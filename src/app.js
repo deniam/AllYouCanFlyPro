@@ -1424,18 +1424,6 @@ import {
       setTimeout(() => banner.classList.add("hidden"), 300); // Fully hide
     }, 3000);
   }  
-  function formatSimpleTime(date, offsetText = "UTC+0") {
-    if (!date) return "";
-    let offsetHours = 0;
-    if (offsetText) {
-      const m = offsetText.match(/UTC([+-]\d+)/);
-      if (m) offsetHours = parseInt(m[1], 10);
-    }
-    // Use UTC getters, then add the offset.
-    const hours = String((date.getUTCHours() + offsetHours + 24) % 24).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
-  }
   
   function formatFlightDate(date) {
     if (!date) return "";
@@ -1512,26 +1500,49 @@ import {
     `;
     return `<div class="mb-2">${headerRow}${gridRow}</div>`;
   }
-  
-  
+
   // --- Updated renderRouteBlock ---
   function renderRouteBlock(routeObj, label = "", extraInfo = "") {
     rehydrateDates(routeObj);
   
-    // Compute the actual departure and arrival date range
+  // Compute the actual departure and arrival date range
     const firstDep = routeObj.segments[0].departureDate;
     const lastArr = routeObj.segments[routeObj.segments.length - 1].arrivalDate;
-    const dateRange = formatFlightDate(firstDep) +
-      (getLocalDateString(firstDep) !== getLocalDateString(lastArr)
+    const dateRange = formatFlightDate(firstDep)
+      + (getLocalDateString(firstDep) !== getLocalDateString(lastArr)
         ? ` – ${formatFlightDate(lastArr)}`
         : "");
   
-    // Start building the HTML container
-    let html = `<div class="border rounded-lg p-4 mb-6">`;
+    const isReturn = label.toLowerCase().includes("return");
+    if (debug) console.log("label: ", label);
+    if (debug) console.log("extraInfo: ", extraInfo);
+    // Updated: use bg-gray-200 for inbound (return) flights
+    const containerBg = isReturn ? "bg-gray-300" : "bg-white";
   
-    if (routeObj.segments.length === 1) {
+    let html = `<div class="border rounded-lg p-4 mb-6 ${containerBg}">`;
+    // Single row for label + stopover info (if provided)
+  
+    if (label || extraInfo) {
+      html += `
+        <div class="flex justify-between items-center mb-2">
+          ${
+            label
+              ? `<div class="inline-block text-xs font-semibold bg-[#C90076] text-white px-2 py-1 rounded">
+                  ${label}
+                </div>`
+              : ""
+          }
+          ${
+            extraInfo
+              ? `<div class="text-xs font-semibold text-gray-700 bg-gray-200 px-2 py-1 rounded">
+                  ${extraInfo}
+                </div>`
+              : ""
+          }
+        </div>
+      `;
+    } if (routeObj.segments.length === 1) {
       // --- Direct Flight ---
-      // Header: flight code on left (purple), date range on right (gray).
       // Render the single segment
       const seg = routeObj.segments[0];
       html += createConnectingSegmentRow(
@@ -1540,7 +1551,6 @@ import {
         seg.arrivalStationText || airportNames[seg.destination],
         false
       );
-  
     } else {
       // --- Connecting Flight ---
       // Header row: date range on the left (gray box), total duration on the right (gray box).
@@ -1549,8 +1559,10 @@ import {
           <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 rounded">
             ${dateRange}
           </div>
-          <div class="text-sm font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
-            ${routeObj.totalTripDuration}
+          <div class="flex items-center text-sm font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 mr-1">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>${routeObj.totalTripDuration}
           </div>
         </div>
       `;
@@ -1573,8 +1585,7 @@ import {
   
     html += `</div>`;
     return html;
-  }
-  
+  }  
   // ---------------- Calendar ----------------
   function renderCalendarMonth(
     popupEl,
