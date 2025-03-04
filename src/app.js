@@ -1161,72 +1161,64 @@ import {
   }
   // ---------------- Main Search Handler ----------------
   async function handleSearch() {
-    const selectedDateRaw = document.getElementById("departure-date").value.trim();
+    const departureInputRaw = document.getElementById("departure-date").value.trim();
     const searchButton = document.getElementById("search-button");
+  
     if (searchButton.textContent === "Stop Search") {
       searchCancelled = true;
-      searchButton.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-        </svg> Search Flights
-      `;
+      searchButton.innerHTML = `<svg ...></svg> Search Flights`;
       return;
     }
-
+  
     searchCancelled = false;
     searchButton.textContent = "Stop Search";
-    
-    // For round-trip, read the return date
-    let returnDate = "";
+  
+    // For round-trip, read the return date from input
+    let returnInputRaw = "";
     if (window.currentTripType === "return") {
-      returnDate = document.getElementById("return-date").value.trim();
-      if (!returnDate) {
+      returnInputRaw = document.getElementById("return-date").value.trim();
+      if (!returnInputRaw) {
         alert("Please select a return date for round-trip search.");
         searchButton.innerHTML = " Search Flights";
         return;
       }
     }
-
+  
     const originInputRaw = document.getElementById("origin-input").value.trim();
     window.originalOriginInput = originInputRaw;
     const destinationInputRaw = document.getElementById("destination-input").value.trim();
-    
+  
     if (!originInputRaw) {
       alert("Please enter at least one departure airport.");
-      searchButton.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-        </svg> Search Flights
-      `;
+      searchButton.innerHTML = `<svg ...></svg> Search Flights`;
       return;
     }
-    
+  
     const tripType = window.currentTripType || "oneway";
   
-    // Build date array
-    let datesToSearch = [];
-    if (selectedDateRaw === "ALL") {
+    // ---- FIX: Split the departure input into individual dates ----
+    let departureDates = [];
+    if (departureInputRaw === "ALL") {
       const today = new Date();
       for (let i = 0; i <= 3; i++) {
         const d = new Date(today.getTime() + i * 24 * 60 * 60 * 1000);
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
-        datesToSearch.push(`${yyyy}-${mm}-${dd}`);
+        departureDates.push(`${yyyy}-${mm}-${dd}`);
       }
     } else {
-      datesToSearch.push(selectedDateRaw);
+      departureDates = departureInputRaw.split(',')
+                            .map(d => d.trim())
+                            .filter(d => d !== "");
     }
     
-    // Resolve inputs
+    // Resolve airport inputs
     let origins = originInputRaw.split(",").map(s => resolveAirport(s)).flat();
-    let destinations = [];
-    if (!destinationInputRaw || destinationInputRaw.toUpperCase() === "ANY") {
-      destinations = ["ANY"];
-    } else {
-      destinations = destinationInputRaw.split(",").map(s => resolveAirport(s)).flat();
-    }
-    
+    let destinations = (!destinationInputRaw || destinationInputRaw.toUpperCase() === "ANY")
+                        ? ["ANY"]
+                        : destinationInputRaw.split(",").map(s => resolveAirport(s)).flat();
+  
     // Clear old results
     document.querySelector(".route-list").innerHTML = "";
     globalResults = [];
@@ -1234,102 +1226,67 @@ import {
   
     try {
       if (tripType === "oneway") {
-        // One-way
-        for (const dateStr of datesToSearch) {
+        // One-way: iterate over each departure date
+        for (const dateStr of departureDates) {
           if (searchCancelled) break;
           console.log(`Searching for flights on ${dateStr}`);
-  
           const maxTransfers = document.getElementById("two-transfer-checkbox").checked
             ? 2
             : (document.getElementById("transfer-checkbox").checked ? 1 : 0);
-  
           if (maxTransfers > 0) {
             await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
           } else {
             await searchDirectRoutes(origins, destinations, dateStr);
           }
         }
-        // The actual display is triggered inside "appendRouteToDisplay" or after the loops.
       } else {
-        // Round-trip
+        // Round-trip: process each outbound date separately
         suppressDisplay = true;
         let outboundFlights = [];
   
-        for (const dateStr of datesToSearch) {
+        for (const outboundDate of departureDates) {
           if (searchCancelled) break;
-          console.log(`Searching outbound flights on ${dateStr}`);
-  
+          console.log(`Searching outbound flights on ${outboundDate}`);
           let outboundFlightsForDate = [];
           const maxTransfers = document.getElementById("two-transfer-checkbox").checked
             ? 2
             : (document.getElementById("transfer-checkbox").checked ? 1 : 0);
-  
-          // Collect outbound
+    
           if (maxTransfers > 0) {
             outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers)
+              await searchConnectingRoutes(origins, destinations, outboundDate, maxTransfers)
             );
           } else {
             outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchDirectRoutes(origins, destinations, dateStr)
+              await searchDirectRoutes(origins, destinations, outboundDate)
             );
           }
           outboundFlights = outboundFlights.concat(outboundFlightsForDate);
           globalResults = outboundFlights;
-  
-          // For each outbound, find inbound
+    
+          // Process inbound flights for each outbound flight found on this outbound date
           for (const outbound of outboundFlightsForDate) {
             if (searchCancelled) break;
-  
             const outboundDeparture = outbound.route[0];
             const outboundDestination = outbound.route[outbound.route.length - 1];
-            // Split comma‐separated dates into arrays
-            const departureInputVal = document.getElementById("departure-date").value.trim();
-            const departureDates = departureInputVal
-            .split(',')
-            .map(d => d.trim())
-            .filter(d => d !== "");
-
-            // For round-trip, allow multiple return dates as well
-            const returnInputVal = document.getElementById("return-date").value.trim();
-            const returnDates = returnInputVal
-              .split(',')
-              .map(d => d.trim())
-              .filter(d => d !== "");
-
-
-            // If no departure date is selected, alert the user
-            if (departureDates.length === 0) {
-              alert("Please select at least one departure date.");
-              return;
-            }
-
-            // For round-trip, ensure at least one return date exists and each return date is not before the earliest departure date.
-            if (window.currentTripType === "return") {
-              if (returnDates.length === 0) {
-                alert("Please select at least one return date for round-trip search.");
+            // Use the current outboundDate for validations
+            const outboundDateObj = new Date(outboundDate);
+  
+            // Split return input into individual dates
+            const returnDates = returnInputRaw.split(',')
+                                  .map(d => d.trim())
+                                  .filter(d => d !== "");
+            // Validate each return date against current outbound date
+            for (const rDate of returnDates) {
+              if (new Date(rDate) < outboundDateObj) {
+                alert("Return date(s) cannot be earlier than the outbound departure date.");
                 return;
               }
-              // Get the earliest departure date as a Date object.
-              const earliestDeparture = new Date(departureDates.sort()[0]);
-              // Check each return date
-              for (const rDate of returnDates) {
-                if (new Date(rDate) < earliestDeparture) {
-                  alert("Return date(s) cannot be earlier than the earliest departure date.");
-                  return;
-                }
-              }
             }
-            // Build inbound date range
-            const inboundDates = returnDate
-              .split(',')
-              .map(dateStr => dateStr.trim())
-              .filter(dateStr => dateStr !== "");
-
+    
             let inboundFlights = [];
-            for (const inboundDate of inboundDates) {
+            for (const inboundDate of returnDates) {
               if (searchCancelled) break;
-
               let results = [];
               if (maxTransfers > 0) {
                 const connectingResults = await searchConnectingRoutes(
@@ -1345,33 +1302,29 @@ import {
                 );
                 results = [...connectingResults, ...directResults];
               } else {
-                // direct only
                 results = await searchDirectRoutes(
                   [outboundDestination],
                   getReturnAirports(outboundDeparture, window.originalOriginInput),
                   inboundDate
                 );
               }
-
-              // ---- FIX #1: If you only want the *first* inbound date with flights, break early ----
+    
               if (results.length > 0) {
                 inboundFlights = inboundFlights.concat(results);
-                // We found flights for this date; no need to check further inbound dates
               }
             }
-  
-            // Filter out flights departing too soon
+    
+            // Continue with filtering, deduplication, and rendering as before…
             const filteredInbound = inboundFlights.filter(inbound => {
               if (inbound.segments && outbound.segments) {
                 const stopoverMinutes = Math.round(
                   (inbound.segments[0].departureDate - outbound.segments[outbound.segments.length - 1].arrivalDate) / 60000
                 );
-                return stopoverMinutes >= 360; // e.g. 6 hours
+                return stopoverMinutes >= 360;
               }
               return false;
             });
-  
-            // Deduplicate
+    
             const seen = new Set();
             const dedupedInbound = [];
             for (const flight of filteredInbound) {
@@ -1383,64 +1336,40 @@ import {
                 dedupedInbound.push(flight);
               }
             }
-            // Assign
             outbound.returnFlights = dedupedInbound;
-  
-            // Now display outbound + inbound 
-            // Inside your loop that processes each outbound flight:
+    
             if (outbound.returnFlights && outbound.returnFlights.length > 0) {
               const resultsDiv = document.querySelector(".route-list");
-
-              // 1) Rehydrate the outbound route (so times are real Date objects)
               rehydrateDates(outbound);
-
-              // 2) Render the outbound route block
               const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
               resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
-
-              // 3) For each return flight
+    
               outbound.returnFlights.forEach((ret, idx) => {
-                // Rehydrate the return flight
                 rehydrateDates(ret);
-
-                // Make sure ret.segments exists and has at least 1 segment
                 if (!ret.segments || ret.segments.length === 0) {
                   console.warn("No segments in return flight:", ret);
                   return;
                 }
-
-                // 4) Compute stopover
+    
                 const outboundLastArrival = outbound.segments[outbound.segments.length - 1].arrivalDate;
                 const inboundFirstDeparture = ret.segments[0].departureDate;
-                
-                console.log("Outbound last arrival:", outboundLastArrival);
-                console.log("Inbound first departure:", inboundFirstDeparture);
-
-                // If either is missing or not a valid Date, skip
                 if (!outboundLastArrival || !inboundFirstDeparture ||
                     isNaN(outboundLastArrival.getTime()) || isNaN(inboundFirstDeparture.getTime())) {
-                  console.warn("Cannot compute stopover because date is invalid:", { outboundLastArrival, inboundFirstDeparture });
+                  console.warn("Cannot compute stopover because date is invalid.");
                   return;
                 }
-
                 const stopoverMs = inboundFirstDeparture - outboundLastArrival;
-                if (stopoverMs < 0) {
-                  console.warn(`Stopover is negative: inbound flight departs before outbound arrives? => ${stopoverMs}ms`);
-                }
-
                 const stopoverMinutes = Math.max(0, Math.round(stopoverMs / 60000));
                 const sh = Math.floor(stopoverMinutes / 60);
                 const sm = stopoverMinutes % 60;
                 const stopoverText = `Stopover: ${sh}h ${sm}m`;
-
-                // 5) Render the return flight block, passing the stopover text
+    
                 const inboundHtml = renderRouteBlock(ret, `Return Flight ${idx + 1}`, stopoverText);
                 resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
               });
             } else {
               console.warn(`No return flights found for ${outbound.route.join(" → ")}`);
             }
-
           }
         }
         suppressDisplay = false;
@@ -1453,13 +1382,10 @@ import {
         document.querySelector(".route-list").innerHTML = "<p>There are no available flights on this route.</p>";
       }
       hideProgress();
-      searchButton.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-        </svg> Search Flights
-      `;
+      searchButton.innerHTML = `<svg ...></svg> Search Flights`;
     }
   }
+  
   // ---------------- Additional UI Functions ----------------
   function swapInputs() {
     const originInput = document.getElementById("origin-input");
