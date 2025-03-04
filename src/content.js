@@ -1,7 +1,5 @@
-console.log("Content script loaded");
-
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log("Content received message:", request);
+    let debug = false;
     
     if (request.action === "getDestinations") {
         setTimeout(() => {
@@ -16,23 +14,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         if (headMatch && headMatch[0]) {
             routesJson = `{"routes":${headMatch[0].split('"routes":')[1].split(',"isOneWayFlightsOnly"')[0]}}`;
-            console.log("Extracted routes JSON from head");
+            if (debug) console.log("Extracted routes JSON from head");
         } else if (bodyMatch && bodyMatch[1]) {
             routesJson = `{"routes":${bodyMatch[1]}}`;
-            console.log("Extracted routes JSON from body");
+            if (debug) console.log("Extracted routes JSON from body");
         }
         
         if (routesJson) {
             try {
             const routesData = JSON.parse(routesJson);
-            console.log("Parsed routes data:", routesData);
+            if (debug) console.log("Parsed routes data:", routesData);
             sendResponse({ success: true, routes: routesData.routes });
             } catch (error) {
-            console.error("Error parsing routes data:", error);
+            if (debug) console.error("Error parsing routes data:", error);
             sendResponse({ success: false, error: "Failed to parse routes data" });
             }
         } else {
-            console.error("No routes data found in page");
+            if (debug) console.error("No routes data found in page");
             sendResponse({ success: false, error: "No routes data found" });
         }
         }, 1000);
@@ -48,14 +46,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (headMatch && headMatch[1]) {
             const uuid = headMatch[1];
             const dynamicUrl = `https://multipass.wizzair.com/w6/subscriptions/json/availability/${uuid}`;
-            console.log("Extracted dynamicUrl from head:", dynamicUrl);
+            if (debug) console.log("Extracted dynamicUrl from head:", dynamicUrl);
             sendResponse({ dynamicUrl });
         } else if (bodyMatch && bodyMatch[1]) {
             const dynamicUrl = bodyMatch[1];
-            console.log("Extracted dynamicUrl from body:", dynamicUrl);
+            if (debug) console.log("Extracted dynamicUrl from body:", dynamicUrl);
             sendResponse({ dynamicUrl });
         } else {
-            console.error("Dynamic URL not found in page content");
+            if (debug) console.error("Dynamic URL not found in page content");
             sendResponse({ error: "Dynamic URL not found" });
         }
         }, 1000);
@@ -72,7 +70,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         }
         });
-        console.log("Returning headers:", headers);
+        if (debug) console.log("Returning headers:", headers);
         sendResponse({ headers });
         return true;
     }
