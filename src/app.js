@@ -9,6 +9,7 @@ import {
   const MIN_CONNECTION_MINUTES = 90;
   const BASE_DELAY_MS = 500;
   const MAX_RETRY_ATTEMPTS = 2;  
+
   // Throttle and caching parameters (loaded from localStorage if available)
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 600;
   let PAUSE_DURATION_MS = Number(localStorage.getItem('pauseDurationSeconds'))
@@ -20,6 +21,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
+  let debug = false;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -68,7 +70,7 @@ import {
   }
   async function throttleRequest() {
     if (requestsThisWindow >= MAX_REQUESTS_IN_ROW) {
-      console.log(`Reached ${MAX_REQUESTS_IN_ROW} consecutive requests; pausing for ${PAUSE_DURATION_MS}ms`);
+      if (debug) console.log(`Reached ${MAX_REQUESTS_IN_ROW} consecutive requests; pausing for ${PAUSE_DURATION_MS}ms`);
       showTimeoutCountdown(PAUSE_DURATION_MS);
       await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION_MS));
       requestsThisWindow = 0;
@@ -105,7 +107,7 @@ import {
     localStorage.setItem("maxRequestsInRow", MAX_REQUESTS_IN_ROW);
     localStorage.setItem("requestsFrequencyMs", REQUESTS_FREQUENCY_MS);
     localStorage.setItem("pauseDurationSeconds", pauseDur);
-    console.log(`Throttle settings updated: Max Requests = ${MAX_REQUESTS_IN_ROW}, Requests Frequency = ${REQUESTS_FREQUENCY_MS}ms, Pause Duration = ${PAUSE_DURATION_MS / 1000}s`);
+    if (debug) console.log(`Throttle settings updated: Max Requests = ${MAX_REQUESTS_IN_ROW}, Requests Frequency = ${REQUESTS_FREQUENCY_MS}ms, Pause Duration = ${PAUSE_DURATION_MS / 1000}s`);
   }
   function updateCacheLifetimeSetting() {
     const hours = parseFloat(document.getElementById("cache-lifetime").value);
@@ -203,35 +205,35 @@ import {
     if (!input) return [];
     const trimmed = input.trim();
     if (trimmed.toLowerCase() === "any") {
-      console.log(`Resolved "${input}" as wildcard ANY`);
+      if (debug) console.log(`Resolved "${input}" as wildcard ANY`);
       return ["ANY"];
     }
     const lower = trimmed.toLowerCase();
     if (trimmed.length === 3) {
       const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
       if (byCode) {
-        console.log(`Resolved "${input}" as airport code: ${byCode.code}`);
+        if (debug) console.log(`Resolved "${input}" as airport code: ${byCode.code}`);
         return [byCode.code];
       }
     }
     for (const country in COUNTRY_AIRPORTS) {
       if (country.toLowerCase() === lower) {
-        console.log(`Resolved "${input}" as country: ${country} with airports ${COUNTRY_AIRPORTS[country]}`);
+        if (debug) console.log(`Resolved "${input}" as country: ${country} with airports ${COUNTRY_AIRPORTS[country]}`);
         return COUNTRY_AIRPORTS[country];
       }
     }
     const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
     if (byCode) {
-      console.log(`Resolved "${input}" as airport code (fallback): ${byCode.code}`);
+      if (debug) console.log(`Resolved "${input}" as airport code (fallback): ${byCode.code}`);
       return [byCode.code];
     }
     const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
     if (matches.length > 0) {
       const codes = matches.map(a => a.code);
-      console.log(`Resolved "${input}" as airport names matching: ${codes}`);
+      if (debug) console.log(`Resolved "${input}" as airport names matching: ${codes}`);
       return codes;
     }
-    console.log(`No match found for "${input}", returning uppercase input`);
+    if (debug) console.log(`No match found for "${input}", returning uppercase input`);
     return [input.toUpperCase()];
   }
   function parseServerDate(dateStr) {
@@ -253,7 +255,7 @@ import {
     const regex = /(\d{1,2}):(\d{2})\s*(am|pm)/i;
     const match = timeStr.match(regex);
     if (!match) {
-      console.warn("parse12HourTime: cannot parse time string", timeStr);
+      if (debug) console.warn("parse12HourTime: cannot parse time string", timeStr);
       return null;
     }
     let hour = parseInt(match[1], 10);
@@ -291,27 +293,27 @@ import {
       offsetStr = "UTC";
     }
     const normalizedOffset = normalizeOffset(offsetStr);
-    console.log(`Parsing time "${timeStr}" with offset "${offsetStr}" normalized to "${normalizedOffset}" for base date ${baseDateStr}`);
+    if (debug) console.log(`Parsing time "${timeStr}" with offset "${offsetStr}" normalized to "${normalizedOffset}" for base date ${baseDateStr}`);
     const timeParts = parse12HourTime(timeStr);
     if (!timeParts) {
-      console.warn("parse12HourTime: cannot parse time string", timeStr);
+      if (debug) console.warn("parse12HourTime: cannot parse time string", timeStr);
       return null;
     }
     let isoString = `${baseDateStr}T${String(timeParts.hour).padStart(2, '0')}:${String(timeParts.minute).padStart(2, '0')}:00`;
     isoString += normalizedOffset;
     const d = new Date(isoString);
     if (isNaN(d.getTime())) {
-      console.error(`Invalid Date created from ISO string: "${isoString}"`);
+      if (debug) console.error(`Invalid Date created from ISO string: "${isoString}"`);
       return null;
     }
-    console.log(`Resulting Date: ${d.toISOString()}`);
+    if (debug) console.log(`Resulting Date: ${d.toISOString()}`);
     return d;
   }  
   function calculateFlightDuration(departureTimeStr, departureOffset, arrivalTimeStr, arrivalOffset, baseDateStr, nextDay = false) {
     let departureDate = parseTimeWithOffset(departureTimeStr, departureOffset, baseDateStr);
     let arrivalDate = parseTimeWithOffset(arrivalTimeStr, arrivalOffset, baseDateStr);
     if (!departureDate || !arrivalDate) {
-      console.warn("calculateFlightDuration: invalid departure or arrival date", departureTimeStr, arrivalTimeStr);
+      if (debug) console.warn("calculateFlightDuration: invalid departure or arrival date", departureTimeStr, arrivalTimeStr);
       return { hours: 0, minutes: 0, totalMinutes: 0, departureDate: null, arrivalDate: null };
     }
     if (nextDay || arrivalDate <= departureDate) {
@@ -321,7 +323,7 @@ import {
     const diffMinutes = Math.round(diffMs / 60000);
     const hours = Math.floor(diffMinutes / 60);
     const minutes = diffMinutes % 60;
-    console.log(`Calculated duration for ${departureTimeStr} → ${arrivalTimeStr}: ${hours}h ${minutes}m (Total ${diffMinutes} minutes)`);
+    if (debug) console.log(`Calculated duration for ${departureTimeStr} → ${arrivalTimeStr}: ${hours}h ${minutes}m (Total ${diffMinutes} minutes)`);
     return { hours, minutes, totalMinutes: diffMinutes, departureDate, arrivalDate };
   }
   function formatFlightTime(date, offsetText) {
@@ -422,7 +424,7 @@ import {
         };
         let headers = { 'Content-Type': 'application/json' };
         if (pageData.headers && Date.now() - pageData.timestamp < 60 * 60 * 1000) {
-          console.log("Using cached headers");
+          if (debug) console.log("Using cached headers");
           headers = { ...headers, ...pageData.headers };
         } else {
           // Attempt to fetch headers from page
@@ -432,7 +434,7 @@ import {
               if (response && response.headers) {
                 headers = { ...headers, ...response.headers };
               } else {
-                console.log("Failed to get headers from page, using defaults");
+                if (debug) console.log("Failed to get headers from page, using defaults");
               }
             });
           });
@@ -446,7 +448,7 @@ import {
         
         if (!fetchResponse.ok) {
           if (fetchResponse.status === 400) {
-            console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
+            if (debug) console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
             return [];
           }
           throw new Error(`HTTP error: ${fetchResponse.status}`);
@@ -458,7 +460,7 @@ import {
           // Alternatively, you can check the text content
           const text = await fetchResponse.text();
           if (text.trim().startsWith("<!DOCTYPE")) {
-            console.warn("Dynamic URL returned HTML. Clearing cache and retrying.");
+            if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and retrying.");
             localStorage.removeItem("wizz_page_data");
             throw new Error("Invalid response format: expected JSON but received HTML");
           }
@@ -466,12 +468,12 @@ import {
         
         // If we passed the above check, parse as JSON.
         const responseData = await fetchResponse.json();
-        console.log(`Response for segment ${origin} → ${destination}:`, responseData);
+        if (debug) console.log(`Response for segment ${origin} → ${destination}:`, responseData);
         return responseData.flightsOutbound || [];
       } catch (error) {
         if (error.message.includes("429") || error.message.includes("426") || error.message.includes("Invalid response format")) {
           const waitTime = error.message.includes("426") ? 60000 : 40000;
-          console.warn(`Rate limit or invalid dynamic URL encountered for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+          if (debug) console.warn(`Rate limit or invalid dynamic URL encountered for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
           showTimeoutCountdown(waitTime);
           await new Promise(resolve => setTimeout(resolve, waitTime));
           windowStartTime = Date.now();
@@ -525,7 +527,7 @@ import {
       if (routeObj.departureStationText && routeObj.arrivalStationText) {
         routeObj.route = [routeObj.departureStationText, routeObj.arrivalStationText];
       } else {
-        console.warn("Skipping routeObj because route is missing or incomplete:", routeObj);
+        if (debug) console.warn("Skipping routeObj because route is missing or incomplete:", routeObj);
         return;
       }
     }
@@ -593,7 +595,7 @@ import {
         resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
       });
     } else {
-      console.warn("No return flights found for this outbound route.");
+      if (debug) console.warn("No return flights found for this outbound route.");
     }
   }
   
@@ -614,14 +616,14 @@ import {
         let multipassTab;
         if (tabs && tabs.length > 0) {
           multipassTab = tabs[0];
-          console.log("Found multipass tab:", multipassTab.id, multipassTab.url);
+          if (debug) console.log("Found multipass tab:", multipassTab.id, multipassTab.url);
         } else {
-          console.log("No multipass tab found, opening one...");
+          if (debug) console.log("No multipass tab found, opening one...");
           chrome.tabs.create({
             url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets"
           }, async (newTab) => {
             multipassTab = newTab;
-            console.log("Opened new multipass tab:", newTab.id, newTab.url);
+            if (debug) console.log("Opened new multipass tab:", newTab.id, newTab.url);
             await waitForTabToComplete(newTab.id);
             chrome.tabs.sendMessage(newTab.id, { action: "getDestinations" }, (response) => {
               if (chrome.runtime.lastError) {
@@ -649,7 +651,7 @@ import {
         if (multipassTab.status !== "complete") {
           await waitForTabToComplete(multipassTab.id);
         }
-        console.log("Sending getDestinations message to tab", multipassTab.id);
+        if (debug) console.log("Sending getDestinations message to tab", multipassTab.id);
         chrome.tabs.sendMessage(multipassTab.id, { action: "getDestinations" }, (response) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -667,7 +669,7 @@ import {
     if (pageDataStr) {
       const data = JSON.parse(pageDataStr);
       if (Date.now() - data.timestamp < 60 * 60 * 1000 && data.dynamicUrl) {
-        console.log("Using cached dynamic URL");
+        if (debug) console.log("Using cached dynamic URL");
         return data.dynamicUrl;
       }
     }
@@ -746,7 +748,7 @@ import {
       origins = [...new Set(routesData.map(route => {
         return typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation;
       }))];
-      console.log("Replaced origins 'ANY' with:", origins);
+      if (debug) console.log("Replaced origins 'ANY' with:", origins);
     }
     let destinationList = [];
     if (destinations.length === 1 && destinations[0] === "ANY") {
@@ -767,7 +769,7 @@ import {
     origins.forEach(origin => {
       findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
     });
-    console.log("Candidate routes:", candidateRoutes);
+    if (debug) console.log("Candidate routes:", candidateRoutes);
     const totalCandidates = candidateRoutes.length;
     let processedCandidates = 0;
     updateProgress(processedCandidates, totalCandidates, "Processing routes");
@@ -782,7 +784,7 @@ import {
         const segOrigin = candidate[i];
         const segDestination = candidate[i + 1];
         if (isExcludedRoute(segOrigin, segDestination)) {
-          console.log(`Excluding candidate route ${candidate.join(" → ")} because segment ${segOrigin} → ${segDestination} is excluded`);
+          if (debug) console.log(`Excluding candidate route ${candidate.join(" → ")} because segment ${segOrigin} → ${segDestination} is excluded`);
           candidateExcluded = true;
           break;
         }
@@ -795,7 +797,7 @@ import {
   
       const cachedCandidate = getCandidateCache(candidateKey);
       if (cachedCandidate) {
-        console.log("Using cached candidate:", candidateKey);
+        if (debug) console.log("Using cached candidate:", candidateKey);
         appendRouteToDisplay(cachedCandidate);
         processedCandidates++;
         updateProgress(processedCandidates, totalCandidates, `Processed candidate: ${candidate.join(" → ")}`);
@@ -810,19 +812,19 @@ import {
         if (searchCancelled) break;
         const segOrigin = candidate[i];
         const segDestination = candidate[i + 1];
-        console.log(`Checking segment ${segOrigin} → ${segDestination} for route ${candidate.join(" → ")}`);
+        if (debug) console.log(`Checking segment ${segOrigin} → ${segDestination} for route ${candidate.join(" → ")}`);
   
         const segmentCacheKey = `${segOrigin}-${segDestination}-${currentSegmentDate}`;
         let flights = getCachedResults(segmentCacheKey);
         if (flights) {
-          console.log(`Using cached segment: ${segmentCacheKey}`);
+          if (debug) console.log(`Using cached segment: ${segmentCacheKey}`);
         } else {
           try {
             flights = await checkRouteSegment(segOrigin, segDestination, currentSegmentDate);
-            console.log(`Found ${flights.length} flights for segment ${segOrigin} → ${segDestination}`);
+            if (debug) console.log(`Found ${flights.length} flights for segment ${segOrigin} → ${segDestination}`);
             setCachedResults(segmentCacheKey, flights);
           } catch (error) {
-            console.error(`Error checking segment ${segOrigin} → ${segDestination}: ${error.message}`);
+            if (debug) console.error(`Error checking segment ${segOrigin} → ${segDestination}: ${error.message}`);
             validCandidate = false;
             break;
           }
@@ -835,10 +837,10 @@ import {
               flight.departureOffsetText || "",
               currentSegmentDate
             );
-            console.log(`Computed departureDate for flight ${flight.flightCode}: ${flight.departureDate}`);
+            if (debug) console.log(`Computed departureDate for flight ${flight.flightCode}: ${flight.departureDate}`);
           }
           if (!flight.departureDate) {
-            console.warn(`Segment ${segOrigin} → ${segDestination} has missing departureDate.`);
+            if (debug) console.warn(`Segment ${segOrigin} → ${segDestination} has missing departureDate.`);
             validCandidate = false;
             break;
           }
@@ -846,13 +848,13 @@ import {
             ? parseServerDate(flight.departureDate)
             : flight.departureDate;
           if (!flightDepartureDate || isNaN(flightDepartureDate.getTime())) {
-            console.warn(`Segment ${segOrigin} → ${segDestination} has invalid departureDate: ${flight.departureDate}`);
+            if (debug) console.warn(`Segment ${segOrigin} → ${segDestination} has invalid departureDate: ${flight.departureDate}`);
             validCandidate = false;
             break;
           }
           const flightLocalDate = getLocalDateFromOffset(flightDepartureDate, flight.departureOffsetText || "");
           if (flightLocalDate !== currentSegmentDate && !document.getElementById("overnight-checkbox").checked) {
-            console.warn(`Segment ${segOrigin} → ${segDestination} departs on ${flightLocalDate} instead of expected date ${currentSegmentDate}`);
+            if (debug) console.warn(`Segment ${segOrigin} → ${segDestination} departs on ${flightLocalDate} instead of expected date ${currentSegmentDate}`);
             validCandidate = false;
             break;
           }
@@ -870,17 +872,17 @@ import {
             if (document.getElementById("overnight-checkbox").checked) {
               let nextDay = new Date(new Date(currentSegmentDate).getTime() + 24 * 60 * 60 * 1000);
               currentSegmentDate = nextDay.toISOString().split("T")[0];
-              console.log(`Forcing overnight for segment ${segOrigin} → ${segDestination} due to connection time`);
+              if (debug) console.log(`Forcing overnight for segment ${segOrigin} → ${segDestination} due to connection time`);
               try {
                 flights = await checkRouteSegment(segOrigin, segDestination, currentSegmentDate);
-                console.log(`After forcing overnight, found ${flights.length} flights for segment ${segOrigin} → ${segDestination}`);
+                if (debug) console.log(`After forcing overnight, found ${flights.length} flights for segment ${segOrigin} → ${segDestination}`);
               } catch (error) {
-                console.error(`Error after forcing overnight for segment ${segOrigin} → ${segDestination}: ${error.message}`);
+                if (debug) console.error(`Error after forcing overnight for segment ${segOrigin} → ${segDestination}: ${error.message}`);
                 validCandidate = false;
                 break;
               }
             } else {
-              console.warn(`Overnight transfer not allowed and connection time is insufficient for segment ${segOrigin} → ${segDestination}`);
+              if (debug) console.warn(`Overnight transfer not allowed and connection time is insufficient for segment ${segOrigin} → ${segDestination}`);
               validCandidate = false;
               break;
             }
@@ -896,7 +898,7 @@ import {
             const nextDay = new Date(new Date(currentSegmentDate).getTime() + 24 * 60 * 60 * 1000);
             if (nextDay > maxBookingDate) break;
             const nextDayStr = nextDay.toISOString().split("T")[0];
-            console.log(`Trying overnight for segment ${segOrigin} → ${segDestination} on ${nextDayStr}`);
+            if (debug) console.log(`Trying overnight for segment ${segOrigin} → ${segDestination} on ${nextDayStr}`);
             await throttleRequest();
             try {
               flights = await checkRouteSegment(segOrigin, segDestination, nextDayStr);
@@ -907,14 +909,14 @@ import {
                 currentSegmentDate = nextDayStr;
               }
             } catch (error) {
-              console.error(`Overnight check failed for segment ${segOrigin} → ${segDestination}: ${error.message}`);
+              if (debug) console.error(`Overnight check failed for segment ${segOrigin} → ${segDestination}: ${error.message}`);
               break;
             }
             attempts++;
           }
         }
         if (flights.length === 0) {
-          console.warn(`No available flights for segment ${segOrigin} → ${segDestination}`);
+          if (debug) console.warn(`No available flights for segment ${segOrigin} → ${segDestination}`);
           validCandidate = false;
           setCachedResults(candidateKey, []);
           break;
@@ -929,7 +931,7 @@ import {
           false
         );
         if (!calculatedDuration || !calculatedDuration.departureDate || !calculatedDuration.arrivalDate) {
-          console.warn(`Unable to calculate duration for segment ${segOrigin} → ${segDestination}`);
+          if (debug) console.warn(`Unable to calculate duration for segment ${segOrigin} → ${segDestination}`);
           validCandidate = false;
           break;
         }
@@ -946,7 +948,7 @@ import {
           arrivalDate: calculatedDuration.arrivalDate
         };
         if (previousSegment && !validateConnection(previousSegment, segmentInfo)) {
-          console.warn(`Insufficient connection time between ${previousSegment.origin} → ${previousSegment.destination} and ${segmentInfo.origin} → ${segmentInfo.destination}`);
+          if (debug) console.warn(`Insufficient connection time between ${previousSegment.origin} → ${previousSegment.destination} and ${segmentInfo.origin} → ${segmentInfo.destination}`);
           validCandidate = false;
           break;
         }
@@ -982,9 +984,9 @@ import {
     return globalResults;
   }
   async function searchDirectRoutes(origins, destinations, selectedDate) {
-    console.log("searchDirectRoutes called with origins:", origins, "destinations:", destinations, "selectedDate:", selectedDate);
+    if (debug) console.log("searchDirectRoutes called with origins:", origins, "destinations:", destinations, "selectedDate:", selectedDate);
     const routesData = await fetchDestinations();
-    console.log("Fetched routesData:", routesData);
+    if (debug) console.log("Fetched routesData:", routesData);
     
     if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
       const destSet = new Set(destinations);
@@ -995,7 +997,7 @@ import {
         }))
         .map(route => typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation);
       origins = [...new Set(filteredOrigins)];
-      console.log(`Filtered ANY origins to only those with direct routes to [${[...destSet].join(", ")}]:`, origins);
+      if (debug) console.log(`Filtered ANY origins to only those with direct routes to [${[...destSet].join(", ")}]:`, origins);
     }
     
     let validDirectFlights = [];
@@ -1021,11 +1023,11 @@ import {
       }
       
       if (!routeData) {
-        console.warn(`No data for departure airport: ${origin}`);
+        if (debug) console.warn(`No data for departure airport: ${origin}`);
         continue;
       }
       
-      console.log(`Route data for origin ${origin}:`, routeData);
+      if (debug) console.log(`Route data for origin ${origin}:`, routeData);
       const totalArrivals = routeData.arrivalStations.length;
       let processed = 0;
       updateProgress(processed, totalArrivals, `Checking direct flights for ${origin}`);
@@ -1042,17 +1044,17 @@ import {
         let arrivalCode = arrival.id || arrival;
         
         if (isExcludedRoute(origin, arrivalCode)) {
-          console.log(`Skipping excluded route ${origin} → ${arrivalCode}`);
+          if (debug) console.log(`Skipping excluded route ${origin} → ${arrivalCode}`);
           processed++;
           updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
           continue;
         }
         
-        console.log(`Processing direct flights from ${origin} to ${arrivalCode}`);
+        if (debug) console.log(`Processing direct flights from ${origin} to ${arrivalCode}`);
         const cacheKey = origin + "-" + arrivalCode + "-" + selectedDate + "-direct";
         let cachedDirect = getCachedResults(cacheKey);
         if (cachedDirect) {
-          console.log(`Found cached result for ${cacheKey}`);
+          if (debug) console.log(`Found cached result for ${cacheKey}`);
           if (Array.isArray(cachedDirect)) {
             cachedDirect.forEach(routeObj => {
               appendRouteToDisplay(routeObj);
@@ -1069,13 +1071,13 @@ import {
         
         try {
           const flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
-          console.log(`Received flights for ${origin} → ${arrivalCode}:`, flights);
+          if (debug) console.log(`Received flights for ${origin} → ${arrivalCode}:`, flights);
           if (flights.length > 0) {
             const firstFlightDate = new Date(flights[0].departureDate);
             const flightLocalDate = getLocalDateFromOffset(firstFlightDate, flights[0].departureOffsetText || "");  
-            console.log(`First flight for ${origin} → ${arrivalCode} departs at:`, firstFlightDate, "local date:", flightLocalDate);
+            if (debug) console.log(`First flight for ${origin} → ${arrivalCode} departs at:`, firstFlightDate, "local date:", flightLocalDate);
             if (flightLocalDate !== selectedDate && !document.getElementById("overnight-checkbox").checked) {
-              console.warn(`Direct flight from ${origin} → ${arrivalCode} departs on ${flightLocalDate} (expected ${selectedDate}). Skipping.`);
+              if (debug) console.warn(`Direct flight from ${origin} → ${arrivalCode} departs on ${flightLocalDate} (expected ${selectedDate}). Skipping.`);
               processed++;
               updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
               continue;
@@ -1091,9 +1093,9 @@ import {
                 selectedDate,
                 false
               );
-              console.log(`Calculated duration for flight ${flight.flightCode}:`, calculatedDuration);
+              if (debug) console.log(`Calculated duration for flight ${flight.flightCode}:`, calculatedDuration);
               if (!calculatedDuration || !calculatedDuration.departureDate) {
-                console.warn(`Skipping flight ${flight.flightCode} due to invalid duration.`);
+                if (debug) console.warn(`Skipping flight ${flight.flightCode} due to invalid duration.`);
                 return;
               }
               const directFlight = {
@@ -1131,11 +1133,11 @@ import {
               validDirectFlights = validDirectFlights.concat(directFlightsForArrival);
             }
           } else {
-            console.warn(`No flights found for ${origin} → ${arrivalCode}`);
+            if (debug) console.warn(`No flights found for ${origin} → ${arrivalCode}`);
             setCachedResults(cacheKey, []);
           }
         } catch (error) {
-          console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
+          if (debug) console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
         }      
         
         processed++;
@@ -1143,7 +1145,7 @@ import {
       }
     }
     
-    console.log("Valid direct flights found:", validDirectFlights);
+    if (debug) console.log("Valid direct flights found:", validDirectFlights);
     return validDirectFlights;
   }
   function getReturnAirports(departureAirport, originalInput) {
@@ -1234,7 +1236,7 @@ import {
         // One-way: iterate over each departure date
         for (const dateStr of departureDates) {
           if (searchCancelled) break;
-          console.log(`Searching for flights on ${dateStr}`);
+          if (debug) console.log(`Searching for flights on ${dateStr}`);
           const maxTransfers = document.getElementById("two-transfer-checkbox").checked
             ? 2
             : (document.getElementById("transfer-checkbox").checked ? 1 : 0);
@@ -1251,7 +1253,7 @@ import {
   
         for (const outboundDate of departureDates) {
           if (searchCancelled) break;
-          console.log(`Searching outbound flights on ${outboundDate}`);
+          if (debug) console.log(`Searching outbound flights on ${outboundDate}`);
           let outboundFlightsForDate = [];
           const maxTransfers = document.getElementById("two-transfer-checkbox").checked
             ? 2
@@ -1352,7 +1354,7 @@ import {
               outbound.returnFlights.forEach((ret, idx) => {
                 rehydrateDates(ret);
                 if (!ret.segments || ret.segments.length === 0) {
-                  console.warn("No segments in return flight:", ret);
+                  if (debug) console.warn("No segments in return flight:", ret);
                   return;
                 }
     
@@ -1360,7 +1362,7 @@ import {
                 const inboundFirstDeparture = ret.segments[0].departureDate;
                 if (!outboundLastArrival || !inboundFirstDeparture ||
                     isNaN(outboundLastArrival.getTime()) || isNaN(inboundFirstDeparture.getTime())) {
-                  console.warn("Cannot compute stopover because date is invalid.");
+                  if (debug) console.warn("Cannot compute stopover because date is invalid.");
                   return;
                 }
                 const stopoverMs = inboundFirstDeparture - outboundLastArrival;
@@ -1373,7 +1375,7 @@ import {
                 resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
               });
             } else {
-              console.warn(`No return flights found for ${outbound.route.join(" → ")}`);
+              if (debug) console.warn(`No return flights found for ${outbound.route.join(" → ")}`);
             }
           }
         }
@@ -1381,7 +1383,7 @@ import {
       }
     } catch (error) {
       document.querySelector(".route-list").innerHTML = `<p>Error: ${error.message}</p>`;
-      console.error("Search error:", error);
+      if (debug) console.error("Search error:", error);
     } finally {
       if (globalResults.length === 0 && tripType === "oneway") {
         document.querySelector(".route-list").innerHTML = "<p>There are no available flights on this route.</p>";
@@ -1797,7 +1799,7 @@ import {
     const inputEl = document.getElementById(inputId);
     const popupEl = document.getElementById(popupId);
     if (!inputEl || !popupEl) {
-      console.error("Calendar input/popup not found:", inputId, popupId);
+      if (debug) console.error("Calendar input/popup not found:", inputId, popupId);
       return;
     }
   
