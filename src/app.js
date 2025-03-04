@@ -21,7 +21,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let debug = false;
+  let debug = true;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -326,20 +326,6 @@ import {
     if (debug) console.log(`Calculated duration for ${departureTimeStr} → ${arrivalTimeStr}: ${hours}h ${minutes}m (Total ${diffMinutes} minutes)`);
     return { hours, minutes, totalMinutes: diffMinutes, departureDate, arrivalDate };
   }
-  function formatFlightTime(date, offsetText) {
-    if (!date) return "";
-    let offsetMatch = offsetText.match(/UTC([+-]\d+)/);
-    let offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
-    const adjusted = new Date(date.getTime() + offsetHours * 3600000);
-    const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const weekday = weekdayNames[adjusted.getUTCDay()];
-    const dd = String(adjusted.getUTCDate()).padStart(2, '0');
-    const mm = String(adjusted.getUTCMonth() + 1).padStart(2, '0');
-    const yyyy = adjusted.getUTCFullYear();
-    const hh = String(adjusted.getUTCHours()).padStart(2, '0');
-    const min = String(adjusted.getUTCMinutes()).padStart(2, '0');
-    return `${weekday}, ${dd}/${mm}/${yyyy}, ${hh}:${min} (${offsetText})`;
-  }
   function rehydrateDates(obj) {
     if (obj.firstDeparture && typeof obj.firstDeparture === "string") {
       obj.firstDeparture = parseServerDate(obj.firstDeparture);
@@ -548,8 +534,6 @@ import {
     rehydrateDates(routeObj);
     globalResults.push(routeObj);
     if (!suppressDisplay) {
-      const sortOption = document.getElementById("sort-select").value;
-      // ... (sorting logic unchanged)
       displayGlobalResults(globalResults);
     }
   }
@@ -778,13 +762,14 @@ import {
       if (searchCancelled) break;
       const candidateKey = candidate.join("-") + "-" + selectedDate + "-connect";
   
-      // Exclude candidates if any segment is excluded.
+      // Exclude candidate if any segment is excluded.
       let candidateExcluded = false;
       for (let i = 0; i < candidate.length - 1; i++) {
         const segOrigin = candidate[i];
         const segDestination = candidate[i + 1];
         if (isExcludedRoute(segOrigin, segDestination)) {
-          if (debug) console.log(`Excluding candidate route ${candidate.join(" → ")} because segment ${segOrigin} → ${segDestination} is excluded`);
+          if (debug)
+            console.log(`Excluding candidate route ${candidate.join(" → ")} because segment ${segOrigin} → ${segDestination} is excluded`);
           candidateExcluded = true;
           break;
         }
@@ -812,146 +797,162 @@ import {
         if (searchCancelled) break;
         const segOrigin = candidate[i];
         const segDestination = candidate[i + 1];
-        if (debug) console.log(`Checking segment ${segOrigin} → ${segDestination} for route ${candidate.join(" → ")}`);
+        if (debug)
+          console.log(`Checking segment ${segOrigin} → ${segDestination} for route ${candidate.join(" → ")}`);
   
+        // Retrieve flights for this segment (using cache if available)
         const segmentCacheKey = `${segOrigin}-${segDestination}-${currentSegmentDate}`;
         let flights = getCachedResults(segmentCacheKey);
-        if (flights) {
-          if (debug) console.log(`Using cached segment: ${segmentCacheKey}`);
-        } else {
+        if (!flights) {
           try {
             flights = await checkRouteSegment(segOrigin, segDestination, currentSegmentDate);
-            if (debug) console.log(`Found ${flights.length} flights for segment ${segOrigin} → ${segDestination}`);
             setCachedResults(segmentCacheKey, flights);
           } catch (error) {
-            if (debug) console.error(`Error checking segment ${segOrigin} → ${segDestination}: ${error.message}`);
+            if (debug)
+              console.error(`Error checking segment ${segOrigin} → ${segDestination}: ${error.message}`);
             validCandidate = false;
             break;
           }
         }
-        if (flights.length > 0) {
-          const flight = flights[0];
-          if (!flight.departureDate) {
-            flight.departureDate = parseTimeWithOffset(
-              flight.departure,
-              flight.departureOffsetText || "",
-              currentSegmentDate
-            );
-            if (debug) console.log(`Computed departureDate for flight ${flight.flightCode}: ${flight.departureDate}`);
-          }
-          if (!flight.departureDate) {
-            if (debug) console.warn(`Segment ${segOrigin} → ${segDestination} has missing departureDate.`);
-            validCandidate = false;
-            break;
-          }
-          const flightDepartureDate = typeof flight.departureDate === "string"
-            ? parseServerDate(flight.departureDate)
-            : flight.departureDate;
-          if (!flightDepartureDate || isNaN(flightDepartureDate.getTime())) {
-            if (debug) console.warn(`Segment ${segOrigin} → ${segDestination} has invalid departureDate: ${flight.departureDate}`);
-            validCandidate = false;
-            break;
-          }
-          const flightLocalDate = getLocalDateFromOffset(flightDepartureDate, flight.departureOffsetText || "");
-          if (flightLocalDate !== currentSegmentDate && !document.getElementById("overnight-checkbox").checked) {
-            if (debug) console.warn(`Segment ${segOrigin} → ${segDestination} departs on ${flightLocalDate} instead of expected date ${currentSegmentDate}`);
-            validCandidate = false;
-            break;
-          }
-        }
-        if (previousSegment && flights.length > 0) {
-          let calc = calculateFlightDuration(
-            flights[0].departure,
-            flights[0].departureOffsetText || "",
-            flights[0].arrival,
-            flights[0].arrivalOffsetText || "",
-            currentSegmentDate,
-            false
-          );
-          if (calc.departureDate < previousSegment.arrivalDate) {
-            if (document.getElementById("overnight-checkbox").checked) {
-              let nextDay = new Date(new Date(currentSegmentDate).getTime() + 24 * 60 * 60 * 1000);
-              currentSegmentDate = nextDay.toISOString().split("T")[0];
-              if (debug) console.log(`Forcing overnight for segment ${segOrigin} → ${segDestination} due to connection time`);
-              try {
-                flights = await checkRouteSegment(segOrigin, segDestination, currentSegmentDate);
-                if (debug) console.log(`After forcing overnight, found ${flights.length} flights for segment ${segOrigin} → ${segDestination}`);
-              } catch (error) {
-                if (debug) console.error(`Error after forcing overnight for segment ${segOrigin} → ${segDestination}: ${error.message}`);
-                validCandidate = false;
-                break;
-              }
-            } else {
-              if (debug) console.warn(`Overnight transfer not allowed and connection time is insufficient for segment ${segOrigin} → ${segDestination}`);
-              validCandidate = false;
+  
+        // If there's a previous segment, filter flights to those departing no earlier than its arrival time.
+        if (previousSegment) {
+          const prevArrivalTime = previousSegment.arrivalDate.getTime();
+          flights = flights.filter(flight => {
+            const depDate = flight.departureDate 
+              ? new Date(flight.departureDate)
+              : parseTimeWithOffset(flight.departure, flight.departureOffsetText || "", currentSegmentDate);
+            return depDate && depDate.getTime() >= prevArrivalTime;
+          });
+          // If none remain, try next day until maxAttempts reached.
+          let attempts = 0;
+          const maxAttempts = 5;
+          while (flights.length === 0 && attempts < maxAttempts) {
+            const nextDay = new Date(new Date(currentSegmentDate).getTime() + 24 * 60 * 60 * 1000);
+            if (nextDay > maxBookingDate) {
+              if (debug)
+                console.warn(`Current segment date ${nextDay.toISOString().split("T")[0]} exceeds max allowed ${getLocalDateString(maxBookingDate)}`);
               break;
             }
+            currentSegmentDate = nextDay.toISOString().split("T")[0];
+            if (debug)
+              console.log(`No valid flight found on base date. Trying next day (${currentSegmentDate}) for segment ${segOrigin} → ${segDestination}.`);
+            flights = await checkRouteSegment(segOrigin, segDestination, currentSegmentDate);
+            setCachedResults(`${segOrigin}-${segDestination}-${currentSegmentDate}`, flights);
+            flights = flights.filter(flight => {
+              const depDate = flight.departureDate 
+                ? new Date(flight.departureDate)
+                : parseTimeWithOffset(flight.departure, flight.departureOffsetText || "", currentSegmentDate);
+              return depDate && depDate.getTime() >= prevArrivalTime;
+            });
+            attempts++;
           }
         }
-        const overnightEnabled = document.getElementById("overnight-checkbox").checked || document.getElementById("two-transfer-checkbox").checked;
-        if (flights.length === 0 && overnightEnabled) {
-          const allowedOvernightAttempts = Math.floor((maxBookingDate - selectedDateObj) / (24 * 60 * 60 * 1000));
-          const defaultOvernight = (candidate.length - 2 === 2) ? 2 : 1;
-          const maxOvernightAttempts = Math.min(defaultOvernight, allowedOvernightAttempts);
+  
+        // Instead of automatically choosing the first flight, iterate over flights to find one that meets the minimum connection time.
+        let chosenFlight = null;
+        for (const flightCandidate of flights) {
+          let candidateDepDate = flightCandidate.departureDate 
+              ? new Date(flightCandidate.departureDate)
+              : parseTimeWithOffset(flightCandidate.departure, flightCandidate.departureOffsetText || "", currentSegmentDate);
+          if (!previousSegment || (candidateDepDate.getTime() - previousSegment.arrivalDate.getTime() >= MIN_CONNECTION_MINUTES * 60000)) {
+            chosenFlight = flightCandidate;
+            break;
+          }
+        }
+        // If no valid flight is found, try overnight adjustments specifically for connection time.
+        if (!chosenFlight) {
           let attempts = 0;
-          while (attempts < maxOvernightAttempts && flights.length === 0) {
+          const maxAttempts = 5;
+          while (!chosenFlight && attempts < maxAttempts) {
             const nextDay = new Date(new Date(currentSegmentDate).getTime() + 24 * 60 * 60 * 1000);
             if (nextDay > maxBookingDate) break;
-            const nextDayStr = nextDay.toISOString().split("T")[0];
-            if (debug) console.log(`Trying overnight for segment ${segOrigin} → ${segDestination} on ${nextDayStr}`);
-            await throttleRequest();
-            try {
-              flights = await checkRouteSegment(segOrigin, segDestination, nextDayStr);
-              if (flights.length > 0) {
-                currentSegmentDate = nextDayStr;
+            currentSegmentDate = nextDay.toISOString().split("T")[0];
+            if (debug)
+              console.log(`No flight with sufficient connection time found. Trying next day (${currentSegmentDate}) for segment ${segOrigin} → ${segDestination}.`);
+            flights = await checkRouteSegment(segOrigin, segDestination, currentSegmentDate);
+            setCachedResults(`${segOrigin}-${segDestination}-${currentSegmentDate}`, flights);
+            if (previousSegment) {
+              const prevArrivalTime = previousSegment.arrivalDate.getTime();
+              flights = flights.filter(flight => {
+                const depDate = flight.departureDate 
+                  ? new Date(flight.departureDate)
+                  : parseTimeWithOffset(flight.departure, flight.departureOffsetText || "", currentSegmentDate);
+                return depDate && depDate.getTime() >= prevArrivalTime;
+              });
+            }
+            for (const flightCandidate of flights) {
+              let candidateDepDate = flightCandidate.departureDate 
+                  ? new Date(flightCandidate.departureDate)
+                  : parseTimeWithOffset(flightCandidate.departure, flightCandidate.departureOffsetText || "", currentSegmentDate);
+              if (!previousSegment || (candidateDepDate.getTime() - previousSegment.arrivalDate.getTime() >= MIN_CONNECTION_MINUTES * 60000)) {
+                chosenFlight = flightCandidate;
                 break;
-              } else {
-                currentSegmentDate = nextDayStr;
               }
-            } catch (error) {
-              if (debug) console.error(`Overnight check failed for segment ${segOrigin} → ${segDestination}: ${error.message}`);
-              break;
             }
             attempts++;
           }
         }
-        if (flights.length === 0) {
-          if (debug) console.warn(`No available flights for segment ${segOrigin} → ${segDestination}`);
+        if (!chosenFlight) {
+          if (debug)
+            console.warn(`No available flights with sufficient connection time for segment ${segOrigin} → ${segDestination}`);
           validCandidate = false;
           setCachedResults(candidateKey, []);
           break;
         }
-        const flight = flights[0];
-        const calculatedDuration = calculateFlightDuration(
-          flight.departure,
-          flight.departureOffsetText || "",
-          flight.arrival,
-          flight.arrivalOffsetText || "",
-          currentSegmentDate,
-          false
-        );
-        if (!calculatedDuration || !calculatedDuration.departureDate || !calculatedDuration.arrivalDate) {
-          if (debug) console.warn(`Unable to calculate duration for segment ${segOrigin} → ${segDestination}`);
+  
+        const flight = chosenFlight;
+        if (debug) console.log("flight", flight);
+        let flightDepDate = flight.departureDate 
+            ? new Date(flight.departureDate)
+            : parseTimeWithOffset(flight.departure, flight.departureOffsetText || "", currentSegmentDate);
+        let flightArrDate = flight.arrivalDate 
+            ? new Date(flight.arrivalDate)
+            : parseTimeWithOffset(flight.arrival, flight.arrivalOffsetText || "", currentSegmentDate);
+  
+        if (previousSegment && flightDepDate < previousSegment.arrivalDate) {
+          if (debug)
+            console.log(`Flight ${flight.flightCode} departs before previous arrival. Adjusting departure/arrival by 24 hours.`);
+          flightDepDate = new Date(flightDepDate.getTime() + 24 * 60 * 60 * 1000);
+          flightArrDate = new Date(flightArrDate.getTime() + 24 * 60 * 60 * 1000);
+        }
+  
+        const calculatedDuration = {
+          hours: Math.floor((flightArrDate - flightDepDate) / 3600000),
+          minutes: Math.round(((flightArrDate - flightDepDate) % 3600000) / 60000),
+          totalMinutes: Math.round((flightArrDate - flightDepDate) / 60000),
+          departureDate: flightDepDate,
+          arrivalDate: flightArrDate
+        };
+  
+        if (!calculatedDuration.departureDate || !calculatedDuration.arrivalDate) {
+          if (debug)
+            console.warn(`Unable to calculate duration for segment ${segOrigin} → ${segDestination}`);
           validCandidate = false;
           break;
         }
+  
         const segmentInfo = {
           origin: segOrigin,
           destination: segDestination,
           flightCode: flight.flightCode,
-          departure: flight.departure,
-          arrival: flight.arrival,
+          originalDeparture: flight.departure,
+          originalArrival: flight.arrival,
           departureOffset: flight.departureOffsetText || "",
           arrivalOffset: flight.arrivalOffsetText || "",
           calculatedDuration: calculatedDuration,
           departureDate: calculatedDuration.departureDate,
           arrivalDate: calculatedDuration.arrivalDate
         };
+  
+        // Final check: if connection time is still insufficient, mark candidate invalid.
         if (previousSegment && !validateConnection(previousSegment, segmentInfo)) {
-          if (debug) console.warn(`Insufficient connection time between ${previousSegment.origin} → ${previousSegment.destination} and ${segmentInfo.origin} → ${segmentInfo.destination}`);
+          if (debug)
+            console.warn(`Insufficient connection time between ${previousSegment.origin} → ${previousSegment.destination} and ${segmentInfo.origin} → ${segmentInfo.destination}`);
           validCandidate = false;
           break;
         }
+  
         segmentsInfo.push(segmentInfo);
         previousSegment = segmentInfo;
         currentSegmentDate = getLocalDateFromOffset(segmentInfo.arrivalDate, segmentInfo.arrivalOffset);
@@ -983,6 +984,7 @@ import {
     }
     return globalResults;
   }
+  
   async function searchDirectRoutes(origins, destinations, selectedDate) {
     if (debug) console.log("searchDirectRoutes called with origins:", origins, "destinations:", destinations, "selectedDate:", selectedDate);
     const routesData = await fetchDestinations();
@@ -1426,12 +1428,19 @@ import {
       setTimeout(() => banner.classList.add("hidden"), 300); // Fully hide
     }, 3000);
   }  
-  function formatSimpleTime(date) {
+  function formatSimpleTime(date, offsetText = "UTC+0") {
     if (!date) return "";
-    const hh = String(date.getHours()).padStart(2, '0');
-    const mm = String(date.getMinutes()).padStart(2, '0');
-    return `${hh}:${mm}`;
+    let offsetHours = 0;
+    if (offsetText) {
+      const m = offsetText.match(/UTC([+-]\d+)/);
+      if (m) offsetHours = parseInt(m[1], 10);
+    }
+    // Use UTC getters, then add the offset.
+    const hours = String((date.getUTCHours() + offsetHours + 24) % 24).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
   }
+  
   function formatFlightDate(date) {
     if (!date) return "";
     const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
@@ -1443,90 +1452,19 @@ import {
     const dd = String(date.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
   }
-  
-  function createFlightCard(seg, depName, arrName) {
-    // Check if the flight arrives on the next day
-    const depDateStr = getLocalDateString(seg.departureDate);
-    const arrDateStr = getLocalDateString(seg.arrivalDate);
-    const isNextDay = (depDateStr !== arrDateStr);
-
-    // Build the date info at the top
-    // If next day, e.g. "Thu, 4 Mar 2025 – Fri, 5 Mar 2025"
-    let dateInfo = formatFlightDate(seg.departureDate);
-    if (isNextDay) {
-      dateInfo += ` – ${formatFlightDate(seg.arrivalDate)}`;
+  function getDisplayTime(segment, type) {
+    if (type === 'departure') {
+      return segment.originalDeparture || formatSimpleTime(segment.departureDate, segment.departureOffset);
+    } else if (type === 'arrival') {
+      return segment.originalArrival || formatSimpleTime(segment.arrivalDate, segment.arrivalOffset);
     }
-
-    // Times
-    const depTime = formatSimpleTime(seg.departureDate);
-    const arrTime = formatSimpleTime(seg.arrivalDate);
-
-    // Header: smaller flight code on the left, date(s) on the right
-    // Using `text-xs` for the flight code, and `<sup>` for the time zone
-    const headerHtml = `
-      <div class="flex justify-between items-center mb-3">
-        <span class="flight-code text-xs font-semibold bg-[#20006D] text-white px-2 py-1 rounded">
-          ${seg.flightCode}
-        </span>
-        <div class="text-sm text-gray-700">
-          ${dateInfo}
-        </div>
-      </div>
-    `;
-
-    // 3-column grid: left/center/right
-    // Adjust proportions so the center column is narrower (0.6fr)
-    // and the left/right columns are wider (1.5fr).
-    const mainHtml = `
-      <div class="grid grid-cols-[1.5fr,0.6fr,1.5fr] items-center gap-4">
-        <!-- Left column -->
-        <div class="flex flex-col items-start">
-          <!-- Airport name + flag -->
-          <div class="flex items-center gap-1 mb-1">
-            <span class="text-xl">${getCountryFlag(seg.origin)}</span>
-            <span class="text-base font-medium">${depName}</span>
-          </div>
-          <!-- Departure time + time zone as a small superscript -->
-          <div class="dep-time text-2xl font-bold">
-            ${depTime}
-            <sup class="ml-1 text-[10px] align-super">${seg.departureOffset}</sup>
-          </div>
-        </div>
-
-        <!-- Narrow center column (arrow + duration) -->
-        <div class="flex flex-col items-center justify-center">
-          <div class="text-xl font-semibold mb-1">→</div>
-          <div class="text-sm font-medium">
-            ${seg.calculatedDuration.hours}h ${seg.calculatedDuration.minutes}m
-          </div>
-        </div>
-
-        <!-- Right column -->
-        <div class="flex flex-col items-end">
-          <!-- Airport name + flag -->
-          <div class="flex items-center gap-1 mb-1">
-            <span class="text-xl">${getCountryFlag(seg.destination)}</span>
-            <span class="text-base font-medium">${arrName}</span>
-          </div>
-          <!-- Arrival time + time zone -->
-          <div class="arr-time text-2xl font-bold">
-            ${arrTime}
-            <sup class="ml-1 text-[10px] align-super">${seg.arrivalOffset}</sup>
-          </div>
-        </div>
-      </div>
-    `;
-
-    return `
-      <div class="flight-card border p-3 mb-4 rounded-lg bg-white">
-        ${headerHtml}
-        ${mainHtml}
-      </div>
-    `;
+    return "";
   }
+  
+
   function createSegmentRow(segment, depName, arrName) {
-    const depTime = formatSimpleTime(segment.departureDate);
-    const arrTime = formatSimpleTime(segment.arrivalDate);
+    const depTime = getDisplayTime(segment, 'departure');
+    const arrTime = getDisplayTime(segment, 'arrival');
   
     // We'll build a 2-row x 3-column grid:
     //  ┌─────────────┬───────────────┬─────────────┐
@@ -1579,33 +1517,39 @@ import {
   }  
   function renderRouteBlock(routeObj, label = "", extraInfo = "") {
     rehydrateDates(routeObj);
-  
-    const allFlightCodes = routeObj.segments.map(seg => seg.flightCode).join(" + ");
-    const firstDep = routeObj.segments[0].departureDate;
-    const lastArr = routeObj.segments[routeObj.segments.length - 1].arrivalDate;
-    const dateRange = formatFlightDate(firstDep)
-      + (getLocalDateString(firstDep) !== getLocalDateString(lastArr)
-        ? ` – ${formatFlightDate(lastArr)}`
+    
+    // For one-segment (direct) routes, use the selected date for display.
+    let firstDepDate, lastArrDate;
+    if (routeObj.segments.length === 1 && routeObj.date) {
+      firstDepDate = new Date(routeObj.date);
+      lastArrDate = new Date(routeObj.date);
+    } else {
+      firstDepDate = routeObj.segments[0].departureDate;
+      lastArrDate = routeObj.segments[routeObj.segments.length - 1].arrivalDate;
+    }
+    
+    const dateRange = formatFlightDate(firstDepDate) +
+      (getLocalDateString(firstDepDate) !== getLocalDateString(lastArrDate)
+        ? ` – ${formatFlightDate(lastArrDate)}`
         : "");
-  
+    
     const isReturn = label.toLowerCase().includes("return");
     const containerBg = isReturn ? "bg-gray-100" : "bg-white";
-  
+    
     let html = `<div class="border rounded-lg p-4 mb-6 ${containerBg}">`;
-  
-    // Top row: flight codes + date range
+    
+    // Top row: flight codes and date range.
     html += `
       <div class="flex justify-between items-center mb-2">
         <div class="text-xs font-semibold bg-[#20006D] text-white px-2 py-1 rounded">
-          ${allFlightCodes}
+          ${routeObj.segments.map(seg => seg.flightCode).join(" + ")}
         </div>
         <div class="text-sm text-gray-700">
           ${dateRange}
         </div>
       </div>
     `;
-  
-    // Single row for label + stopover
+    
     if (label || extraInfo) {
       html += `
         <div class="flex justify-between items-center mb-2">
@@ -1626,14 +1570,12 @@ import {
         </div>
       `;
     }
-  
-    // Now render each segment
+    
     routeObj.segments.forEach((segment, idx) => {
       const depName = segment.departureStationText || airportNames[segment.origin];
       const arrName = segment.arrivalStationText || airportNames[segment.destination];
       html += createSegmentRow(segment, depName, arrName);
-  
-      // If multi-segment, show connection time
+    
       if (idx < routeObj.segments.length - 1) {
         const connectionMs = routeObj.segments[idx + 1].departureDate - segment.arrivalDate;
         const connectionMinutes = Math.round(connectionMs / 60000);
@@ -1646,12 +1588,12 @@ import {
         `;
       }
     });
-  
+    
     html += `</div>`;
     return html;
   }
-  // ---------------- Initialize on DOMContentLoaded ----------------
-
+  
+  // ---------------- Calendar ----------------
   function renderCalendarMonth(
     popupEl,
     inputId,
@@ -1820,6 +1762,7 @@ import {
       }
     });
   }
+  // ---------------- Initialize on DOMContentLoaded ----------------
   
   document.addEventListener("DOMContentLoaded", function () {
     const originInput = document.getElementById("origin-input");
