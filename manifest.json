@@ -1,0 +1,31 @@
+    {
+        "manifest_version": 3,
+        "name": "All You Can Fly Pro",
+        "description": "A Chrome extension to automate flight route search with enhanced features including multi-connection routes, return routes, and comprehensive country-based search.",
+        "version": "1.0.0",
+        "permissions": [
+            "activeTab",
+            "sidePanel"
+        ],
+        "host_permissions": [
+        "https://multipass.wizzair.com/*"
+        ],
+        "action": {
+            "default_icon": "assets/icons/icon.png"
+        },
+        "side_panel": {
+            "default_path": "index.html"
+        },
+        "background": {
+            "service_worker": "src/background.js"
+        },
+            "content_scripts": [
+        {
+            "matches": ["https://multipass.wizzair.com/*"],
+            "js": ["src/content.js"],
+            "run_at": "document_idle"
+        }],
+        "icons": {
+            "48": "assets/icons/icon.png"
+        }
+    }

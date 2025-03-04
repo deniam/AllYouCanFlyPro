@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>All You Can Fly Pro</title>
+  <!-- Tailwind CSS -->
+  <script src="./assets/css/tailwind_cdn_409.js"></script>
+  <style>
+    #ui-scale::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #C90076; /* Starting pink color */
+      border: 2px solid white;
+      cursor: pointer;
+      margin-top: -8px; /* centers thumb on the 2px tall track wrapper */
+    }
+    .calendar-popup {
+      position: absolute;
+      z-index: 10;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 0.375rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      padding: 1rem;
+      margin-top: 0.25rem;
+    }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <section class="pt-0">
+    <div class="max-w-3xl mx-auto px-4">
+        <!-- Donation & GitHub Links -->
+      <div class="flex justify-between items-center p-4 bg-gray-100 rounded-md shadow-md mb-4">
+        <a href="https://ko-fi.com/denya24" target="_blank" rel="noopener noreferrer"
+        class="inline-flex items-center text-white bg-[#C90076] px-4 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition">
+        ☕ Support this project</a>        
+        <a href="https://github.com/deniam24/AllYouCanFlyPro" target="_blank" rel="noopener noreferrer"
+        class="inline-flex items-center text-white bg-[#20006D] px-4 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] transition">
+        ⭐ GitHub</a>
+    </div>
+      
+      <!-- Header / Logo -->
+      <div class="text-center mt-[-20px] mb-6"> 
+        <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 10 300 100" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <!-- Define gradient in user space so that its coordinates match the overall SVG -->
+              <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
+                <stop offset="0" stop-color="#20006D" />
+                <stop offset="1" stop-color="#C90076" />
+              </linearGradient>
+            </defs>
+            <rect width="300" height="120" fill="white"/>
+            <g transform="translate(20,20)">
+              <!-- Line with gradient stroke -->
+              <line x1="0" y1="40" x2="260" y2="40" stroke="url(#lineGradient)" stroke-width="4" stroke-linecap="round" />
+              <!-- Departure circle -->
+              <circle cx="0" cy="40" r="6" fill="#20006D" />
+              <!-- Destination circle -->
+              <circle cx="260" cy="40" r="6" fill="#C90076" />
+              <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D" />
+            </g>
+            <text x="50%" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#20006D">
+              All You Can Fly Pro ✈️ 😎
+            </text>
+          </svg>
+      </div>
+      
+      <!-- Flight Search Form -->
+      <div class="mb-4 flex items-center gap-2 relative">
+        <!-- Departure -->
+        <div class="relative flex-1">
+          <label for="origin-input" class="sr-only">Departure</label>
+          <input
+            type="text"
+            id="origin-input"
+            class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]"
+            placeholder="Departure"
+          >
+          <div
+            id="airport-suggestions-origin"
+            class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 hidden text-gray-800 text-sm"
+          ></div>
+        </div>
+      
+        <!-- Swap Button (Smaller & Aligned) -->
+        <button
+          id="swap-button"
+          class="p-1.5 bg-[#20006D] text-white rounded-full hover:bg-[#A00065] flex items-center justify-center w-7 h-7 shadow-md transition cursor-pointer"
+          title="Swap"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.33-3.36l1.16-1.16M20.49 15a9 9 0 01-14.33 3.36l-1.16 1.16" />
+          </svg>
+        </button>
+      
+        <!-- Destination -->
+        <div class="relative flex-1">
+          <label for="destination-input" class="sr-only">Destination</label>
+          <input
+            type="text"
+            id="destination-input"
+            class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]"
+            placeholder="Destination"
+          >
+          <div
+            id="airport-suggestions-dest"
+            class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 hidden text-gray-800 text-sm"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Trip Type Selection with Sort Option on the right -->
+      <div class="mb-4 flex items-center">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Trip Type</label>
+          <div class="flex gap-3">
+            <!-- One-way Button (default selected: purple) -->
+            <button
+              id="oneway-btn"
+              class="flex items-center gap-2 px-4 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer"
+              data-type="oneway"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M13 5l7 7-7 7"/>
+              </svg>
+              One-way
+            </button>
+        
+            <!-- Return Button -->
+            <button id="return-btn" class="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-lg shadow-md hover:bg-[#A00065] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+              </svg>          
+              Return
+            </button>
+          </div>
+        </div>
+        <!-- Sort results by moved here (narrow dropdown) -->
+        <div class="ml-auto">
+          <label for="sort-select" class="block text-sm font-medium text-gray-700 mb-1">Sort</label>
+          <select
+            id="sort-select"
+            class="block w-32 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
+          >
+            <option value="departure" selected>Departure</option>
+            <option value="duration">Duration</option>
+            <option value="airport">Airport</option>
+            <option value="arrival">Arrival</option>
+          </select>
+        </div>
+      </div>
+      
+      <!-- Date Selection Row (Calendar inputs) -->
+      <div class="mb-4 flex gap-3">
+        <!-- Departure Date -->
+        <div class="w-1/2 relative">
+          <label for="departure-date" class="block text-sm font-medium text-gray-700 mb-1">Departure Date</label>
+          <input
+            type="text"
+            id="departure-date"
+            readonly
+            class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
+            placeholder="Select Departure Date"
+          >
+          <!-- Calendar popup for departure -->
+          <div
+            id="departure-calendar-popup"
+            class="calendar-popup hidden"
+            style="width: 220px; font-size: 0.8rem;"
+          ></div>
+        </div>
+
+        <!-- Return Date (visible only for round-trip) -->
+        <div class="w-1/2 relative" id="return-date-container" style="display: none;">
+          <label for="return-date" class="block text-sm font-medium text-gray-700 mb-1">Return Date</label>
+          <input
+            type="text"
+            id="return-date"
+            disabled
+            readonly
+            class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
+            placeholder="Select Return Date"
+            />
+          <!-- Calendar popup for return -->
+          <div
+            id="return-calendar-popup"
+            class="calendar-popup hidden"
+            style="width: 220px; font-size: 0.8rem;"
+          ></div>
+        </div>
+      </div>
+      
+      <!-- Options Panel -->
+      <div class="mb-4">
+        <button id="toggle-options" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#20006D] text-white rounded hover:bg-[#A00065] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+          </svg>              
+          Options
+        </button>
+        <div id="options-container" class="mt-3 hidden space-y-3">
+          <div class="flex flex-col gap-1">
+            <label class="inline-flex items-center text-gray-700 cursor-pointer">
+              <input type="checkbox" class="form-checkbox text-[#C90076]" id="transfer-checkbox">
+              <span class="ml-2">Allow connections (1 transfer)</span>
+            </label>
+            <label class="inline-flex items-center text-gray-700 cursor-pointer">
+              <input type="checkbox" class="form-checkbox text-[#C90076]" id="two-transfer-checkbox">
+              <span class="ml-2">Allow two connections (overnight transfer)</span>
+            </label>
+            <label class="inline-flex items-center text-gray-700 cursor-pointer">
+              <input type="checkbox" class="form-checkbox text-[#C90076]" id="overnight-checkbox">
+              <span class="ml-2">Allow overnight transfer</span>
+            </label>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-gray-700 font-medium mb-1">Max Requests in Row:</label>
+              <input
+                type="number"
+                id="max-requests"
+                value="25"
+                class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]"
+              >
+            </div>
+            <div>
+              <label class="block text-gray-700 font-medium mb-1">Requests Frequency (ms):</label>
+              <input
+                type="number"
+                id="requests-frequency"
+                value="600"
+                class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]"
+              >
+            </div>
+            <div>
+              <label class="block text-gray-700 font-medium mb-1">Pause Duration (sec):</label>
+              <input
+                type="number"
+                id="pause-duration"
+                value="15"
+                class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]"
+              >
+            </div>
+            <div>
+              <label class="block text-gray-700 font-medium mb-1">Cache Lifetime (hrs):</label>
+              <input
+                type="number"
+                id="cache-lifetime"
+                value="4"
+                class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]"
+              >
+            </div>
+          </div>
+          <!-- Preferred Departure Airport  -->
+          <div class="mb-4 flex items-center gap-2">
+            <label for="preferred-airport" class="sr-only">Preferred Departure Airport</label>
+            <div class="relative flex-1">
+              <input
+                type="text"
+                id="preferred-airport"
+                class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]"
+                placeholder="Enter preferred airport"
+              >
+              <div id="airport-suggestions-preferred" class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 hidden text-gray-800 text-sm"></div>
+            </div>
+            <button
+              id="update-preferred-airport"
+              class="px-4 py-2 bg-[#20006D] text-white rounded hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer"
+            >
+              Update
+            </button>
+          </div>   
+          <!-- UI Scale Control -->
+          <div class="mt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">UI Scale</label>
+            <div class="relative w-full h-2 rounded-full overflow-hidden">
+              <div class="absolute inset-0 pointer-events-none bg-gradient-to-r from-[#20006D] to-[#C90076]"></div>
+              <input
+                type="range"
+                id="ui-scale"
+                min="50"
+                max="100"
+                value="85"
+                class="relative w-full appearance-none h-2 bg-transparent cursor-pointer"
+              >
+            </div>
+          </div>
+          <!-- Clear Cache Button -->
+          <div>
+            <button
+              id="clear-cache-button"
+              class="w-full px-4 py-2 bg-[#20006D] text-white rounded hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer"
+            >
+              Clear Cache
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search Button -->
+      <div class="mb-4 flex justify-center">
+        <button id="search-button" 
+          class="flex items-center justify-center gap-2 px-4 py-2 bg-[#C90076] text-white rounded hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#20006D] transition cursor-pointer w-full">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>              
+          Search Flights
+        </button>         
+      </div>  
+
+      <!-- Progress Display -->
+      <div id="progress-container" class="bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4 hidden">
+        <p id="progress-text" class="mb-2 font-medium"></p>
+        <div class="w-full bg-gray-300 rounded-full overflow-hidden">
+          <div id="progress-bar" class="bg-[#20006D] h-2" style="width: 0%;"></div>
+        </div>
+      </div>
+      
+      <!-- Timeout Status Display -->
+      <div id="timeout-status" class="bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4 hidden"></div>
+
+      <!-- Results Display -->
+      <div class="route-list"></div>
+    </div>
+
+    <!-- Notification Message (Hidden by Default) -->
+    <div id="notification-banner"
+      class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-gray-200 text-black px-6 py-3 rounded-lg shadow-md transition-opacity duration-300 opacity-0 hidden">
+      <span id="notification-text"></span>
+    </div>
+  </section>
+
+  <!-- Main App Logic -->
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
