@@ -1650,7 +1650,15 @@ import {
   }
   // ---------------- Initialize on DOMContentLoaded ----------------
 
-  function renderCalendarMonth(popupEl, inputId, year, month, maxDaysAhead, selectedDates, minSelectableDate = null) {
+  function renderCalendarMonth(
+    popupEl,
+    inputId,
+    year,
+    month,
+    maxDaysAhead,
+    selectedDates,
+    minSelectableDate = null
+  ) {
     // Clear old content
     popupEl.innerHTML = "";
   
@@ -1662,26 +1670,6 @@ import {
     const prevBtn = document.createElement("button");
     prevBtn.textContent = "←";
     prevBtn.className = "px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm";
-    // If a minSelectableDate is provided, disable Prev if we're at its month.
-    if (minSelectableDate) {
-      const minDateObj = parseLocalDate(minSelectableDate);
-      if (year === minDateObj.getFullYear() && month === minDateObj.getMonth()) {
-        prevBtn.disabled = true;
-        prevBtn.classList.add("cursor-not-allowed", "opacity-50");
-      } else {
-        prevBtn.addEventListener("click", () => {
-          const newMonth = (month - 1 < 0) ? 11 : (month - 1);
-          const newYear = (month - 1 < 0) ? year - 1 : year;
-          renderCalendarMonth(popupEl, inputId, newYear, newMonth, maxDaysAhead, selectedDates, minSelectableDate);
-        });
-      }
-    } else {
-      prevBtn.addEventListener("click", () => {
-        const newMonth = (month - 1 < 0) ? 11 : (month - 1);
-        const newYear = (month - 1 < 0) ? year - 1 : year;
-        renderCalendarMonth(popupEl, inputId, newYear, newMonth, maxDaysAhead, selectedDates, minSelectableDate);
-      });
-    }
     headerRow.appendChild(prevBtn);
   
     // --- Title ---
@@ -1696,22 +1684,46 @@ import {
     const nextBtn = document.createElement("button");
     nextBtn.textContent = "→";
     nextBtn.className = "px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm";
-    nextBtn.addEventListener("click", () => {
-      const newMonth = (month + 1 > 11) ? 0 : (month + 1);
-      const newYear = (month + 1 > 11) ? year + 1 : year;
-      renderCalendarMonth(popupEl, inputId, newYear, newMonth, maxDaysAhead, selectedDates, minSelectableDate);
-    });
     headerRow.appendChild(nextBtn);
   
     popupEl.appendChild(headerRow);
   
-    // --- Day Names ---
+    // Handle Prev/Next navigation (Fix: stopPropagation)
+    prevBtn.addEventListener("click", (event) => {
+      event.stopPropagation(); // Prevent calendar from closing
+      let newMonth = month - 1;
+      let newYear = year;
+      if (newMonth < 0) {
+        newMonth = 11;
+        newYear--;
+      }
+      renderCalendarMonth(popupEl, inputId, newYear, newMonth, maxDaysAhead, selectedDates, minSelectableDate);
+    });
+  
+    nextBtn.addEventListener("click", (event) => {
+      event.stopPropagation(); // Prevent calendar from closing
+      let newMonth = month + 1;
+      let newYear = year;
+      if (newMonth > 11) {
+        newMonth = 0;
+        newYear++;
+      }
+      renderCalendarMonth(popupEl, inputId, newYear, newMonth, maxDaysAhead, selectedDates, minSelectableDate);
+    });
+  
+    // --- Day Names (Monday-based) ---
+    const daysShort = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
     const dayNamesRow = document.createElement("div");
     dayNamesRow.className = "grid grid-cols-7 text-center text-xs font-semibold mb-2";
-    const daysShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    daysShort.forEach(day => {
+  
+    daysShort.forEach((dayName, i) => {
       const dayEl = document.createElement("div");
-      dayEl.textContent = day;
+      dayEl.textContent = dayName;
+      if (i === 5 || i === 6) {
+        dayEl.classList.add("text-[#C90076]", "font-semibold");
+      } else {
+        dayEl.classList.add("text-[#20006D]", "font-semibold");
+      }
       dayNamesRow.appendChild(dayEl);
     });
     popupEl.appendChild(dayNamesRow);
@@ -1720,40 +1732,36 @@ import {
     const datesGrid = document.createElement("div");
     datesGrid.className = "grid grid-cols-7 text-center text-xs gap-1";
   
-    // Get first day of the month and number of days in the month
     const firstOfMonth = new Date(year, month, 1);
-    const startingWeekday = firstOfMonth.getDay();
+    let startingWeekday = firstOfMonth.getDay();
+    startingWeekday = (startingWeekday + 6) % 7; // Shift Monday to 0
+  
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-  
-    // Determine the earliest allowed date.
-    // For departure calendar, this is today.
-    // For return calendar, minSelectableDate is passed in (the departure date).
-    const minDate = minSelectableDate ? parseLocalDate(minSelectableDate) : new Date(new Date().setHours(0,0,0,0));
-  
-    // **Change here:** Determine the last bookable day relative to today.
+    const minDate = minSelectableDate ? parseLocalDate(minSelectableDate) : new Date(new Date().setHours(0, 0, 0, 0));
     const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
     const lastBookable = new Date(todayMidnight.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
   
-    // Insert blank cells before the 1st of the month
     for (let i = 0; i < startingWeekday; i++) {
       const blank = document.createElement("div");
       blank.className = "p-2";
       datesGrid.appendChild(blank);
     }
   
-    // Create a cell for each day
     for (let d = 1; d <= daysInMonth; d++) {
       const dateCell = document.createElement("div");
       dateCell.className = "border rounded p-1 cursor-pointer";
-      dateCell.textContent = d;
-  
       const cellDate = new Date(year, month, d);
       const yyyy = cellDate.getFullYear();
-      const mm = String(cellDate.getMonth() + 1).padStart(2, '0');
-      const dd = String(cellDate.getDate()).padStart(2, '0');
+      const mm = String(cellDate.getMonth() + 1).padStart(2, "0");
+      const dd = String(cellDate.getDate()).padStart(2, "0");
       const dateStr = `${yyyy}-${mm}-${dd}`;
+      const dayOfWeek = (startingWeekday + (d - 1)) % 7;
   
-      // Disable if the cell is before minDate or after lastBookable
+      if (dayOfWeek === 5 || dayOfWeek === 6) {
+        dateCell.classList.add("bg-pink-50");
+      }
+      dateCell.textContent = d;
+  
       if (cellDate < minDate || cellDate > lastBookable) {
         dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
       } else {
@@ -1772,7 +1780,6 @@ import {
           const inputEl = document.getElementById(inputId);
           const sortedArr = Array.from(selectedDates).sort();
           inputEl.value = sortedArr.join(", ");
-          // Dispatch change event so that any listeners (such as enabling the return date) will fire
           inputEl.dispatchEvent(new Event("change"));
         });
       }
@@ -1781,43 +1788,37 @@ import {
     popupEl.appendChild(datesGrid);
   }
   
-function initMultiCalendar(inputId, popupId, maxDaysAhead = 3) {
-  const inputEl = document.getElementById(inputId);
-  const popupEl = document.getElementById(popupId);
-
-  if (!inputEl || !popupEl) {
-    console.error("Calendar input/popup not found:", inputId, popupId);
-    return;
+  function parseLocalDate(dateStr) {
+    const [year, month, day] = dateStr.split("-").map(Number);
+    return new Date(year, month - 1, day);
   }
-
-  // We'll track selected dates in a Set of YYYY-MM-DD strings
-  const selectedDates = new Set();
-
-  // By default, we start with the current month/year
-  const today = new Date();
-  let currentYear = today.getFullYear();
-  let currentMonth = today.getMonth();
-
-  // On input click, we rebuild and show the calendar
-  inputEl.addEventListener("click", (e) => {
-    e.stopPropagation();
-    // Rebuild the calendar
-    renderCalendarMonth(popupEl, inputId, currentYear, currentMonth, maxDaysAhead, selectedDates);
-    popupEl.classList.toggle("hidden");
-  });
-
-  // Hide the popup if user clicks outside
-  document.addEventListener("click", (e) => {
-    if (!popupEl.contains(e.target) && !inputEl.contains(e.target)) {
-      popupEl.classList.add("hidden");
+  
+  function initMultiCalendar(inputId, popupId, maxDaysAhead = 3) {
+    const inputEl = document.getElementById(inputId);
+    const popupEl = document.getElementById(popupId);
+    if (!inputEl || !popupEl) {
+      console.error("Calendar input/popup not found:", inputId, popupId);
+      return;
     }
-  });
-}
-function parseLocalDate(dateStr) {
-  // Assumes dateStr is in "YYYY-MM-DD" format and creates a date in local time.
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
+  
+    const selectedDates = new Set();
+    const today = new Date();
+    let currentYear = today.getFullYear();
+    let currentMonth = today.getMonth();
+  
+    inputEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      renderCalendarMonth(popupEl, inputId, currentYear, currentMonth, maxDaysAhead, selectedDates);
+      popupEl.classList.toggle("hidden");
+    });
+  
+    document.addEventListener("click", (e) => {
+      if (!popupEl.contains(e.target) && !inputEl.contains(e.target)) {
+        popupEl.classList.add("hidden");
+      }
+    });
+  }
+  
   document.addEventListener("DOMContentLoaded", function () {
     const originInput = document.getElementById("origin-input");
     const preferredAirportInput = document.getElementById("preferred-airport");
