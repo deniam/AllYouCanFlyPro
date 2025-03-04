@@ -798,10 +798,8 @@ import {
         if (searchCancelled) break;
         const segOrigin = candidate[i];
         const segDestination = candidate[i + 1];
-        if (debug)
-          console.log(`Checking segment ${segOrigin} → ${segDestination} for route ${candidate.join(" → ")}`);
+        if (debug) console.log(`Checking segment ${segOrigin} → ${segDestination} for route ${candidate.join(" → ")}`);
   
-        // Retrieve flights for this segment (using cached result if available)
         const segmentCacheKey = `${segOrigin}-${segDestination}-${currentSegmentDate}`;
         let flights = getCachedResults(segmentCacheKey);
         if (!flights) {
@@ -815,7 +813,6 @@ import {
           }
         }
   
-        // If there's a previous segment, filter flights to those departing no earlier than its arrival.
         if (previousSegment) {
           const prevArrivalTime = previousSegment.arrivalDate.getTime();
           flights = flights.filter(flight => {
@@ -846,7 +843,6 @@ import {
           }
         }
   
-        // Choose a flight that meets the minimum connection gap.
         let chosenFlight = null;
         for (const flightCandidate of flights) {
           let baseDepDateStr = flightCandidate.departureDate ? getLocalDateString(parseServerDate(flightCandidate.departureDate)) : currentSegmentDate;
@@ -896,7 +892,6 @@ import {
         const flight = chosenFlight;
         if (debug) console.log("flight", flight);
         
-        // Compute the departure and arrival times using the flight's time strings and offset.
         let flightDepDate;
         if (flight.departure && flight.departureOffsetText) {
           let baseDepDateStr = flight.departureDate ? getLocalDateString(parseServerDate(flight.departureDate)) : currentSegmentDate;
@@ -909,7 +904,7 @@ import {
           let baseArrDateStr = flight.arrivalDate ? getLocalDateString(parseServerDate(flight.arrivalDate)) : currentSegmentDate;
           flightArrDate = parseTimeWithOffset(flight.arrival, flight.arrivalOffsetText || "", baseArrDateStr);
         } else {
-          flightArrDate = flight.arrivalDate ? new Date(flight.arrivalDate) : null;
+          flightArrDate = flight.arrivalDate ? new Date(flight.arrival) : null;
         }
   
         if (previousSegment && flightDepDate < previousSegment.arrivalDate) {
@@ -1457,111 +1452,125 @@ import {
     if (!date) return "";
     const offsetMatch = offsetText.match(/UTC([+-]\d+)/);
     const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
-    // Use UTC values then add the offset (this yields the flight's local time)
+    // Use the UTC hours then add the offset to get local time
     let hours = date.getUTCHours() + offsetHours;
     let minutes = date.getUTCMinutes();
     hours = (hours + 24) % 24;
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   }
   
-  // Updated createSegmentRow to include flight code and date per segment, and always use 24-hour time
-  function createSegmentRow(segment, depName, arrName, includeHeader = true) {
-    // Use our helper to format the times in the flight's local time.
+  function createConnectingSegmentRow(segment, depName, arrName) {
     const depTime = formatFlightTimeWithOffset(segment.departureDate, segment.departureOffset);
     const arrTime = formatFlightTimeWithOffset(segment.arrivalDate, segment.arrivalOffset);
-    let headerHtml = "";
-    if (includeHeader) {
-      const flightDate = formatFlightDate(segment.departureDate);
-      headerHtml = `<div class="text-xs text-gray-700 mb-1">Flight <strong>${segment.flightCode}</strong> · ${flightDate}</div>`;
-    }
-    return `
-      <div class="mb-2">
-        ${headerHtml}
-        <div class="grid grid-cols-3 grid-rows-2 gap-2 items-center w-full py-3 border-b last:border-b-0">
-          <!-- Row 1, Col 1: Departure Airport -->
-          <div class="flex items-center gap-1 whitespace-nowrap">
-            <span class="text-xl">${getCountryFlag(segment.origin)}</span>
-            <span class="text-base font-medium">${depName}</span>
-          </div>
-          <!-- Row 1, Col 2: Plane Icon (centered) -->
-          <div class="flex justify-center">
-            <span class="text-xl font-medium">✈</span>
-          </div>
-          <!-- Row 1, Col 3: Arrival Airport (right-aligned) -->
-          <div class="flex items-center justify-end gap-1 whitespace-nowrap">
-            <span class="text-base font-medium">${arrName}</span>
-            <span class="text-xl">${getCountryFlag(segment.destination)}</span>
-          </div>
-          <!-- Row 2, Col 1: Departure Time -->
-          <div class="flex items-center gap-1">
-            <span class="text-2xl font-bold whitespace-nowrap">${depTime}</span>
-            <sup class="text-[10px] align-super">${segment.departureOffset}</sup>
-          </div>
-          <!-- Row 2, Col 2: Flight Duration (centered) -->
-          <div class="flex flex-col items-center">
-            <div class="text-sm font-medium">
-              ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
-            </div>
-          </div>
-          <!-- Row 2, Col 3: Arrival Time (right-aligned) -->
-          <div class="flex items-center justify-end gap-1">
-            <span class="text-2xl font-bold whitespace-nowrap">${arrTime}</span>
-            <sup class="text-[10px] align-super">${segment.arrivalOffset}</sup>
-          </div>
+    // Use the departure date of the segment for display.
+    const flightDate = formatFlightDate(segment.departureDate);
+    // Header: left grey box with date; right purple box with flight code.
+    const headerRow = `
+      <div class="flex justify-between items-center mb-1">
+        <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
+          ${flightDate}
+        </div>
+        <div class="text-xs font-semibold bg-[#20006D] text-white px-2 py-1 rounded">
+          ${segment.flightCode}
         </div>
       </div>
     `;
+    // Grid with departure/arrival airports and times (in local 24-hour format)
+    const gridRow = `
+      <div class="grid grid-cols-3 grid-rows-2 gap-2 items-center w-full py-3 border-b last:border-b-0">
+        <!-- Departure Airport -->
+        <div class="flex items-center gap-1 whitespace-nowrap">
+          <span class="text-xl">${getCountryFlag(segment.origin)}</span>
+          <span class="text-base font-medium">${depName}</span>
+        </div>
+        <!-- Plane Icon -->
+        <div class="flex justify-center">
+          <span class="text-xl font-medium">✈</span>
+        </div>
+        <!-- Arrival Airport -->
+        <div class="flex items-center justify-end gap-1 whitespace-nowrap">
+          <span class="text-base font-medium">${arrName}</span>
+          <span class="text-xl">${getCountryFlag(segment.destination)}</span>
+        </div>
+        <!-- Departure Time -->
+        <div class="flex items-center gap-1">
+          <span class="text-2xl font-bold whitespace-nowrap">${depTime}</span>
+          <sup class="text-[10px] align-super">${segment.departureOffset}</sup>
+        </div>
+        <!-- Flight Duration -->
+        <div class="flex flex-col items-center">
+          <div class="text-sm font-medium">
+            ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
+          </div>
+        </div>
+        <!-- Arrival Time -->
+        <div class="flex items-center justify-end gap-1">
+          <span class="text-2xl font-bold whitespace-nowrap">${arrTime}</span>
+          <sup class="text-[10px] align-super">${segment.arrivalOffset}</sup>
+        </div>
+      </div>
+    `;
+    return `<div class="mb-2">${headerRow}${gridRow}</div>`;
   }
-
+  
+  
+  // --- Updated renderRouteBlock ---
   function renderRouteBlock(routeObj, label = "", extraInfo = "") {
     rehydrateDates(routeObj);
-    // Determine departure/arrival for display.
-    let firstDep, lastArr;
-    if (routeObj.segments.length === 1 && routeObj.date) {
-      firstDep = new Date(routeObj.date);
-      lastArr = new Date(routeObj.date);
-    } else {
-      firstDep = routeObj.segments[0].departureDate;
-      lastArr = routeObj.segments[routeObj.segments.length - 1].arrivalDate;
-    }
+  
+    // Compute the actual departure and arrival date range
+    const firstDep = routeObj.segments[0].departureDate;
+    const lastArr = routeObj.segments[routeObj.segments.length - 1].arrivalDate;
     const dateRange = formatFlightDate(firstDep) +
-      (getLocalDateString(firstDep) !== getLocalDateString(lastArr) ? ` – ${formatFlightDate(lastArr)}` : "");
-    
-    // Top row: flight codes and date range.
-    const containerBg = label.toLowerCase().includes("return") ? "bg-gray-100" : "bg-white";
-    let html = `<div class="border rounded-lg p-4 mb-6 ${containerBg}">`;
-    html += `
-      <div class="flex justify-between items-center mb-2">
-        <div class="text-xs font-semibold bg-[#20006D] text-white px-2 py-1 rounded">
-          ${routeObj.segments.map(seg => seg.flightCode).join(" + ")}
-        </div>
-        <div class="text-sm text-gray-700">
-          ${dateRange}
-        </div>
-      </div>
-    `;
-    if (label || extraInfo) {
+      (getLocalDateString(firstDep) !== getLocalDateString(lastArr)
+        ? ` – ${formatFlightDate(lastArr)}`
+        : "");
+  
+    // Start building the HTML container
+    let html = `<div class="border rounded-lg p-4 mb-6">`;
+  
+    if (routeObj.segments.length === 1) {
+      // --- Direct Flight ---
+      // Header: flight code on left (purple), date range on right (gray).
+      // Render the single segment
+      const seg = routeObj.segments[0];
+      html += createConnectingSegmentRow(
+        seg,
+        seg.departureStationText || airportNames[seg.origin],
+        seg.arrivalStationText || airportNames[seg.destination],
+        false
+      );
+  
+    } else {
+      // --- Connecting Flight ---
+      // Header row: date range on the left (gray box), total duration on the right (gray box).
       html += `
         <div class="flex justify-between items-center mb-2">
-          ${ label ? `<div class="inline-block text-xs font-semibold bg-[#C90076] text-white px-2 py-1 rounded">${label}</div>` : "" }
-          ${ extraInfo ? `<div class="text-xs font-semibold text-gray-700 bg-gray-200 px-2 py-1 rounded">${extraInfo}</div>` : "" }
+          <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 rounded">
+            ${dateRange}
+          </div>
+          <div class="text-sm font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
+            ${routeObj.totalTripDuration}
+          </div>
         </div>
       `;
+      // Render each segment using createConnectingSegmentRow
+      routeObj.segments.forEach((segment, idx) => {
+        const depName = segment.departureStationText || airportNames[segment.origin];
+        const arrName = segment.arrivalStationText || airportNames[segment.destination];
+        html += createConnectingSegmentRow(segment, depName, arrName);
+  
+        // Connection time display if not the last segment
+        if (idx < routeObj.segments.length - 1) {
+          const connectionMs = routeObj.segments[idx + 1].departureDate - segment.arrivalDate;
+          const connectionMinutes = Math.round(connectionMs / 60000);
+          const ch = Math.floor(connectionMinutes / 60);
+          const cm = connectionMinutes % 60;
+          html += `<div class="text-center text-sm text-gray-500 my-2">Connection: ${ch}h ${cm}m</div>`;
+        }
+      });
     }
-    // For a direct flight (one segment), avoid duplicate header information.
-    const includeHeader = routeObj.segments.length > 1;
-    routeObj.segments.forEach((segment, idx) => {
-      const depName = segment.departureStationText || airportNames[segment.origin];
-      const arrName = segment.arrivalStationText || airportNames[segment.destination];
-      html += createSegmentRow(segment, depName, arrName, includeHeader);
-      if (idx < routeObj.segments.length - 1) {
-        const connectionMs = routeObj.segments[idx + 1].departureDate - segment.arrivalDate;
-        const connectionMinutes = Math.round(connectionMs / 60000);
-        const ch = Math.floor(connectionMinutes / 60);
-        const cm = connectionMinutes % 60;
-        html += `<div class="text-center text-sm text-gray-500 my-2">Connection: ${ch}h ${cm}m</div>`;
-      }
-    });
+  
     html += `</div>`;
     return html;
   }
