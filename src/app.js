@@ -437,7 +437,7 @@ import {
             if (debug) console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
             return [];
           }
-          throw new Error(`HTTP error: ${fetchResponse.status}`);
+          if (debug) throw new Error(`HTTP error: ${fetchResponse.status}`);
         }
         
         // Check if response looks like JSON (by checking the content-type header)
@@ -448,7 +448,7 @@ import {
           if (text.trim().startsWith("<!DOCTYPE")) {
             if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and retrying.");
             localStorage.removeItem("wizz_page_data");
-            throw new Error("Invalid response format: expected JSON but received HTML");
+            if (debug) throw new Error("Invalid response format: expected JSON but received HTML");
           }
         }
         
@@ -532,11 +532,20 @@ import {
       }];
     }
     rehydrateDates(routeObj);
+    // Store the original rendered order index if not already set.
+    if (typeof routeObj.originalIndex === "undefined") {
+      routeObj.originalIndex = globalResults.length;
+    }
     globalResults.push(routeObj);
     if (!suppressDisplay) {
-      displayGlobalResults(globalResults);
+      // Render using the appropriate function based on trip type.
+      if (window.currentTripType === "return") {
+        displayRoundTripResultsAll(globalResults);
+      } else {
+        displayGlobalResults(globalResults);
+      }
     }
-  }
+  }    
 
   function displayGlobalResults(results) {
     const resultsDiv = document.querySelector(".route-list");
@@ -554,34 +563,37 @@ import {
     });
   }
 
-  function displayRoundTripResults(outbound) {
+  function displayRoundTripResultsAll(outbounds) {
     const resultsDiv = document.querySelector(".route-list");
     resultsDiv.innerHTML = "";
+    // Optionally show total count
+    const totalResultsEl = document.createElement("p");
+    totalResultsEl.textContent = `Total results: ${outbounds.length}`;
+    totalResultsEl.className = "text-lg font-semibold text-[#20006D] mb-4";
+    resultsDiv.appendChild(totalResultsEl);
   
-    // Render the outbound flight (normal appearance)
-    const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
-    resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
-  
-    // Render each return flight
-    if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-      outbound.returnFlights.forEach((ret, idx) => {
-        // Compute stopover duration: difference between inbound's first departure and outbound's final arrival
-        const outboundLastArrival = outbound.segments[outbound.segments.length - 1].arrivalDate;
-        const inboundFirstDeparture = ret.segments[0].departureDate;
-        const stopoverMs = inboundFirstDeparture - outboundLastArrival;
-        const stopoverMinutes = Math.round(stopoverMs / 60000);
-        const sh = Math.floor(stopoverMinutes / 60);
-        const sm = stopoverMinutes % 60;
-        const stopoverText = `Stopover: ${sh}h ${sm}m`;
-  
-        // Render the inbound flight block with a label and extra info showing the stopover
-        const inboundHtml = renderRouteBlock(ret, `Return Flight ${idx + 1}`, stopoverText);
-        resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
-      });
-    } else {
-      if (debug) console.warn("No return flights found for this outbound route.");
-    }
-  }
+    outbounds.forEach(outbound => {
+      // Render outbound flight block
+      const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
+      resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
+      // Render each return flight (if any) with computed stopover time
+      if (outbound.returnFlights && outbound.returnFlights.length > 0) {
+        outbound.returnFlights.forEach((ret, idx) => {
+          const outboundLastArrival = outbound.segments[outbound.segments.length - 1].arrivalDate;
+          const inboundFirstDeparture = ret.segments[0].departureDate;
+          const stopoverMs = inboundFirstDeparture - outboundLastArrival;
+          const stopoverMinutes = Math.round(stopoverMs / 60000);
+          const sh = Math.floor(stopoverMinutes / 60);
+          const sm = stopoverMinutes % 60;
+          const stopoverText = `Stopover: ${sh}h ${sm}m`;
+          const inboundHtml = renderRouteBlock(ret, `Return Flight ${idx + 1}`, stopoverText);
+          resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
+        });
+      } else {
+        if (debug) console.warn("No return flights found for outbound route:", outbound);
+      }
+    });
+  }  
   
   function formatDurationDetailed(totalMinutes) {
     const days = Math.floor(totalMinutes / (60 * 24));
@@ -1916,51 +1928,65 @@ import {
   // ---------------- Sorting Results on Change ----------------
   document.getElementById("sort-select").addEventListener("change", function () {
     const sortOption = document.getElementById("sort-select").value;
-    // Check trip type – assuming you set window.currentTripType earlier
+    
+    if (sortOption === "default") {
+      // Restore original order using stored index.
+      globalResults.sort((a, b) => a.originalIndex - b.originalIndex);
+    } else if (sortOption === "departure") {
+      // Sort by first segment's departure time.
+      globalResults.sort((a, b) => a.firstDeparture - b.firstDeparture);
+    } else if (sortOption === "airport") {
+      // Sort by departure airport (first element in route).
+      globalResults.sort((a, b) => {
+        let nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
+        let nameB = (airportNames[b.route[0]] || b.route[0]).toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+    } else if (sortOption === "arrival") {
+      // For round-trip flights, if a return flight exists, use its final airport.
+      globalResults.sort((a, b) => {
+        const getFinalArrival = (flight) => {
+          if (flight.returnFlights && flight.returnFlights.length > 0) {
+            return flight.returnFlights[0].route[flight.returnFlights[0].route.length - 1];
+          } else {
+            return flight.route[flight.route.length - 1];
+          }
+        };
+        let arrivalA = getFinalArrival(a);
+        let arrivalB = getFinalArrival(b);
+        let nameA = (airportNames[arrivalA] || arrivalA).toLowerCase();
+        let nameB = (airportNames[arrivalB] || arrivalB).toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+    } else if (sortOption === "duration") {
+      // For return flights, sort by stopover duration; for others, sort by totalDuration.
+      globalResults.sort((a, b) => {
+        let durationA, durationB;
+        if (a.returnFlights && a.returnFlights.length > 0) {
+          const outboundLastArrivalA = a.segments[a.segments.length - 1].arrivalDate;
+          const inboundFirstDepartureA = a.returnFlights[0].segments[0].departureDate;
+          durationA = (inboundFirstDepartureA - outboundLastArrivalA) / 60000;
+        } else {
+          durationA = a.totalDuration;
+        }
+        if (b.returnFlights && b.returnFlights.length > 0) {
+          const outboundLastArrivalB = b.segments[b.segments.length - 1].arrivalDate;
+          const inboundFirstDepartureB = b.returnFlights[0].segments[0].departureDate;
+          durationB = (inboundFirstDepartureB - outboundLastArrivalB) / 60000;
+        } else {
+          durationB = b.totalDuration;
+        }
+        return durationA - durationB;
+      });
+    }
+  
+    // Re-render results based on trip type.
+    const resultsDiv = document.querySelector(".route-list");
+    resultsDiv.innerHTML = "";
     if (window.currentTripType === "return") {
-      // Apply sorting to round-trip results
-      if (sortOption === "departure") {
-        globalResults.sort((a, b) => a.firstDeparture - b.firstDeparture);
-      } else if (sortOption === "duration") {
-        globalResults.sort((a, b) => a.totalDuration - b.totalDuration);
-      } else if (sortOption === "airport") {
-        globalResults.sort((a, b) => {
-          let nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
-          let nameB = (airportNames[b.route[0]] || b.route[0]).toLowerCase();
-          return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
-        });
-      } else if (sortOption === "arrival") {
-        globalResults.sort((a, b) => {
-          let arrivalA = a.route[a.route.length - 1];
-          let arrivalB = b.route[b.route.length - 1];
-          let nameA = (airportNames[arrivalA] || arrivalA).toLowerCase();
-          let nameB = (airportNames[arrivalB] || arrivalB).toLowerCase();
-          return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
-        });
-      }
-      // Render round-trip results (grouped outbound and return flights)
-      displayRoundTripResults(globalResults);
+      displayRoundTripResultsAll(globalResults);
     } else {
-      // One-way sorting logic remains the same
-      if (sortOption === "departure") {
-        globalResults.sort((a, b) => a.firstDeparture - b.firstDeparture);
-      } else if (sortOption === "duration") {
-        globalResults.sort((a, b) => a.totalDuration - b.totalDuration);
-      } else if (sortOption === "airport") {
-        globalResults.sort((a, b) => {
-          let nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
-          let nameB = (airportNames[b.route[0]] || b.route[0]).toLowerCase();
-          return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
-        });
-      } else if (sortOption === "arrival") {
-        globalResults.sort((a, b) => {
-          let arrivalA = a.route[a.route.length - 1];
-          let arrivalB = b.route[b.route.length - 1];
-          let nameA = (airportNames[arrivalA] || arrivalA).toLowerCase();
-          let nameB = (airportNames[arrivalB] || arrivalB).toLowerCase();
-          return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
-        });
-      }
       displayGlobalResults(globalResults);
     }
   });
+  
