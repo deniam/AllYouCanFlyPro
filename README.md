@@ -1,7 +1,10 @@
 # All You Can Fly Pro
 
 All You Can Fly Pro is a Chrome extension that automates the search for available flight routes and provides enhanced features such as multi-connection routes, return routes, comprehensive route search, and country-based search. This extension is designed to streamline your flight search experience by offering additional functionalities not available on the original website.
-![All You Can Fly Pro](assets/screenshot.png)
+
+<img src="assets/screenshot.png" alt="All You Can Fly Pro" width="200">
+
+
 ## Features
 - Search for available flight routes with advanced filters.
 - Support for one-way and return trips.

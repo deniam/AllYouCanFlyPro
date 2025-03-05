@@ -21,7 +21,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let debug = false;
+  let debug = true;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -504,9 +504,14 @@ import {
     }
   }
   function validateConnection(prevSegment, nextSegment) {
+    const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
+    const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 1440;
+
     const connectionTime = (nextSegment.departureDate - prevSegment.arrivalDate) / 60000;
-    return connectionTime >= MIN_CONNECTION_MINUTES;
-  }
+
+    return connectionTime >= minConnection && connectionTime <= maxConnection;
+}
+
   // ---------------- Global Results Display Functions ----------------
   function appendRouteToDisplay(routeObj) {
     if (!routeObj.route || !Array.isArray(routeObj.route) || routeObj.route.length < 2) {
@@ -1418,7 +1423,12 @@ import {
     optionsContainer.classList.toggle("hidden");
   }
   function handleClearCache() {
-    localStorage.clear();
+    localStorage.removeItem("wizz_page_data");  
+    localStorage.removeItem("candidate_cache"); 
+    localStorage.removeItem("cacheLifetimeHours");
+    localStorage.removeItem("maxRequestsInRow");
+    localStorage.removeItem("requestsFrequencyMs");
+    localStorage.removeItem("pauseDurationSeconds");
     showNotification("Cache successfully cleared! ✅");
   }
   function showNotification(message) {
@@ -1436,7 +1446,10 @@ import {
       setTimeout(() => banner.classList.add("hidden"), 300); // Fully hide
     }, 3000);
   }  
-  
+  function formatFlightCode(code) {
+    if (!code || code.length < 3) return code;
+    return code.slice(0, 2) + ' ' + code.slice(2);
+  }
   function formatFlightDate(date) {
     if (!date) return "";
     const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
@@ -1471,7 +1484,7 @@ import {
           ${flightDate}
         </div>
         <div class="text-xs font-semibold bg-[#20006D] text-white px-2 py-1 rounded">
-          ${segment.flightCode}
+          ${formatFlightCode(segment.flightCode)}
         </div>
       </div>
     `;
@@ -1590,8 +1603,16 @@ import {
           const connectionMinutes = Math.round(connectionMs / 60000);
           const ch = Math.floor(connectionMinutes / 60);
           const cm = connectionMinutes % 60;
-          html += `<div class="text-center text-sm text-gray-500 my-2">Connection: ${ch}h ${cm}m</div>`;
-        }
+          html += `
+          <div class="flex items-center my-2">
+            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
+            <div class="px-3 text-sm text-gray-500 whitespace-nowrap">
+              Connection: ${ch}h ${cm}m
+            </div>
+            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
+          </div>
+        `;
+                }
       });
     }
   
@@ -1769,46 +1790,78 @@ import {
   }
   // ---------------- Initialize on DOMContentLoaded ----------------
   
-  document.addEventListener("DOMContentLoaded", function () {
-    const originInput = document.getElementById("origin-input");
-    const preferredAirportInput = document.getElementById("preferred-airport");
-    const updatePreferredButton = document.getElementById("update-preferred-airport");
-
-    // Load the preferred airport from localStorage and set it as the default departure
-    const savedPreferredAirport = localStorage.getItem("preferredAirport");
-    if (savedPreferredAirport) {
-        originInput.value = savedPreferredAirport;
-        preferredAirportInput.value = savedPreferredAirport;
-    }
-
-    // Save the preferred airport when the "Update" button is clicked
-    updatePreferredButton.addEventListener("click", function () {
-        const preferredAirport = preferredAirportInput.value.trim();
-        if (!preferredAirport) {
-          showNotification("Please enter a valid airport. ⚠️");
-          return;
-        }
-        localStorage.setItem("preferredAirport", preferredAirport);
-        showNotification(`Preferred airport updated to: ${preferredAirport} ✈️`);
-      });
-    // Setup autocomplete for the preferred airport input
+  document.addEventListener("DOMContentLoaded", () => {
+    // === 1. Load settings from localStorage ===
+    const storedPreferredAirport = localStorage.getItem("preferredAirport") || "";
+    document.getElementById("preferred-airport").value = storedPreferredAirport;
+    document.getElementById("origin-input").value = storedPreferredAirport;
+    document.getElementById("min-connection-time").value = localStorage.getItem("minConnectionTime") || 90;
+    document.getElementById("max-connection-time").value = localStorage.getItem("maxConnectionTime") || 360;
+    document.getElementById("max-requests").value = localStorage.getItem("maxRequestsInRow") || 25;
+    document.getElementById("requests-frequency").value = localStorage.getItem("requestsFrequencyMs") || 600;
+    document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
+    document.getElementById("cache-lifetime").value = localStorage.getItem("cacheLifetimeHours") || 4;
+  
+    // Toggle Expert Settings inside Options Panel
+    document.getElementById("toggle-expert-settings").addEventListener("click", (event) => {
+      const expertSettings = document.getElementById("expert-settings");
+      if (expertSettings.classList.contains("hidden")) {
+        expertSettings.classList.remove("hidden");
+        event.target.textContent = "Hide Expert Settings";
+      } else {
+        expertSettings.classList.add("hidden");
+        event.target.textContent = "Show Expert Settings";
+      }
+    });
+    // === 2. Setup the multi-functional Update button ===
+    const updateButton = document.getElementById("update-preferred-airport");
+    updateButton.addEventListener("click", () => {
+      const preferredAirport = document.getElementById("preferred-airport").value.trim();
+      if (!preferredAirport) {
+        showNotification("Please enter a valid airport. ⚠️");
+        return;
+      }
+      // Save preferred airport
+      localStorage.setItem("preferredAirport", preferredAirport);
+      document.getElementById("origin-input").value = preferredAirport;
+  
+      // Save additional settings
+      const minConn = document.getElementById("min-connection-time").value;
+      localStorage.setItem("minConnectionTime", minConn);
+      const maxConn = document.getElementById("max-connection-time").value;
+      localStorage.setItem("maxConnectionTime", maxConn);
+      const maxReq = document.getElementById("max-requests").value;
+      localStorage.setItem("maxRequestsInRow", maxReq);
+      const reqFreq = document.getElementById("requests-frequency").value;
+      localStorage.setItem("requestsFrequencyMs", reqFreq);
+      const pauseDur = document.getElementById("pause-duration").value;
+      localStorage.setItem("pauseDurationSeconds", pauseDur);
+      const cacheLife = document.getElementById("cache-lifetime").value;
+      localStorage.setItem("cacheLifetimeHours", cacheLife);
+  
+      showNotification(`Settings updated successfully! ✅`);
+    });
+  
+    // === 3. Setup autocomplete for inputs ===
     setupAutocomplete("preferred-airport", "airport-suggestions-preferred");
-  });
-  document.addEventListener("DOMContentLoaded", function () {
+    setupAutocomplete("origin-input", "airport-suggestions-origin");
+    setupAutocomplete("destination-input", "airport-suggestions-dest");
+  
+    // === 4. Initialize calendars ===
     initMultiCalendar("departure-date", "departure-calendar-popup", 3);
     initMultiCalendar("return-date", "return-calendar-popup", 3);
+  
+    // === 5. Setup date input event handlers ===
     document.getElementById("departure-date").addEventListener("change", () => {
       const departureVal = document.getElementById("departure-date").value.trim();
       const returnInput = document.getElementById("return-date");
       if (departureVal) {
-        // Enable return input when a departure date is chosen.
         returnInput.disabled = false;
-        // Optionally, update the return calendar with a new minimum date:
         updateReturnCalendarMinDate(departureVal);
       } else {
         returnInput.disabled = true;
       }
-    });    
+    });
     document.getElementById("return-date").addEventListener("click", (e) => {
       const departureVal = document.getElementById("departure-date").value.trim();
       if (!departureVal) {
@@ -1816,11 +1869,10 @@ import {
         alert("Please select a departure date first.");
       }
     });
-    
+    // Function for updating return calendar minimum date
     function updateReturnCalendarMinDate(departureDateStr) {
       const returnCalendarPopup = document.getElementById("return-calendar-popup");
       const minDate = parseLocalDate(departureDateStr);
-      // Re-render the return calendar using the local date's year and month.
       renderCalendarMonth(
         returnCalendarPopup,
         "return-date",
@@ -1830,10 +1882,9 @@ import {
         new Set(),
         departureDateStr
       );
-    }       
-    
-    setupAutocomplete("origin-input", "airport-suggestions-origin");
-    setupAutocomplete("destination-input", "airport-suggestions-dest");
+    }
+  
+    // === 6. Setup other event handlers ===
     document.getElementById("search-button").addEventListener("click", handleSearch);
     document.getElementById("max-requests").addEventListener("change", updateThrottleSettings);
     document.getElementById("requests-frequency").addEventListener("change", updateThrottleSettings);
@@ -1842,53 +1893,27 @@ import {
     document.getElementById("clear-cache-button").addEventListener("click", handleClearCache);
     document.getElementById("swap-button").addEventListener("click", swapInputs);
     document.getElementById("toggle-options").addEventListener("click", toggleOptions);
-    loadSettings();
-  });
-  document.addEventListener("DOMContentLoaded", function () {
-    const optionsBtn = document.getElementById("toggle-options");
   
-    optionsBtn.addEventListener("click", function () {
+    // === 7. Options button styling ===
+    const optionsBtn = document.getElementById("toggle-options");
+    optionsBtn.addEventListener("click", () => {
       optionsBtn.classList.remove("bg-[#C90076]");
       optionsBtn.classList.add("bg-[#20006D]");
       optionsBtn.blur();
     });
-  
-    optionsBtn.addEventListener("focus", function () {
+    optionsBtn.addEventListener("focus", () => {
       optionsBtn.classList.add("bg-[#C90076]");
     });
-  
-    optionsBtn.addEventListener("blur", function () {
+    optionsBtn.addEventListener("blur", () => {
       optionsBtn.classList.remove("bg-[#C90076]");
       optionsBtn.classList.add("bg-[#20006D]");
     });
-  });  
-  document.getElementById("update-preferred-airport").addEventListener("click", () => {
-  const preferredAirportInput = document.getElementById("preferred-airport");
-  const preferredAirport = preferredAirportInput.value.trim();
-  const originInput = document.getElementById("origin-input");
-  if (!preferredAirport) {
-      showNotification("Please enter a valid airport. ⚠️", "error");
-      return;
-  }
-  document.addEventListener("DOMContentLoaded", () => {
-    const storedPreferredAirport = localStorage.getItem("preferredAirport");
-    if (storedPreferredAirport) {
-        document.getElementById("origin-input").value = storedPreferredAirport;
-    }
-  });
-  // Save to localStorage
-  localStorage.setItem("preferredAirport", preferredAirport);
-  // Update departure input instantly
-  originInput.value = preferredAirport;
-  showNotification(`Preferred airport updated to: ${preferredAirport} ✈️`);
-  });
-  document.addEventListener("DOMContentLoaded", function () {
+  
+    // === 8. Trip type switching (oneway / return) ===
     const onewayBtn = document.getElementById("oneway-btn");
     const returnBtn = document.getElementById("return-btn");
     const returnDateContainer = document.getElementById("return-date-container");
-    // Set initial trip type (One-way is selected by default, purple)
     window.currentTripType = "oneway";
-
     function toggleTripType(selectedType) {
       window.currentTripType = selectedType;
       if (selectedType === "oneway") {
@@ -1905,7 +1930,6 @@ import {
         returnDateContainer.style.display = "block";
       }
     }
-  
     onewayBtn.addEventListener("click", () => {
       toggleTripType("oneway");
       onewayBtn.blur();
@@ -1914,79 +1938,69 @@ import {
       toggleTripType("return");
       returnBtn.blur();
     });
-  });
-  // ---------------- UI Scale Change ----------------
-  document.addEventListener("DOMContentLoaded", function () {
+  
+    // === 9. UI Scale change ===
     const scaleSlider = document.getElementById("ui-scale");
-    // Set default scale to 85% on load
-    document.body.style.zoom = scaleSlider.value / 100; 
-    // Update zoom in real time as the slider is dragged
+    document.body.style.zoom = scaleSlider.value / 100;
     scaleSlider.addEventListener("input", function() {
       document.body.style.zoom = this.value / 100;
     });
-  }); 
-  // ---------------- Sorting Results on Change ----------------
-  document.getElementById("sort-select").addEventListener("change", function () {
-    const sortOption = document.getElementById("sort-select").value;
-    
-    if (sortOption === "default") {
-      // Restore original order using stored index.
-      globalResults.sort((a, b) => a.originalIndex - b.originalIndex);
-    } else if (sortOption === "departure") {
-      // Sort by first segment's departure time.
-      globalResults.sort((a, b) => a.firstDeparture - b.firstDeparture);
-    } else if (sortOption === "airport") {
-      // Sort by departure airport (first element in route).
-      globalResults.sort((a, b) => {
-        let nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
-        let nameB = (airportNames[b.route[0]] || b.route[0]).toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
-    } else if (sortOption === "arrival") {
-      // For round-trip flights, if a return flight exists, use its final airport.
-      globalResults.sort((a, b) => {
-        const getFinalArrival = (flight) => {
-          if (flight.returnFlights && flight.returnFlights.length > 0) {
-            return flight.returnFlights[0].route[flight.returnFlights[0].route.length - 1];
-          } else {
-            return flight.route[flight.route.length - 1];
-          }
-        };
-        let arrivalA = getFinalArrival(a);
-        let arrivalB = getFinalArrival(b);
-        let nameA = (airportNames[arrivalA] || arrivalA).toLowerCase();
-        let nameB = (airportNames[arrivalB] || arrivalB).toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
-    } else if (sortOption === "duration") {
-      // For return flights, sort by stopover duration; for others, sort by totalDuration.
-      globalResults.sort((a, b) => {
-        let durationA, durationB;
-        if (a.returnFlights && a.returnFlights.length > 0) {
-          const outboundLastArrivalA = a.segments[a.segments.length - 1].arrivalDate;
-          const inboundFirstDepartureA = a.returnFlights[0].segments[0].departureDate;
-          durationA = (inboundFirstDepartureA - outboundLastArrivalA) / 60000;
-        } else {
-          durationA = a.totalDuration;
-        }
-        if (b.returnFlights && b.returnFlights.length > 0) {
-          const outboundLastArrivalB = b.segments[b.segments.length - 1].arrivalDate;
-          const inboundFirstDepartureB = b.returnFlights[0].segments[0].departureDate;
-          durationB = (inboundFirstDepartureB - outboundLastArrivalB) / 60000;
-        } else {
-          durationB = b.totalDuration;
-        }
-        return durationA - durationB;
-      });
-    }
   
-    // Re-render results based on trip type.
-    const resultsDiv = document.querySelector(".route-list");
-    resultsDiv.innerHTML = "";
-    if (window.currentTripType === "return") {
-      displayRoundTripResultsAll(globalResults);
-    } else {
-      displayGlobalResults(globalResults);
-    }
+    // === 10. Sorting results handler ===
+    document.getElementById("sort-select").addEventListener("change", function () {
+      const sortOption = document.getElementById("sort-select").value;
+      if (sortOption === "default") {
+        globalResults.sort((a, b) => a.originalIndex - b.originalIndex);
+      } else if (sortOption === "departure") {
+        globalResults.sort((a, b) => a.firstDeparture - b.firstDeparture);
+      } else if (sortOption === "airport") {
+        globalResults.sort((a, b) => {
+          let nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
+          let nameB = (airportNames[b.route[0]] || b.route[0]).toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+      } else if (sortOption === "arrival") {
+        globalResults.sort((a, b) => {
+          const getFinalArrival = (flight) => {
+            if (flight.returnFlights && flight.returnFlights.length > 0) {
+              return flight.returnFlights[0].route[flight.returnFlights[0].route.length - 1];
+            } else {
+              return flight.route[flight.route.length - 1];
+            }
+          };
+          let arrivalA = getFinalArrival(a);
+          let arrivalB = getFinalArrival(b);
+          let nameA = (airportNames[arrivalA] || arrivalA).toLowerCase();
+          let nameB = (airportNames[arrivalB] || arrivalB).toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+      } else if (sortOption === "duration") {
+        globalResults.sort((a, b) => {
+          let durationA, durationB;
+          if (a.returnFlights && a.returnFlights.length > 0) {
+            const outboundLastArrivalA = a.segments[a.segments.length - 1].arrivalDate;
+            const inboundFirstDepartureA = a.returnFlights[0].segments[0].departureDate;
+            durationA = (inboundFirstDepartureA - outboundLastArrivalA) / 60000;
+          } else {
+            durationA = a.totalDuration;
+          }
+          if (b.returnFlights && b.returnFlights.length > 0) {
+            const outboundLastArrivalB = b.segments[b.segments.length - 1].arrivalDate;
+            const inboundFirstDepartureB = b.returnFlights[0].segments[0].departureDate;
+            durationB = (inboundFirstDepartureB - outboundLastArrivalB) / 60000;
+          } else {
+            durationB = b.totalDuration;
+          }
+          return durationA - durationB;
+        });
+      }
+      const resultsDiv = document.querySelector(".route-list");
+      resultsDiv.innerHTML = "";
+      if (window.currentTripType === "return") {
+        displayRoundTripResultsAll(globalResults);
+      } else {
+        displayGlobalResults(globalResults);
+      }
+    });
   });
   
