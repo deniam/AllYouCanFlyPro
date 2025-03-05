@@ -73,3 +73,5 @@ Contributions are welcome! Please submit pull requests for any bug fixes or enha
 
 ### Disclaimer
 All You Can Fly Pro is an independent project and is not affiliated with any airline or third-party service. The extension uses data from public sources and is provided as-is without any warranty.
+
+This extension does not collect or store any personal data. All user input remains local and is not shared with third parties.
