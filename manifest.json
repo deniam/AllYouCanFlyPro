@@ -1,7 +1,7 @@
     {
         "manifest_version": 3,
         "name": "All You Can Fly Pro",
-        "description": "A Chrome extension to automate flight route search with enhanced features including multi-connection routes, return routes, and comprehensive country-based search.",
+        "description": "A Chrome extension for automated flight route searches, including multi-connection and return routes.",
         "version": "1.0.0",
         "permissions": [
             "activeTab",
