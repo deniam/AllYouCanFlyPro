@@ -141,7 +141,7 @@
 
       <!-- Options Toggle (Entire Options Hidden by Default) -->
       <div class="mb-4">
-        <button id="toggle-options" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#20006D] text-white rounded hover:bg-[#A00065] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+        <button id="toggle-options" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#20006D] text-white rounded hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
           </svg>
@@ -276,31 +276,5 @@
 
   <!-- Main App Logic -->
   <script type="module" src="src/app.js"></script>
-  <!-- Options Toggle Script -->
-  <script>
-    // Toggle entire Options Panel
-    document.getElementById("toggle-options").addEventListener("click", (event) => {
-      const optionsContainer = document.getElementById("options-container");
-      if (optionsContainer.classList.contains("hidden")) {
-        optionsContainer.classList.remove("hidden");
-        event.target.textContent = "Hide Options";
-      } else {
-        optionsContainer.classList.add("hidden");
-        event.target.textContent = "Options";
-      }
-    });
-
-    // Toggle Expert Settings inside Options Panel
-    document.getElementById("toggle-expert-settings").addEventListener("click", (event) => {
-      const expertSettings = document.getElementById("expert-settings");
-      if (expertSettings.classList.contains("hidden")) {
-        expertSettings.classList.remove("hidden");
-        event.target.textContent = "Hide Expert Settings";
-      } else {
-        expertSettings.classList.add("hidden");
-        event.target.textContent = "Show Expert Settings";
-      }
-    });
-  </script>
 </body>
 </html>
