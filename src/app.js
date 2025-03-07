@@ -1134,15 +1134,40 @@ async function checkRouteSegment(origin, destination, date) {
       let processed = 0;
       updateProgress(processed, totalArrivals, `Checking direct flights for ${origin}`);
       
-      const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
-        ? routeData.arrivalStations
-        : routeData.arrivalStations.filter(arr => {
+      const transformAirports = (destinations, AIRPORTS) => {
+        return destinations.map(code => {
+            const match = AIRPORTS.find(airport => airport.code === code);
+            return {
+                id: code,
+                name: match ? match.name : `Unknown Airport (${code})`,
+                description: code
+            };
+        });
+    };
+    
+    const getMatchingArrivals = (destinations, routeData, AIRPORTS) => {
+        if (destinations.length === 1 && destinations[0] === "ANY") {
+            return routeData.arrivalStations;
+        }
+    
+        let matchingArrivals = routeData.arrivalStations.filter(arr => {
             const arrCode = typeof arr === "object" ? arr.id : arr;
             return destinations.includes(arrCode);
-          });
-      
-      for (const arrival of matchingArrivals) {
-        console.log("arrival:", arrival);
+        });
+    
+        const existingCodes = matchingArrivals.map(arr => typeof arr === "object" ? arr.id : arr);
+        const missingDestinations = destinations.filter(dest => !existingCodes.includes(dest));
+    
+        if (missingDestinations.length > 0) {
+            matchingArrivals = [...matchingArrivals, ...transformAirports(missingDestinations, AIRPORTS)];
+        }
+    
+        return matchingArrivals;
+    };
+        const finalArrivals = getMatchingArrivals(destinations, routeData, AIRPORTS);
+
+        
+      for (const arrival of finalArrivals) {
         if (searchCancelled) break;
         let arrivalCode = arrival.id || arrival;
         if (isExcludedRoute(origin, arrivalCode)) {
