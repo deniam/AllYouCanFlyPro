@@ -1612,7 +1612,7 @@ function createSegmentRow(segment) {
       <div class="flex justify-center">
         <span class="text-xl font-medium">✈</span>
       </div>
-      <div class="flex items-center justify-end gap-1 whitespace-nowrap">
+      <div class="flex items-center justify-end gap-1 whitespace-nowrap mb-0">
         <span class="text-base font-medium">${segment.arrivalStationText}</span>
         <span class="text-xl">${getCountryFlag(segment.arrivalStation)}</span>
       </div>
@@ -1625,7 +1625,7 @@ function createSegmentRow(segment) {
           ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
         </div>
       </div>
-      <div class="flex items-center justify-end gap-0">
+      <div class="flex items-center justify-end gap-1">
         <span class="text-2xl font-bold whitespace-nowrap mb-0">${segment.displayArrival}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.arrivalOffset)}</sup>
       </div>

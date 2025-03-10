@@ -214,6 +214,16 @@ export const AIRPORTS = [
 ];
 
 export const COUNTRY_AIRPORTS = {
+    "Venice": ["TSF", "VCE"],
+    "Warsaw": ["RDO", "WAW"],
+    "Brussels": ["BRU", "CRL"],
+    "Bucharest": ["BBU", "OTP"],
+    "Oslo": ["TRF", "OSL"],
+    "Rome": ["CIA", "FCO"],
+    "Milan": ["BGY", "MXP"],
+    "Paris": ["BVA", "ORY"],
+    "Stockholm": ["ARN", "NYO"],
+    "London": ["LTN", "LGW"],
     "London": ["LTN", "LGW"],
     "Albania": ["TIA"],
     "Armenia": ["EVN"],
