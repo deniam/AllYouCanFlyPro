@@ -20,7 +20,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let debug = true;
+  let debug = false;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -744,7 +744,7 @@ async function checkRouteSegment(origin, destination, date) {
 
       const responseData = await fetchResponse.json();
       if (debug) console.log(`Response for segment ${origin} → ${destination}:`, responseData);
-      console.log(responseData.flightsOutbound)
+      if (debug) console.log(responseData.flightsOutbound)
       return responseData.flightsOutbound || [];
       
     } catch (error) {
@@ -999,14 +999,30 @@ function appendRouteToDisplay(routeObj) {
     // --- Updated searchConnectingRoutes ---
   // Searches for connecting (multi‑leg) routes.
   // Uses the "overnight-checkbox" value to decide if connecting flights must depart on the same day as selected.
+  function addDays(date, days) {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+  }
+  
   async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers) {
     const routesData = await fetchDestinations();
+    // Get user-defined connection times (in minutes); default to 90 and 360 if not set.
+    const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
+    const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
     const allowOvernight = document.getElementById("overnight-checkbox").checked;
+  
+    // Booking horizon: do not search beyond today + 3 days.
+    const bookingHorizon = new Date();
+    bookingHorizon.setDate(bookingHorizon.getDate() + 3);
+  
+    // If origins is "ANY", use all available departure airports.
     if (origins.length === 1 && origins[0] === "ANY") {
       origins = [...new Set(routesData.map(route =>
         typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
       ))];
     }
+    // Build destination list.
     let destinationList = [];
     if (destinations.length === 1 && destinations[0] === "ANY") {
       const destSet = new Set();
@@ -1021,6 +1037,7 @@ function appendRouteToDisplay(routeObj) {
     } else {
       destinationList = destinations;
     }
+    
     const graph = buildGraph(routesData);
     let candidateRoutes = [];
     origins.forEach(origin => {
@@ -1029,59 +1046,93 @@ function appendRouteToDisplay(routeObj) {
     const totalCandidates = candidateRoutes.length;
     let processedCandidates = 0;
     updateProgress(processedCandidates, totalCandidates, "Processing routes");
+    
     const aggregatedResults = [];
+    // Process each candidate route.
     for (const candidate of candidateRoutes) {
       if (searchCancelled) break;
       let validCandidate = true;
       let unifiedFlights = [];
       let previousFlight = null;
-      let currentSegmentDate = selectedDate;
+      // currentSegmentDate starts as the selectedDate (converted to Date)
+      let currentSegmentDate = new Date(selectedDate);
+      
+      // Determine candidate transfer count (number of transfers = candidate.length - 2)
+      const transferCount = candidate.length - 2;
+      // For one-transfer routes when overnight isn't allowed, restrict search to same day.
+      const baseMaxDays = (transferCount === 1 && !allowOvernight)
+        ? 0
+        : Math.ceil(maxConnection / 1440);
+      
+      // Process each leg in the candidate route.
       for (let i = 0; i < candidate.length - 1; i++) {
         if (searchCancelled) break;
         const segOrigin = candidate[i];
         const segDestination = candidate[i + 1];
-        const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, currentSegmentDate);
-        let flights = getCachedResults(cacheKey);
-        if (!flights) {
-          try {
-            flights = await checkRouteSegment(segOrigin, segDestination, currentSegmentDate);
-            flights = flights.map(unifyRawFlight);
-            setCachedResults(cacheKey, flights);
-          } catch (error) {
-            validCandidate = false;
-            break;
-          }
-        } else {
-          flights = flights.map(unifyRawFlight);
-        }
-        if (!allowOvernight) {
-          flights = flights.filter(f =>
-            getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === selectedDate
-          );
-        }
-        if (previousFlight) {
-          const prevArrival = previousFlight.calculatedDuration.arrivalDate.getTime();
-          flights = flights.filter(f => f.calculatedDuration.departureDate.getTime() >= prevArrival);
-        }
+        
         let chosenFlight = null;
-        for (const flightCandidate of flights) {
-          if (!previousFlight || (flightCandidate.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime() >= MIN_CONNECTION_MINUTES * 60000)) {
-            chosenFlight = flightCandidate;
+        let dayOffsetUsed = 0;
+        
+        // Try offsets from 0 up to baseMaxDays.
+        for (let offset = 0; offset <= baseMaxDays; offset++) {
+          const dateToSearch = addDays(currentSegmentDate, offset);
+          // Enforce booking horizon.
+          if (dateToSearch > bookingHorizon) {
+            break;
+          }
+          const dateStr = dateToSearch.toISOString().slice(0, 10);
+          // Throttle before each API call.
+          await throttleRequest();
+          const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
+          let flights = getCachedResults(cacheKey);
+          if (!flights) {
+            try {
+              flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
+              flights = flights.map(unifyRawFlight);
+              setCachedResults(cacheKey, flights);
+            } catch (error) {
+              flights = [];
+            }
+          } else {
+            flights = flights.map(unifyRawFlight);
+          }
+          
+          // For one-transfer routes without overnight allowed, restrict to the same searched date.
+          if (!allowOvernight && transferCount === 1) {
+            flights = flights.filter(f =>
+              getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === dateStr
+            );
+          }
+          
+          // If there is a previous flight, filter flights so the connection time is within bounds.
+          if (previousFlight) {
+            flights = flights.filter(f => {
+              const connectionTime = (f.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime()) / 60000;
+              return connectionTime >= minConnection && connectionTime <= maxConnection;
+            });
+          }
+          
+          if (flights.length > 0) {
+            chosenFlight = flights[0];
+            dayOffsetUsed = offset;
             break;
           }
         }
+        
         if (!chosenFlight) {
           validCandidate = false;
           break;
         }
+        
         unifiedFlights.push(chosenFlight);
         previousFlight = chosenFlight;
-        if (allowOvernight) {
-          currentSegmentDate = getLocalDateFromOffset(chosenFlight.calculatedDuration.arrivalDate, chosenFlight.arrivalOffsetText);
-        }
+        // Update currentSegmentDate by the day offset used.
+        currentSegmentDate = addDays(currentSegmentDate, dayOffsetUsed);
       }
+      
       processedCandidates++;
       updateProgress(processedCandidates, totalCandidates, `Processed candidate: ${candidate.join(" → ")}`);
+      
       if (validCandidate && unifiedFlights.length === candidate.length - 1) {
         const firstFlight = unifiedFlights[0];
         const lastFlight = unifiedFlights[unifiedFlights.length - 1];
@@ -1136,7 +1187,7 @@ function appendRouteToDisplay(routeObj) {
           formattedFlightDate: formatFlightDateCombined(firstFlight.calculatedDuration.departureDate, lastFlight.calculatedDuration.arrivalDate),
           route: [unifiedFlights[0].departureStationText, unifiedFlights[unifiedFlights.length - 1].arrivalStationText],
           totalConnectionTime: totalConnectionTime,
-          segments: unifiedFlights // Save each leg for detailed rendering
+          segments: unifiedFlights
         };
         appendRouteToDisplay(aggregatedRoute);
         aggregatedResults.push(aggregatedRoute);
@@ -1146,7 +1197,6 @@ function appendRouteToDisplay(routeObj) {
     return aggregatedResults;
   }
   
-
     // --- Updated searchDirectRoutes ---
   // Searches for direct (non‑connecting) flights using only the server–provided arrival stations.
   async function searchDirectRoutes(origins, destinations, selectedDate) {
@@ -1702,6 +1752,10 @@ function createSegmentRow(segment) {
         dateCell.classList.add("bg-pink-50");
       }
       dateCell.textContent = d;
+
+      if (selectedDates.has(dateStr)) {
+        dateCell.classList.add("bg-blue-300");
+      }
   
       if (cellDate < minDate || cellDate > lastBookable) {
         dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
@@ -1740,27 +1794,60 @@ function createSegmentRow(segment) {
     const inputEl = document.getElementById(inputId);
     const popupEl = document.getElementById(popupId);
     if (!inputEl || !popupEl) {
-      if (debug) console.error("Calendar input/popup not found:", inputId, popupId);
+      console.error("Calendar input/popup not found:", inputId, popupId);
       return;
     }
   
-    const selectedDates = new Set();
-    const today = new Date();
+    // Default month/year to "today"
+    let today = new Date();
     let currentYear = today.getFullYear();
     let currentMonth = today.getMonth();
   
+    // When user clicks the input, show the calendar
     inputEl.addEventListener("click", (e) => {
       e.stopPropagation();
-      renderCalendarMonth(popupEl, inputId, currentYear, currentMonth, maxDaysAhead, selectedDates);
-      popupEl.classList.toggle("hidden");
+      
+      // 1) Parse input value into a Set of selected dates
+      const rawValue = inputEl.value.trim();
+      let selectedDates = new Set();
+      if (rawValue) {
+        rawValue.split(",").map(s => s.trim()).forEach(dateStr => {
+          if (dateStr) selectedDates.add(dateStr);
+        });
+      }
+  
+      // 2) If there’s at least one selected date, jump calendar to that month
+      if (selectedDates.size > 0) {
+        const firstSelected = [...selectedDates][0];  // take the first date in the set
+        const parsedDate = parseLocalDate(firstSelected);
+        if (parsedDate.toString() !== "Invalid Date") {
+          currentYear = parsedDate.getFullYear();
+          currentMonth = parsedDate.getMonth();
+        }
+      }
+  
+      // 3) Render the calendar with the selectedDates
+      renderCalendarMonth(
+        popupEl,
+        inputId,
+        currentYear,
+        currentMonth,
+        maxDaysAhead,
+        selectedDates
+      );
+      
+      // Show the popup
+      popupEl.classList.remove("hidden");
     });
   
+    // Close the calendar if user clicks outside
     document.addEventListener("click", (e) => {
       if (!popupEl.contains(e.target) && !inputEl.contains(e.target)) {
         popupEl.classList.add("hidden");
       }
     });
   }
+  
   // ---------------- Initialize on DOMContentLoaded ----------------
   
   document.addEventListener("DOMContentLoaded", () => {
