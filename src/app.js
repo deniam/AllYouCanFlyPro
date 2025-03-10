@@ -109,87 +109,37 @@ import {
   function setupAutocomplete(inputId, suggestionsId) {
     const inputEl = document.getElementById(inputId);
     const suggestionsEl = document.getElementById(suggestionsId);
-    const RECENT_KEY = "recentAirports_" + inputId;
   
-    // Get recent entries from localStorage.
+    // Gather used airports from both origin & destination containers (lowercased).
+    function getAllUsedAirports() {
+      // Get all inputs in the origin and destination containers EXCEPT the current one.
+      const originUsed = Array.from(document.querySelectorAll("#origin-multi input"))
+        .filter(el => el.id !== inputId)
+        .map(el => el.value.trim().toLowerCase());
+      const destUsed = Array.from(document.querySelectorAll("#destination-multi input"))
+        .filter(el => el.id !== inputId)
+        .map(el => el.value.trim().toLowerCase());
+      return new Set([...originUsed, ...destUsed]);
+    }    
+  
+    // Retrieve "recent" picks for this input (optional).
     function getRecentEntries() {
+      const RECENT_KEY = "recentAirports_" + inputId;
       const stored = localStorage.getItem(RECENT_KEY);
       return stored ? JSON.parse(stored) : [];
     }
-    // Add an entry to recent entries.
     function addRecentEntry(entry) {
+      const RECENT_KEY = "recentAirports_" + inputId;
       let recents = getRecentEntries();
+      // Move it to front, remove old duplicates
       recents = recents.filter(e => e !== entry);
       recents.unshift(entry);
       if (recents.length > 5) recents = recents.slice(0, 5);
       localStorage.setItem(RECENT_KEY, JSON.stringify(recents));
     }
-    // Show a clear ("✕") button when input is not empty.
-    function updateClearButton() {
-      let clearBtn = inputEl.parentElement.querySelector('.clear-btn');
-      if (!clearBtn) {
-        clearBtn = document.createElement('span');
-        clearBtn.className = "clear-btn cursor-pointer";
-        clearBtn.textContent = "✕";
-        clearBtn.style.position = "absolute";
-        clearBtn.style.right = "10px";
-        clearBtn.style.top = "50%";
-        clearBtn.style.transform = "translateY(-50%)";
-        inputEl.parentElement.style.position = "relative";
-        inputEl.parentElement.appendChild(clearBtn);
-        clearBtn.addEventListener("click", () => {
-          inputEl.value = "";
-          updateClearButton();
-        });
-      }
-      clearBtn.style.display = inputEl.value.trim() ? "block" : "none";
-    }
-    // Show a plus ("+") button to allow adding another airport (max 3).
-    function updatePlusButton() {
-      let plusBtn = inputEl.parentElement.querySelector('.plus-btn');
-      if (!plusBtn) {
-        plusBtn = document.createElement('span');
-        plusBtn.className = "plus-btn cursor-pointer";
-        plusBtn.textContent = "+";
-        plusBtn.style.position = "absolute";
-        plusBtn.style.right = "30px";
-        plusBtn.style.top = "50%";
-        plusBtn.style.transform = "translateY(-50%)";
-        inputEl.parentElement.style.position = "relative";
-        inputEl.parentElement.appendChild(plusBtn);
-        plusBtn.addEventListener("click", () => {
-          const container = document.createElement("div");
-          container.className = "relative flex-1 mt-2"; // например, с отступом сверху
-
-          // Создаем новое текстовое поле
-          const newInput = document.createElement("input");
-          newInput.type = "text";
-          newInput.placeholder = "Additional Airport";
-          newInput.className = inputEl.className; // используем те же классы для стилей
-          newInput.id = inputId + "-extra-" + Date.now();
-
-          // Создаем элемент для подсказок (можно также вызвать setupAutocomplete для него)
-          const suggestionsDiv = document.createElement("div");
-          suggestionsDiv.id = newInput.id + "-suggestions";
-          suggestionsDiv.className = "absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 hidden text-gray-800 text-sm";
-
-          container.appendChild(newInput);
-          container.appendChild(suggestionsDiv);
-          // Добавляем контейнер под текущим полем (например, после родительского контейнера)
-          inputEl.parentElement.parentElement.appendChild(container);
-
-          // Инициализируем автодополнение для нового поля
-          setupAutocomplete(newInput.id, suggestionsDiv.id);
-
-          // Скрываем плюс в предыдущем поле, если он не нужен
-          plusBtn.style.display = "none";
-        });
-      }
-      plusBtn.style.display = "block";
-    }
   
-    inputEl.addEventListener("focus", function(e) {
-      updateClearButton();
+    // Show suggestions for "recent" if empty
+    inputEl.addEventListener("focus", () => {
       if (!inputEl.value.trim()) {
         const recent = getRecentEntries();
         if (recent.length > 0) {
@@ -198,7 +148,7 @@ import {
             const div = document.createElement("div");
             div.className = "px-4 py-2 cursor-pointer hover:bg-gray-100";
             div.textContent = entry;
-            div.addEventListener("click", function() {
+            div.addEventListener("click", () => {
               inputEl.value = entry;
               suggestionsEl.classList.add("hidden");
             });
@@ -207,32 +157,75 @@ import {
           suggestionsEl.classList.remove("hidden");
         }
       }
-      updatePlusButton();
     });
   
-    inputEl.addEventListener("input", function(e) {
-      updateClearButton();
+    // Main event: user types
+    inputEl.addEventListener("input", () => {
       const query = inputEl.value.trim().toLowerCase();
-      if (!query) return;
+      suggestionsEl.innerHTML = "";
+      if (!query) {
+        suggestionsEl.classList.add("hidden");
+        return;
+      }
+  
+      // If user typed "any", show "Anywhere"
+      if (query === "any") {
+        const div = document.createElement("div");
+        div.className = "px-4 py-2 cursor-pointer hover:bg-gray-100";
+        div.textContent = "Anywhere";
+        div.addEventListener("click", () => {
+          inputEl.value = "Anywhere";
+          addRecentEntry("Anywhere");
+          suggestionsEl.classList.add("hidden");
+        });
+        suggestionsEl.appendChild(div);
+        suggestionsEl.classList.remove("hidden");
+        return;
+      }
+  
+      // 1) Build set of used airports (lowercased)
+      const usedAirports = getAllUsedAirports();
+  
+      // 2) Filter country names
       const countryMatches = Object.keys(COUNTRY_AIRPORTS)
         .filter(country => country.toLowerCase().includes(query))
         .map(country => ({ isCountry: true, code: country, name: country }));
+  
+      // 3) Filter airport codes/names
       const airportMatches = AIRPORTS.filter(a =>
-        a.code.toLowerCase().includes(query) ||
+        a.code.toLowerCase().includes(query) || 
         a.name.toLowerCase().includes(query)
-      ).map(a => ({ isCountry: false, code: a.code, name: a.name }));
+      ).map(a => ({
+        isCountry: false,
+        code: a.code,
+        name: a.name
+      }));
+  
       let matches = [...countryMatches, ...airportMatches];
-      // Limit suggestions to 5.
+  
+      // 4) Exclude any airport that is already used in origin or destination
+      //    (We only exclude if the EXACT code or name is found in usedAirports).
+      matches = matches.filter(m => {
+        const codeLower = m.code.toLowerCase();
+        const nameLower = m.name.toLowerCase();
+        return !usedAirports.has(codeLower) && !usedAirports.has(nameLower);
+      });
+  
+      // 5) Limit suggestions to 5
       matches = matches.slice(0, 5);
-      suggestionsEl.innerHTML = "";
+  
+      // 6) Render suggestions
+      if (matches.length === 0) {
+        suggestionsEl.classList.add("hidden");
+        return;
+      }
       matches.forEach(match => {
         const div = document.createElement("div");
         div.className = "px-4 py-2 cursor-pointer hover:bg-gray-100";
-        const suggestionText = match.isCountry ? match.name : `${match.name}`;
-        div.textContent = suggestionText;
-        div.addEventListener("click", function() {
-          inputEl.value = suggestionText;
-          addRecentEntry(suggestionText);
+        div.textContent = match.name; // e.g. "Abu Dhabi (AUH)" or country
+        div.addEventListener("click", () => {
+          inputEl.value = match.name;
+          addRecentEntry(match.name);
           suggestionsEl.classList.add("hidden");
         });
         suggestionsEl.appendChild(div);
@@ -240,48 +233,51 @@ import {
       suggestionsEl.classList.remove("hidden");
     });
   
-    document.addEventListener("click", function(event) {
+    // Hide suggestions on outside click
+    document.addEventListener("click", event => {
       if (!inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
         suggestionsEl.classList.add("hidden");
       }
     });
   }
   
-  function resolveAirport(input) {
-    if (!input) return [];
-    const trimmed = input.trim();
-    if (trimmed.toLowerCase() === "any") {
-      if (debug) console.log(`Resolved "${input}" as wildcard ANY`);
-      return ["ANY"];
-    }
-    const lower = trimmed.toLowerCase();
-    if (trimmed.length === 3) {
-      const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
-      if (byCode) {
-        if (debug) console.log(`Resolved "${input}" as airport code: ${byCode.code}`);
-        return [byCode.code];
-      }
-    }
-    for (const country in COUNTRY_AIRPORTS) {
-      if (country.toLowerCase() === lower) {
-        if (debug) console.log(`Resolved "${input}" as country: ${country} with airports ${COUNTRY_AIRPORTS[country]}`);
-        return COUNTRY_AIRPORTS[country];
-      }
-    }
+
+function resolveAirport(input) {
+  if (!input) return [];
+  const trimmed = input.trim();
+  // Treat both "any" and "anywhere" as the wildcard
+  if (trimmed.toLowerCase() === "any" || trimmed.toLowerCase() === "anywhere") {
+    if (debug) console.log(`Resolved "${input}" as wildcard ANY`);
+    return ["ANY"];
+  }
+  const lower = trimmed.toLowerCase();
+  if (trimmed.length === 3) {
     const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
     if (byCode) {
-      if (debug) console.log(`Resolved "${input}" as airport code (fallback): ${byCode.code}`);
+      if (debug) console.log(`Resolved "${input}" as airport code: ${byCode.code}`);
       return [byCode.code];
     }
-    const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
-    if (matches.length > 0) {
-      const codes = matches.map(a => a.code);
-      if (debug) console.log(`Resolved "${input}" as airport names matching: ${codes}`);
-      return codes;
-    }
-    if (debug) console.log(`No match found for "${input}", returning uppercase input`);
-    return [input.toUpperCase()];
   }
+  for (const country in COUNTRY_AIRPORTS) {
+    if (country.toLowerCase() === lower) {
+      if (debug) console.log(`Resolved "${input}" as country: ${country} with airports ${COUNTRY_AIRPORTS[country]}`);
+      return COUNTRY_AIRPORTS[country];
+    }
+  }
+  const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
+  if (byCode) {
+    if (debug) console.log(`Resolved "${input}" as airport code (fallback): ${byCode.code}`);
+    return [byCode.code];
+  }
+  const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
+  if (matches.length > 0) {
+    const codes = matches.map(a => a.code);
+    if (debug) console.log(`Resolved "${input}" as airport names matching: ${codes}`);
+    return codes;
+  }
+  if (debug) console.log(`No match found for "${input}", returning uppercase input`);
+  return [input.toUpperCase()];
+}
 
   /**
  * Parses a 12‑hour time string (e.g., "11:20 pm") and returns an object {hour, minute} in 24‑hour format.
@@ -378,6 +374,119 @@ function formatFlightDateCombined(depDate, arrDate) {
     return `${formatFlightDateSingle(depDate)} - ${formatFlightDateSingle(arrDate)}`;
   }
 }
+// --- Multi-Entry Airport Input Functions ---
+//
+// These functions transform a single-field input into a multi‑row container.
+// Each row holds an input for one airport along with a delete button (if more than one row)
+// and a plus button on the last row to add a new airport entry.
+  
+// Call this function (for example, on DOMContentLoaded) to initialize a multi-entry field.
+// The containerId should be the id of a container (a div) that will hold the airport rows.
+// The fieldName is used to generate unique ids.
+function initializeMultiAirportField(containerId, fieldName) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = ""; // Clear any existing content
+  container.classList.add("multi-airport-container");
+  container.multiAirportRows = [];
+  // Add the initial row
+  addAirportRow(container, fieldName);
+  updateAirportRows(container);
+}
+
+function addAirportRow(container, fieldName) {
+  // Limit to a maximum of 3 airport rows.
+  if (container.multiAirportRows && container.multiAirportRows.length >= 3) return;
+
+  const row = document.createElement("div");
+  row.className = "airport-row flex items-center gap-2 mb-1";
+
+  // Create a wrapper for the actual input + suggestions
+  const inputWrapper = document.createElement("div");
+  inputWrapper.className = "relative flex-1";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "Enter Airport";
+  // Style to match project colors
+  input.className = "block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
+  
+  // Unique ID for the input + suggestions
+  const inputId = fieldName + "-input-" + Date.now();
+  input.id = inputId;
+  inputWrapper.appendChild(input);
+
+  const suggestions = document.createElement("div");
+  suggestions.id = inputId + "-suggestions";
+  suggestions.className = "absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 text-gray-800 text-sm hidden";
+  inputWrapper.appendChild(suggestions);
+
+  row.appendChild(inputWrapper);
+
+  // Add a delete button if there's more than one row
+  if (container.multiAirportRows && container.multiAirportRows.length > 0) {
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "✕";
+    deleteBtn.className = "delete-btn px-2 py-1 text-white bg-[#20006D] rounded hover:bg-red-600";
+    deleteBtn.addEventListener("click", () => {
+      container.removeChild(row);
+      updateAirportRows(container);
+    });
+    row.appendChild(deleteBtn);
+  }
+
+  // Add the plus button on the last row only
+  const plusBtn = document.createElement("button");
+  plusBtn.textContent = "+";
+  plusBtn.className = "plus-btn px-2 py-1 text-white bg-[#C90076] rounded hover:bg-[#A00065]";
+  plusBtn.addEventListener("click", () => {
+    if (input.value.trim() === "") return;
+    plusBtn.style.display = "none"; // hide this row's plus
+    addAirportRow(container, fieldName);
+    updateAirportRows(container);
+  });
+  row.appendChild(plusBtn);
+
+  container.appendChild(row);
+  if (!container.multiAirportRows) container.multiAirportRows = [];
+  container.multiAirportRows.push(row);
+
+  // Autocomplete on this new input
+  setupAutocomplete(input.id, suggestions.id);
+
+  updateAirportRows(container);
+}
+
+function updateAirportRows(container) {
+  const rows = container.querySelectorAll(".airport-row");
+  rows.forEach((row, index) => {
+    const deleteBtn = row.querySelector(".delete-btn");
+    // Show delete if there's more than 1 row
+    if (rows.length === 1) {
+      if (deleteBtn) deleteBtn.style.display = "none";
+    } else {
+      if (deleteBtn) deleteBtn.style.display = "inline-block";
+    }
+
+    const plusBtn = row.querySelector(".plus-btn");
+    if (index === rows.length - 1) {
+      if (plusBtn) plusBtn.style.display = "inline-block";
+    } else {
+      if (plusBtn) plusBtn.style.display = "none";
+    }
+  });
+}
+
+function getMultiAirportValues(containerId) {
+  const container = document.getElementById(containerId);
+  const inputs = container.querySelectorAll("input");
+  let values = [];
+  inputs.forEach(input => {
+    const val = input.value.trim();
+    if (val) values.push(val);
+  });
+  return values;
+}
 
 /**
  * Unifies a raw flight object from the server by recalculating the departure and arrival Date objects,
@@ -473,24 +582,6 @@ function unifyRawFlight(rawFlight) {
     route: route
   };
 }
-
-  function formatFlightTimeLocal(date, offsetText) {
-    if (!date) return "";
-    // Extract the numeric offset from offsetText (e.g. from "+01:00" get 1)
-    let offsetMatch = offsetText ? offsetText.match(/([+-]\d+)/) : null;
-    let offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
-    // Manually adjust the UTC time by the offset hours
-    let localTime = new Date(date.getTime() + offsetHours * 3600000);
-    let hours = localTime.getUTCHours();
-    let minutes = localTime.getUTCMinutes();
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-  }
-  function formatFlightDate(date) {
-    if (!date || !(date instanceof Date)) return "";
-    const options = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
-    return date.toLocaleDateString('en-US', options);
-  }
-
   /**
  * Formats an offset string for display.
  * For example, "+01:00" is shown as "UTC+1" and "+00:00" as "UTC".
@@ -521,28 +612,6 @@ function unifyRawFlight(rawFlight) {
     return new Date(dateStr);
   }
   
-  function parseTimeWithOffset(timeStr, offsetStr, baseDateStr) {
-    // Default to "UTC" if no offset is provided
-    if (!offsetStr) {
-      offsetStr = "UTC";
-    }
-    const normalizedOffset = normalizeOffset(offsetStr);
-    if (debug) console.log(`Parsing time "${timeStr}" with offset "${offsetStr}" normalized to "${normalizedOffset}" for base date ${baseDateStr}`);
-    const timeParts = parse12HourTime(timeStr);
-    if (!timeParts) {
-      if (debug) console.warn("parse12HourTime: cannot parse time string", timeStr);
-      return null;
-    }
-    let isoString = `${baseDateStr}T${String(timeParts.hour).padStart(2, '0')}:${String(timeParts.minute).padStart(2, '0')}:00`;
-    isoString += normalizedOffset;
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) {
-      if (debug) console.error(`Invalid Date created from ISO string: "${isoString}"`);
-      return null;
-    }
-    if (debug) console.log(`Resulting Date: ${d.toISOString()}`);
-    return d;
-  }  
   function rehydrateDates(obj) {
     if (obj.firstDeparture && typeof obj.firstDeparture === "string") {
       obj.firstDeparture = parseServerDate(obj.firstDeparture);
@@ -736,15 +805,6 @@ async function checkRouteSegment(origin, destination, date) {
     }
   }   
 
-  function validateConnection(prevSegment, nextSegment) {
-    const minConnection = Number(localStorage.getItem("minConnectionTime")) || MIN_CONNECTION_MINUTES;
-    const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 2880;
-
-    const connectionTime = (nextSegment.departureDate - prevSegment.arrivalDate) / 60000;
-
-    return connectionTime >= minConnection && connectionTime <= maxConnection;
-}
-
   // ---------------- Global Results Display Functions ----------------
   /**
  * Appends a unified route (either a direct flight or an aggregated connecting route) to the global results,
@@ -806,16 +866,6 @@ function appendRouteToDisplay(routeObj) {
     });
   }
     
-  function formatDurationDetailed(totalMinutes) {
-    const days = Math.floor(totalMinutes / (60 * 24));
-    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-    const minutes = totalMinutes % 60;
-    let result = "";
-    if (days > 0) result += days + "d ";
-    if (hours > 0) result += hours + "h ";
-    result += minutes + "m";
-    return result;
-  }
   
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
@@ -1203,16 +1253,19 @@ function appendRouteToDisplay(routeObj) {
       }
     }
   
-    const originInputRaw = document.getElementById("origin-input").value.trim();
-    window.originalOriginInput = originInputRaw;
-    const destinationInputRaw = document.getElementById("destination-input").value.trim();
-  
-    if (!originInputRaw) {
+    let originInputs = getMultiAirportValues("origin-multi");
+    if (originInputs.length === 0) {
       alert("Please enter at least one departure airport.");
       searchButton.innerHTML = " Search Flights";
       return;
     }
-  
+    let origins = originInputs.map(s => resolveAirport(s)).flat();
+    
+    let destinationInputs = getMultiAirportValues("destination-multi");
+    let destinations = destinationInputs.length === 0 || destinationInputs.includes("ANY")
+      ? ["ANY"]
+      : destinationInputs.map(s => resolveAirport(s)).flat();
+
     const tripType = window.currentTripType || "oneway";
     let departureDates = [];
     if (departureInputRaw === "ALL") {
@@ -1228,10 +1281,6 @@ function appendRouteToDisplay(routeObj) {
       departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
     }
   
-    let origins = originInputRaw.split(",").map(s => resolveAirport(s)).flat();
-    let destinations = (!destinationInputRaw || destinationInputRaw.toUpperCase() === "ANY")
-      ? ["ANY"]
-      : destinationInputRaw.split(",").map(s => resolveAirport(s)).flat();
   
     document.querySelector(".route-list").innerHTML = "";
     globalResults = [];
@@ -1284,6 +1333,8 @@ function appendRouteToDisplay(routeObj) {
         // Prepare inbound queries.
         let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
         let inboundQueries = {};
+        // In round-trip search, store the original origin values as a comma-separated string.
+        window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
         const originalOrigins = resolveAirport(window.originalOriginInput);
         for (const outbound of outboundFlights) {
           let outboundDestination = outbound.arrivalStationText;
@@ -1319,7 +1370,7 @@ function appendRouteToDisplay(routeObj) {
           for (const rDate of returnDates) {
             for (const origin of originalOrigins) {
               const key = `${outboundDestination}-${origin}-${rDate}`;
-              let inboundForKey = (inboundResults[key] || []).map(flight => unifyRawFlight(flight));
+              let inboundForKey = inboundResults[key] || [];
               const filteredInbound = inboundForKey.filter(inbound =>
                 Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000) >= 360
               );
@@ -1380,12 +1431,36 @@ function appendRouteToDisplay(routeObj) {
 
   // ---------------- Additional UI Functions ----------------
   function swapInputs() {
-    const originInput = document.getElementById("origin-input");
-    const destinationInput = document.getElementById("destination-input");
-    const temp = originInput.value;
-    originInput.value = destinationInput.value;
-    destinationInput.value = temp;
+    // Gather existing values from each container
+    const originValues = getMultiAirportValues("origin-multi");
+    const destValues = getMultiAirportValues("destination-multi");
+  
+    // Clear both containers
+    const originContainer = document.getElementById("origin-multi");
+    originContainer.innerHTML = "";
+    originContainer.multiAirportRows = [];
+  
+    const destContainer = document.getElementById("destination-multi");
+    destContainer.innerHTML = "";
+    destContainer.multiAirportRows = [];
+  
+    // Refill origin container with the old destination’s values
+    destValues.forEach(val => {
+      addAirportRow(originContainer, "origin");
+      const rowInput = originContainer.lastElementChild.querySelector("input");
+      if (rowInput) rowInput.value = val;
+    });
+    updateAirportRows(originContainer);
+  
+    // Refill destination container with the old origin’s values
+    originValues.forEach(val => {
+      addAirportRow(destContainer, "destination");
+      const rowInput = destContainer.lastElementChild.querySelector("input");
+      if (rowInput) rowInput.value = val;
+    });
+    updateAirportRows(destContainer);
   }
+  
   function toggleOptions() {
     const optionsContainer = document.getElementById("options-container");
     optionsContainer.classList.toggle("hidden");
@@ -1405,29 +1480,69 @@ function appendRouteToDisplay(routeObj) {
       setTimeout(() => banner.classList.add("hidden"), 300); // Fully hide
     }, 3000);
   }  
-
-  function getLocalDateString(date) {
-    const yyyy = date.getFullYear();
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  function formatFlightTimeWithOffset(date, offsetText) {
-    if (!date) return "";
-    // Use the local time already computed from the ISO string.
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+//-------------------Rendeting results-----------------------------
+function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
+  const isReturn = label && label.toLowerCase().includes("return flight");
+  const isOutbound = label && label.toLowerCase().includes("outbound flight");
+  const isDirectFlight = !unifiedFlight.segments || unifiedFlight.segments.length === 1; 
+  const header = isOutbound && isDirectFlight || isDirectFlight ? "" :  `
+    <div class="flex justify-between items-center mb-1">
+      <div class="text-xs font-semibold ${isReturn ? "bg-gray-800 text-white" : "bg-gray-800 text-white"} px-2 py-1 rounded">
+        ${unifiedFlight.formattedFlightDate}
+      </div>
+      <div class="text-xs font-semibold ${isReturn ? "bg-gray-800 text-white" : "bg-gray-800 text-white"} px-2 py-1 rounded">
+        Total duration: ${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
+      </div>
+    </div>
+    <hr class=${ isOutbound ? "border-[#C90076] my-2" : "border-[#20006D] my-2"}>
+    <div class="mt-1"></div>
+  `;
+  
+  const labelExtraHtml = (label || extraInfo) ? `
+    <div class="flex justify-between items-center mb-2">
+      ${ label ? `<div class="inline-block text-xs font-semibold ${isReturn ? "bg-[#20006D] text-white" : "bg-[#C90076] text-white"} px-2 py-1 rounded">${label}</div>` : "" }
+      ${ extraInfo ? `<div class="text-xs font-semibold ${isReturn ? "bg-white text-gray-800" : "bg-gray-200 text-gray-700"} px-2 py-1 rounded">${extraInfo}</div>` : "" }
+    </div>` : "";
+  
+  let bodyHtml = "";
+  if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
+    unifiedFlight.segments.forEach((segment, idx) => {
+      bodyHtml += createSegmentRow(segment);
+      if (idx < unifiedFlight.segments.length - 1) {
+        const nextSegment = unifiedFlight.segments[idx + 1];
+        const connectionMs = nextSegment.calculatedDuration.departureDate - segment.calculatedDuration.arrivalDate;
+        const connectionMinutes = Math.max(0, Math.round(connectionMs / 60000));
+        const ch = Math.floor(connectionMinutes / 60);
+        const cm = connectionMinutes % 60;
+        bodyHtml += `
+          <div class="flex items-center my-2">
+            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
+            <div class="px-3 text-sm ${isReturn ? "text-black" : "text-gray-500"} whitespace-nowrap">
+              Connection: ${ch}h ${cm}m
+            </div>
+            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
+          </div>
+        `;
+      }
+    });
+  } else {
+    bodyHtml = createSegmentRow(unifiedFlight);
   }
   
-// Обновлённая функция для отрисовки одного сегмента
+  // Always include the header regardless of return flight type.
+  const containerClasses = isReturn ? "border rounded-lg p-2.5 mb-2 bg-gray-300" : "border rounded-lg p-2.5 mb-2";
+  return `
+    <div class="${containerClasses}">
+      ${labelExtraHtml}
+      ${header}
+      ${bodyHtml}
+    </div>
+  `;
+}
+
 function createSegmentRow(segment) {
-  // Форматируем дату вылета сегмента (предполагается, что segment.departureDate – объект Date)
-  const segmentDate = formatFlightDateSingle(segment.departureDate);
-  console.log("formatFlightDateSingle(segment.departureDate):", formatFlightDateSingle(segment.departureDate))
-  console.log("segment.departureDate: ", segment.departureDate);
+  const segmentDate = formatFlightDateCombined(segment.calculatedDuration.departureDate, segment.calculatedDuration.arrivalDate);
   const flightCode = formatFlightCode(segment.flightCode);
-  // Верхняя строка для сегмента: отображаем дату вылета и код рейса в серых плашках
   const segmentHeader = `
     <div class="flex justify-between items-center mb-1">
       <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
@@ -1438,7 +1553,6 @@ function createSegmentRow(segment) {
       </div>
     </div>
   `;
-  // Основная информация о сегменте (время, аэропорты, длительность)
   const gridRow = `
     <div class="grid grid-cols-3 grid-rows-2 gap-1 items-center w-full py-1">
       <div class="flex items-center gap-1 whitespace-nowrap">
@@ -1469,69 +1583,6 @@ function createSegmentRow(segment) {
   `;
   return `<div class=>${segmentHeader}${gridRow}</div>`;
 }
-// Обновлённая функция для рендеринга блока маршрута
-function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
-  // Если метка содержит "Return Flight", считаем, что это обратный рейс – для него используем тёмно-серый фон
-  const isReturn = label && label.toLowerCase().includes("return flight");
-  const isOutbound = label && label.toLowerCase().includes("outbound flight");
-  const isDirectFlight = !unifiedFlight.segments || unifiedFlight.segments.length === 1; 
-  const header = isOutbound || isDirectFlight ? "" :  `
-    <div class="flex justify-between items-center mb-1">
-      <div class="text-xs font-semibold ${isReturn ? "bg-gray-600 text-white" : "bg-gray-800 text-white"} px-2 py-1 rounded">
-        ${unifiedFlight.formattedFlightDate}
-      </div>
-      <div class="text-xs font-semibold ${isReturn ? "bg-gray-600 text-white" : "bg-gray-200 text-gray-800"} px-2 py-1 rounded">
-        Total duration: ${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
-      </div>
-    </div>
-  `;
-
-  // Если переданы label или extraInfo – выводим их в верхней части блока
-  const labelExtraHtml = (label || extraInfo) ? `
-    <div class="flex justify-between items-center mb-2">
-      ${ label ? `<div class="inline-block text-xs font-semibold ${isReturn ? "bg-[#20006D] text-white" : "bg-[#C90076] text-white"} px-2 py-1 rounded">${label}</div>` : "" }
-      ${ extraInfo ? `<div class="text-xs font-semibold ${isReturn ? "bg-gray-800 text-white" : "bg-gray-200 text-gray-700"} px-2 py-1 rounded">${extraInfo}</div>` : "" }
-    </div>` : "";
-
-  // Если маршрут состоит из нескольких сегментов, для каждого сегмента вызываем createSegmentRow.
-  // Между сегментами добавляем строку с информацией о стыковке.
-  let bodyHtml = "";
-  if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
-    unifiedFlight.segments.forEach((segment, idx) => {
-      bodyHtml += createSegmentRow(segment);
-      if (idx < unifiedFlight.segments.length - 1) {
-        const nextSegment = unifiedFlight.segments[idx + 1];
-        const connectionMs = nextSegment.calculatedDuration.departureDate - segment.calculatedDuration.arrivalDate;
-        const connectionMinutes = Math.max(0, Math.round(connectionMs / 60000));
-        const ch = Math.floor(connectionMinutes / 60);
-        const cm = connectionMinutes % 60;
-        bodyHtml += `
-          <div class="flex items-center my-2">
-            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
-            <div class="px-3 text-sm ${isReturn ? "text-white" : "text-gray-500"} whitespace-nowrap">
-              Connection: ${ch}h ${cm}m
-            </div>
-            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
-          </div>
-        `;
-      }
-    });
-  } else {
-    // Для прямого рейса – выводим как один сегмент
-    bodyHtml = createSegmentRow(unifiedFlight);
-  }
-
-  // Класс контейнера блока: для обратных рейсов добавляем тёмно-серый фон
-  const containerClasses = isReturn ? "border rounded-lg p-2.5 mb-2 bg-gray-300" : "border rounded-lg p-2.5 mb-2";
-  return `
-    <div class="${containerClasses}">
-      ${labelExtraHtml}
-      ${isReturn ? "" : header}
-      ${bodyHtml}
-    </div>
-  `;
-}
-
   /**
    * Formats a flight code by inserting a space after the first two characters.
    */
@@ -1655,23 +1706,25 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
       if (cellDate < minDate || cellDate > lastBookable) {
         dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
       } else {
-        dateCell.classList.add("hover:bg-blue-100");
-        if (selectedDates.has(dateStr)) {
-          dateCell.classList.add("bg-blue-300");
-        }
         dateCell.addEventListener("click", () => {
           if (selectedDates.has(dateStr)) {
             selectedDates.delete(dateStr);
             dateCell.classList.remove("bg-blue-300");
+            // If it’s a weekend day, reapply the weekend style.
+            if (dayOfWeek === 5 || dayOfWeek === 6) {
+              dateCell.classList.add("bg-pink-50");
+            }
           } else {
             selectedDates.add(dateStr);
+            // Remove weekend style if present so the selection color shows.
+            dateCell.classList.remove("bg-pink-50");
             dateCell.classList.add("bg-blue-300");
           }
           const inputEl = document.getElementById(inputId);
           const sortedArr = Array.from(selectedDates).sort();
           inputEl.value = sortedArr.join(", ");
           inputEl.dispatchEvent(new Event("change"));
-        });
+        });        
       }
       datesGrid.appendChild(dateCell);
     }
@@ -1714,7 +1767,6 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
     // === 1. Load settings from localStorage ===
     const storedPreferredAirport = localStorage.getItem("preferredAirport") || "";
     document.getElementById("preferred-airport").value = storedPreferredAirport;
-    document.getElementById("origin-input").value = storedPreferredAirport;
     document.getElementById("min-connection-time").value = localStorage.getItem("minConnectionTime") || 90;
     document.getElementById("max-connection-time").value = localStorage.getItem("maxConnectionTime") || 360;
     document.getElementById("max-requests").value = localStorage.getItem("maxRequestsInRow") || 25;
@@ -1743,7 +1795,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
       }
       // Save preferred airport
       localStorage.setItem("preferredAirport", preferredAirport);
-      document.getElementById("origin-input").value = preferredAirport;
+      document.getElementById("origin-multi").value = preferredAirport;
   
       // Save additional settings
       const minConn = document.getElementById("min-connection-time").value;
@@ -1763,9 +1815,15 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
     });
   
     // === 3. Setup autocomplete for inputs ===
+    
     setupAutocomplete("preferred-airport", "airport-suggestions-preferred");
-    setupAutocomplete("origin-input", "airport-suggestions-origin");
-    setupAutocomplete("destination-input", "airport-suggestions-dest");
+    initializeMultiAirportField("origin-multi", "origin");
+      const originContainer = document.getElementById("origin-multi");
+      const firstInput = originContainer.querySelector("input");
+      if (firstInput) {
+        firstInput.value = storedPreferredAirport;
+      }
+    initializeMultiAirportField("destination-multi", "destination");
   
     // === 4. Initialize calendars ===
     initMultiCalendar("departure-date", "departure-calendar-popup", 3);
@@ -1832,24 +1890,37 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
     // === 8. Trip type switching (oneway / return) ===
     const onewayBtn = document.getElementById("oneway-btn");
     const returnBtn = document.getElementById("return-btn");
-    const returnDateContainer = document.getElementById("return-date-container");
     window.currentTripType = "oneway";
     function toggleTripType(selectedType) {
       window.currentTripType = selectedType;
+      const returnDateContainer = document.getElementById("return-date-container");
+      const onewayBtn = document.getElementById("oneway-btn");
+      const returnBtn = document.getElementById("return-btn");
+    
       if (selectedType === "oneway") {
+        // Style the buttons
         onewayBtn.classList.add("bg-[#20006D]", "text-white");
         onewayBtn.classList.remove("bg-gray-200", "text-gray-700");
         returnBtn.classList.add("bg-gray-200", "text-gray-700");
         returnBtn.classList.remove("bg-[#20006D]", "text-white");
+    
+        // Hide the return-date container, but DO NOT disable or reinit the “destination-multi” container
         returnDateContainer.style.display = "none";
       } else {
+        // Return trip
         returnBtn.classList.add("bg-[#20006D]", "text-white");
         returnBtn.classList.remove("bg-gray-200", "text-gray-700");
         onewayBtn.classList.add("bg-gray-200", "text-gray-700");
         onewayBtn.classList.remove("bg-[#20006D]", "text-white");
+    
+        // Show the return-date container
         returnDateContainer.style.display = "block";
       }
+    
+      // Do NOT re-init or disable the “destination-multi” container here.
+      // That way, the user can still add or remove rows.
     }
+    
     onewayBtn.addEventListener("click", () => {
       toggleTripType("oneway");
       onewayBtn.blur();
@@ -1872,7 +1943,9 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
     if (sortOption === "default") {
       globalResults.sort((a, b) => a.originalIndex - b.originalIndex);
     } else if (sortOption === "departure") {
-      globalResults.sort((a, b) => a.firstDeparture - b.firstDeparture);
+      globalResults.sort((a, b) => {
+        return new Date(a.calculatedDuration.departureDate).getTime() - new Date(b.calculatedDuration.departureDate).getTime();
+      });
     } else if (sortOption === "airport") {
       globalResults.sort((a, b) => {
         let nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
@@ -1881,60 +1954,47 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
       });
     } else if (sortOption === "arrival") {
       globalResults.sort((a, b) => {
-        const getFinalArrival = (flight) => {
+        const getFinalArrivalTime = (flight) => {
           if (flight.returnFlights && flight.returnFlights.length > 0) {
-            return flight.returnFlights[0].route[flight.returnFlights[0].route.length - 1];
+            // For round-trip, use the final return flight segment's arrival time.
+            return new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
           } else {
-            return flight.route[flight.route.length - 1];
+            return new Date(flight.calculatedDuration.arrivalDate).getTime();
           }
         };
-        let arrivalA = getFinalArrival(a);
-        let arrivalB = getFinalArrival(b);
-        let nameA = (airportNames[arrivalA] || arrivalA).toLowerCase();
-        let nameB = (airportNames[arrivalB] || arrivalB).toLowerCase();
-        return nameA.localeCompare(nameB);
+        return getFinalArrivalTime(a) - getFinalArrivalTime(b);
       });
     } else if (sortOption === "duration") {
       globalResults.sort((a, b) => {
-        let durationA, durationB;
-        if (a.returnFlights && a.returnFlights.length > 0) {
-          const outboundLastArrivalA = a.segments[a.segments.length - 1].arrivalDate;
-          const inboundFirstDepartureA = a.returnFlights[0].segments[0].departureDate;
-          durationA = (inboundFirstDepartureA - outboundLastArrivalA) / 60000;
-        } else {
-          durationA = a.totalDuration;
-        }
-        if (b.returnFlights && b.returnFlights.length > 0) {
-          const outboundLastArrivalB = b.segments[b.segments.length - 1].arrivalDate;
-          const inboundFirstDepartureB = b.returnFlights[0].segments[0].departureDate;
-          durationB = (inboundFirstDepartureB - outboundLastArrivalB) / 60000;
-        } else {
-          durationB = b.totalDuration;
-        }
-        return durationA - durationB;
+        const getDuration = (flight) => {
+          if (flight.returnFlights && flight.returnFlights.length > 0) {
+            // Overall duration from outbound departure to final inbound arrival.
+            const outboundDeparture = new Date(flight.calculatedDuration.departureDate).getTime();
+            const inboundArrival = new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
+            return (inboundArrival - outboundDeparture) / 60000;
+          } else {
+            return flight.calculatedDuration.totalMinutes;
+          }
+        };
+        return getDuration(a) - getDuration(b);
       });
     }
     const resultsDiv = document.querySelector(".route-list");
     resultsDiv.innerHTML = "";
-    let filteredResults = [];
     if (window.currentTripType === "return") {
-      filteredResults = globalResults.filter(flight =>
-        flight.returnFlights && flight.returnFlights.length > 0
-      );
+      const filteredResults = globalResults.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
       const totalResultsEl = document.createElement("p");
       totalResultsEl.textContent = `Total results: ${filteredResults.length}`;
       totalResultsEl.className = "text-lg font-semibold text-[#20006D] mb-4";
       resultsDiv.appendChild(totalResultsEl);
-
       filteredResults.forEach(outbound => {
         rehydrateDates(outbound);
         const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
         resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
         outbound.returnFlights.forEach((ret, idx) => {
           rehydrateDates(ret);
-          if (!ret.segments || ret.segments.length === 0) return;
-          const outboundLastArrival = outbound.segments[outbound.segments.length - 1].arrivalDate;
-          const inboundFirstDeparture = ret.segments[0].departureDate;
+          const outboundLastArrival = outbound.segments ? outbound.segments[outbound.segments.length - 1].arrivalDate : outbound.calculatedDuration.arrivalDate;
+          const inboundFirstDeparture = ret.segments && ret.segments[0] ? ret.segments[0].departureDate : ret.calculatedDuration.departureDate;
           if (!outboundLastArrival || !inboundFirstDeparture ||
               isNaN(outboundLastArrival.getTime()) || isNaN(inboundFirstDeparture.getTime())) {
             return;
@@ -1951,6 +2011,6 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
     } else {
       displayGlobalResults(globalResults);
     }
-  });  
+  });
 });
   
