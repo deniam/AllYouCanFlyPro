@@ -1470,18 +1470,24 @@ async function checkRouteSegment(origin, destination, date) {
   
     const input = document.createElement("input");
     input.type = "text";
-    input.placeholder = "Enter Airport";
-    // Use a transparent background for the input so it blends with the container
+    // Set placeholder based on fieldName
+    if (fieldName === "origin") {
+      input.placeholder = "Add origin";
+    } else if (fieldName === "destination") {
+      input.placeholder = "Add destination";
+    } else {
+      input.placeholder = "Enter Airport";
+    }
     input.className = "block w-full bg-transparent border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
     const inputId = fieldName + "-input-" + Date.now();
     input.id = inputId;
     inputWrapper.appendChild(input);
-  
+
     const suggestions = document.createElement("div");
     suggestions.id = inputId + "-suggestions";
     suggestions.className = "absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 text-gray-800 text-sm hidden";
     inputWrapper.appendChild(suggestions);
-  
+
     row.appendChild(inputWrapper);
   
     // Always add a delete button (even for the first row)
@@ -2172,55 +2178,43 @@ function createSegmentRow(segment) {
     // === 8. Trip type switching (oneway / return) ===
     // Set the initial trip type.
     window.currentTripType = "oneway";
+  const tripTypeToggle = document.getElementById("trip-type-toggle");
+  const tripTypeText = document.getElementById("trip-type-text");
+  const returnDateContainer = document.getElementById("return-date-container");
+  const removeReturnDateBtn = document.getElementById("remove-return-date");
 
-    // Get button elements.
-    const tripTypeToggle = document.getElementById("trip-type-toggle");
-    const tripTypeText = document.getElementById("trip-type-text");
-    const tripTypeIcon = document.getElementById("trip-type-icon");
-    const returnDateContainer = document.getElementById("return-date-container");
+  // Ensure initial state: one-way with the "Add Return Date" button visible and return date container hidden.
+  tripTypeText.textContent = "Add Return Date";
+  returnDateContainer.style.display = "none";
+  tripTypeToggle.style.display = "block";
 
-    // Set the initial display for the return date container.
+  // When the user clicks the "Add Return Date" button:
+  tripTypeToggle.addEventListener("click", () => {
+    if (window.currentTripType === "oneway") {
+      window.currentTripType = "return";
+      // Hide the "Add Return Date" button
+      tripTypeToggle.style.display = "none";
+      // Show the return date container
+      returnDateContainer.style.display = "block";
+      // Immediately open the Return Date calendar popup
+      const returnCalendarPopup = document.getElementById("return-calendar-popup");
+      returnCalendarPopup.classList.remove("hidden");
+    }
+  });
+
+  // When the user clicks the remove (✕) button in the Return Date container:
+  removeReturnDateBtn.addEventListener("click", () => {
+    window.currentTripType = "oneway";
+    // Hide the return date container
     returnDateContainer.style.display = "none";
-
-    // Function to toggle between One-way and Roundtrip.
-    tripTypeToggle.addEventListener("click", () => {
-      if (window.currentTripType === "oneway") {
-        // Switch to Roundtrip.
-        window.currentTripType = "return";
-        tripTypeText.textContent = "Roundtrip";
-
-        // Change button style to pink.
-        tripTypeToggle.classList.remove("bg-[#20006D]", "hover:bg-[#180055]");
-        tripTypeToggle.classList.add("bg-[#C90076]", "hover:bg-[#A00065]");
-        
-        returnDateContainer.style.display = "block";
-
-        // Update SVG to Roundtrip icon.
-        tripTypeIcon.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>
-          </svg>
-        `;
-
-      } else {
-        // Switch to One-way.
-        window.currentTripType = "oneway";
-        tripTypeText.textContent = "One-way";
-
-        // Change button style back to purple.
-        tripTypeToggle.classList.remove("bg-[#C90076]", "hover:bg-[#A00065]");
-        tripTypeToggle.classList.add("bg-[#20006D]", "hover:bg-[#180055]");
-        
-        returnDateContainer.style.display = "none";
-
-        // Update SVG to One-way icon.
-        tripTypeIcon.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M13 5l7 7-7 7"/>
-          </svg>
-        `;
-      }
-    });
+    // Clear the return date input
+    document.getElementById("return-date").value = "";
+    // Hide the return calendar popup
+    const returnCalendarPopup = document.getElementById("return-calendar-popup");
+    returnCalendarPopup.classList.add("hidden");
+    // Show the "Add Return Date" button again
+    tripTypeToggle.style.display = "block";
+  });
 
 
     // === 9. UI Scale change ===

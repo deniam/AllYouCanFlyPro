@@ -93,34 +93,38 @@
         </div>
       </div>
 
-      <!-- Date Selection -->
-      <div class="mb-2 flex gap-1">
-        <!-- Departure Date -->
-        <div class="w-1/2 relative">
-          <label for="departure-date" class="block text-sm font-medium text-gray-700 mb-1">Departure Date</label>
+      <!-- Date Selection: Two Equal Columns for Departure and Return -->
+      <div class="mb-2 flex gap-1 items-center">
+        <!-- Departure Date Container -->
+        <div class="flex-1 relative">
+          <!-- <label for="departure-date" class="block text-sm font-medium text-gray-700 mb-1">Departure Date</label> -->
           <input type="text" id="departure-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Departure Date">
           <div id="departure-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
         </div>
-        <!-- Return Date (Only for round-trip) -->
-        <div class="w-1/2 relative" id="return-date-container" style="display: none;">
-          <label for="return-date" class="block text-sm font-medium text-gray-700 mb-1">Return Date</label>
-          <input type="text" id="return-date" disabled readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Return Date">
-          <div id="return-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
+        <!-- Return Date / Add Return Date Button Container -->
+        <div class="flex-1 relative" id="return-date-wrapper">
+          <!-- Initially show the Add Return Date button -->
+          <div id="add-return-date-button-container">
+            <button id="trip-type-toggle" class="flex items-center justify-center w-full gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+              <span id="trip-type-text">Add Return Date</span>
+            </button>
+          </div>
+          <!-- Return Date Container (hidden by default) -->
+          <div id="return-date-container" style="display: none;">
+            <!-- <label for="return-date" class="block text-sm font-medium text-gray-700 mb-1">Return Date</label> -->
+            <div class="flex items-center">
+              <input type="text" id="return-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Return Date">
+              <button id="remove-return-date" class="ml-1 p-1 bg-[#20006D] text-white text-xs rounded-lg hover:bg-[#A00065] flex items-center justify-center w-5 h-5 shadow-md transition cursor-pointer">
+                ✕
+              </button>
+            </div>
+            <div id="return-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
+          </div>
         </div>
       </div>
 
-      <!-- Trip Type -->
-        <div class="mb-4 flex items-center gap-2">
-          <!-- Trip Type Toggle Button -->
-          <button id="trip-type-toggle" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
-            <span id="trip-type-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M13 5l7 7-7 7"/>
-              </svg>
-            </span>
-            <span id="trip-type-text">One-way</span>
-          </button>
-        
+      <!-- Options and Search Buttons -->
+      <div class="mb-4 flex items-center gap-2">
           <!-- Options Button -->
           <button id="toggle-options" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
@@ -136,7 +140,7 @@
             </svg>
             Search Flights
           </button>
-        </div>
+      </div>
 
       <!-- Options Toggle (Entire Options Hidden by Default) -->
       <div class="mb-4">
@@ -237,7 +241,6 @@
       </div>
 
       <!-- Results and Sort Container (initially hidden) -->
-      <!-- The container that holds the total results label and the sort dropdown -->
       <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
         <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>
         <div class="flex items-center gap-2">
