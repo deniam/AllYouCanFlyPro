@@ -139,6 +139,13 @@ import {
   function setupAutocomplete(inputId, suggestionsId) {
     const inputEl = document.getElementById(inputId);
     const suggestionsEl = document.getElementById(suggestionsId);
+
+    const lowerInputId = inputId.toLowerCase();
+    const recentKey = lowerInputId.includes("destination")
+    ? "recentAirports_destination"
+    : lowerInputId.includes("origin")
+      ? "recentAirports_origin"
+      : "recentAirports_" + inputId;
   
     // Gather all used entries (in both origin and destination fields)
     function getAllUsedEntries() {
@@ -153,17 +160,16 @@ import {
   
     // Retrieve recent entries for this input (if any)
     function getRecentEntries() {
-      const RECENT_KEY = "recentAirports_" + inputId;
-      const stored = localStorage.getItem(RECENT_KEY);
+      const stored = localStorage.getItem(recentKey);
       return stored ? JSON.parse(stored) : [];
     }
+
     function addRecentEntry(entry) {
-      const RECENT_KEY = "recentAirports_" + inputId;
       let recents = getRecentEntries();
       recents = recents.filter(e => e !== entry);
       recents.unshift(entry);
       if (recents.length > 5) recents = recents.slice(0, 5);
-      localStorage.setItem(RECENT_KEY, JSON.stringify(recents));
+      localStorage.setItem(recentKey, JSON.stringify(recents));
     }
   
     // Show recent suggestions when the field is focused and empty
