@@ -68,10 +68,10 @@
       </div>
 
       <!-- Flight Search Form -->
-      <div class="mb-4 flex items-center gap-2 relative">
+      <div class="mb-2 flex items-center relative">
         <!-- Departure Container as flex item -->
         <div class="flex-1">
-          <label for="origin-multi" class="sr-only">Departure</label>
+          <label for="origin-multi" class="sr-only">Origin</label>
           <div id="origin-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md px-3 py-2">
             <!-- dynamic input rows get inserted here -->
           </div>
@@ -93,40 +93,8 @@
         </div>
       </div>
 
-      <!-- Trip Type & Sort Options -->
-      <div class="mb-4 flex items-center">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Trip Type</label>
-          <div class="flex gap-3">
-            <button id="oneway-btn" class="flex items-center gap-2 px-4 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer" data-type="oneway">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M13 5l7 7-7 7"/>
-              </svg>
-              One-way
-            </button>
-            <button id="return-btn" class="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-lg shadow-md hover:bg-[#A00065] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>
-              </svg>
-              Return
-            </button>
-          </div>
-        </div>
-        <!-- Sort Dropdown -->
-        <div class="ml-auto">
-          <label for="sort-select" class="block text-sm font-medium text-gray-700 mb-1">Sort results</label>
-          <select id="sort-select" class="block w-32 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
-            <option value="default" selected>Default</option>
-            <option value="airport">Departure Airport</option>
-            <option value="departure">Departure Time</option>
-            <option value="arrival">Arrival Time</option>
-            <option value="duration">Trip Length</option>
-          </select>
-        </div>
-      </div>
-
       <!-- Date Selection -->
-      <div class="mb-4 flex gap-3">
+      <div class="mb-2 flex gap-1">
         <!-- Departure Date -->
         <div class="w-1/2 relative">
           <label for="departure-date" class="block text-sm font-medium text-gray-700 mb-1">Departure Date</label>
@@ -141,14 +109,37 @@
         </div>
       </div>
 
+      <!-- Trip Type -->
+        <div class="mb-4 flex items-center gap-2">
+          <!-- Trip Type Toggle Button -->
+          <button id="trip-type-toggle" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+            <span id="trip-type-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M13 5l7 7-7 7"/>
+              </svg>
+            </span>
+            <span id="trip-type-text">One-way</span>
+          </button>
+        
+          <!-- Options Button -->
+          <button id="toggle-options" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+            </svg>
+            Options
+          </button>
+        
+          <!-- Search Flights Button -->
+          <button id="search-button" class="flex items-center gap-1 px-2 py-2 ml-auto bg-[#C90076] text-white font-medium rounded-lg hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#20006D] transition cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+            Search Flights
+          </button>
+        </div>
+
       <!-- Options Toggle (Entire Options Hidden by Default) -->
       <div class="mb-4">
-        <button id="toggle-options" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#20006D] text-white rounded hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
-          </svg>
-          Options
-        </button>
         <!-- Options Panel (Hidden by Default) -->
         <div id="options-container" class="mt-3 hidden space-y-4">
           <!-- Basic Options: Preferred Airport, Connection Times, and Stopover Options -->
@@ -245,14 +236,20 @@
         </div>
       </div>
 
-      <!-- Search Button -->
-      <div class="mb-4 flex justify-center">
-        <button id="search-button" class="flex items-center justify-center gap-2 px-4 py-2 bg-[#C90076] text-white rounded hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#20006D] transition cursor-pointer w-full">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-          </svg>
-          Search Flights
-        </button>
+      <!-- Results and Sort Container (initially hidden) -->
+      <!-- The container that holds the total results label and the sort dropdown -->
+      <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
+        <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>
+        <div class="flex items-center gap-2">
+          <label for="sort-select" class="text-sm font-medium text-gray-700">Sort by</label>
+          <select id="sort-select" class="block w-32 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
+            <option value="default" selected>Default</option>
+            <option value="airport">Departure Airport</option>
+            <option value="departure">Departure Time</option>
+            <option value="arrival">Arrival Time</option>
+            <option value="duration">Trip Length</option>
+          </select>
+        </div>
       </div>
 
       <!-- Progress Display -->
