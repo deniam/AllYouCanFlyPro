@@ -21,7 +21,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let debug = true;
+  let debug = false;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};

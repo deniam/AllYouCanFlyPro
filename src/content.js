@@ -1,5 +1,5 @@
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    let debug = true;
+    let debug = false;
     
     if (request.action === "getDestinations") {
         setTimeout(() => {
