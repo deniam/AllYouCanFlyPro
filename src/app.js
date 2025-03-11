@@ -1478,9 +1478,9 @@ async function checkRouteSegment(origin, destination, date) {
     input.type = "text";
     // Set placeholder based on fieldName
     if (fieldName === "origin") {
-      input.placeholder = "Add origin";
+      input.placeholder = "Origin";
     } else if (fieldName === "destination") {
-      input.placeholder = "Add destination";
+      input.placeholder = "Destination";
     } else {
       input.placeholder = "Enter Airport";
     }
