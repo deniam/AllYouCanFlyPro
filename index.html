@@ -180,27 +180,40 @@
         <!-- Options Panel (Hidden by Default) -->
         <div id="options-container" class="mt-3 hidden space-y-4">
           <!-- Basic Options: Preferred Airport, Connection Times, and Stopover Options -->
-          <div class="grid grid-cols-1 gap-3">
-            <!-- Preferred Airport -->
-            <div>
-              <label class="block text-gray-700 font-medium mb-1">Preferred Airport:</label>
+          <!-- Preferred Airport, Connection Time, and Clear Cache in One Line -->
+          <div class="flex items-end justify-between gap-4">
+            <!-- Preferred Airport (Takes More Space) -->
+            <div class="flex-1 relative">
+              <label class="block text-gray-700 font-medium mb-1">PREFERRED AIRPORT</label>
               <input type="text" id="preferred-airport" placeholder="Enter preferred airport"
                 class="w-full bg-gray-100 border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]">
-              <div id="airport-suggestions-preferred" class="absolute hidden bg-white border border-gray-300 rounded shadow-lg z-20 text-gray-800 text-sm"></div>
             </div>
-            <!-- Connection Times -->
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-gray-700 font-medium mb-1">Min Connection Time (min):</label>
-                <input type="number" id="min-connection-time" value="90"
-                  class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
-              </div>
-              <div>
-                <label class="block text-gray-700 font-medium mb-1">Max Connection Time (min):</label>
-                <input type="number" id="max-connection-time" value="360"
-                  class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
+
+            <!-- Connection Time (Centered Title & Smaller Inputs) -->
+            <div class="flex flex-col items-center">
+              <!-- Centered Header -->
+              <label class="block text-gray-700 font-medium mb-1 text-center">CONNECTION (minutes)</label>
+              <div class="flex items-center gap-3">
+                <div class="flex flex-col items-center">
+                  <label class="block text-gray-700 text-xs font-medium mb-1 text-center">MIN</label>
+                  <input type="number" id="min-connection-time" value="90"
+                    class="bg-gray-100 border border-gray-300 rounded px-1 py-1 text-right focus:outline-none focus:ring-1 focus:ring-[#C90076] w-[55px]">
+                </div>
+                <div class="flex flex-col items-center">
+                  <label class="block text-gray-700 text-xs font-medium mb-1 text-center">MAX</label>
+                  <input type="number" id="max-connection-time" value="1440"
+                    class="bg-gray-100 border border-gray-300 rounded px-1 py-1 text-right focus:outline-none focus:ring-1 focus:ring-[#C90076] w-[55px]">
+                </div>
               </div>
             </div>
+
+            <!-- Clear Cache Button (Right Aligned & Auto Width) -->
+            <button id="clear-cache-button"
+              class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 whitespace-nowrap self-end cursor-pointer">
+              CLEAR CACHE
+            </button>
+          </div>
+
 
           <!-- UI Scale & Clear Cache & Update Button -->
           <div class="grid grid-cols-1 gap-3">
@@ -212,15 +225,10 @@
                   class="relative w-full appearance-none h-2 bg-transparent cursor-pointer">
               </div>
             </div>
-            <div>
-              <button id="clear-cache-button" class="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
-                Clear Cache
-              </button>              
-            </div>
           <!-- Expert Settings Toggle -->
           <div>
             <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-3 py-2 rounded">
-              Show Expert Settings
+              SHOW EXPERT SETTINGS
             </button>
             <!-- Expert Settings (Hidden by Default) -->
             <div id="expert-settings" class="mt-3 hidden border-t pt-3">
@@ -251,7 +259,7 @@
           
             <div>
               <button id="update-preferred-airport" class="w-full bg-[#20006D] text-white rounded px-4 py-2 hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076]">
-                Update
+                UPDATE
               </button>
             </div>
           </div>
