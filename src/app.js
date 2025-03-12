@@ -1,10 +1,6 @@
-import {
-    AIRPORTS,
-    COUNTRY_AIRPORTS,
-    isExcludedRoute,
-    airportFlags
-  } from './airports.js';
-  // ----------------------- Global Settings -----------------------
+import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, airportFlags } from './airports.js';
+import Dexie from '../src/libs/dexie.mjs';
+// ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 500;
   const MAX_RETRY_ATTEMPTS = 2;  
@@ -27,6 +23,11 @@ import {
     if (!airportNames[airport.code]) {
       airportNames[airport.code] = airport.name.replace(/\s*\(.*\)$/, "").trim();
     }
+  });
+  //---------DixieDB Initialisation------------------
+    const db = new Dexie("FlightSearchCache");
+  db.version(1).stores({
+    cache: 'key, timestamp'  // 'key' is our primary key; we also index the timestamp
   });
   // ---------------- Helper: Airport Flag ----------------
   function getCountryFlag(airportCode) {
@@ -550,181 +551,154 @@ function unifyRawFlight(rawFlight) {
     return new Date(dateStr);
   }
   
-  function rehydrateDates(obj) {
-    if (obj.firstDeparture && typeof obj.firstDeparture === "string") {
-      obj.firstDeparture = parseServerDate(obj.firstDeparture);
-    }
-    if (obj.segments && Array.isArray(obj.segments)) {
-      obj.segments.forEach(seg => {
-        if (seg.departureDate && typeof seg.departureDate === "string") {
-          seg.departureDate = parseServerDate(seg.departureDate);
-        }
-        if (seg.arrivalDate && typeof seg.arrivalDate === "string") {
-          seg.arrivalDate = parseServerDate(seg.arrivalDate);
-        }
-        if (seg.calculatedDuration) {
-          if (seg.calculatedDuration.departureDate && typeof seg.calculatedDuration.departureDate === "string") {
-            seg.calculatedDuration.departureDate = parseServerDate(seg.calculatedDuration.departureDate);
-          }
-          if (seg.calculatedDuration.arrivalDate && typeof seg.calculatedDuration.arrivalDate === "string") {
-            seg.calculatedDuration.arrivalDate = parseServerDate(seg.calculatedDuration.arrivalDate);
-          }
-        }
-      });
-    }
-  }
   // ---------------- Candidate Caching Functions ----------------
   function getUnifiedCacheKey(origin, destination, date) {
     return `${origin}-${destination}-${date}`;
   }
-  function handleClearCache() {
-    // Define a set of keys to preserve
-    const keysToKeep = new Set(["wizz_page_data", "preferredAirport", "pauseDurationSeconds", "minConnectionTime", "maxConnectionTime", "cacheLifetimeHours", "maxRequestsInRow", "requestsFrequencyMs"]);
-  
-    // Loop over all keys in localStorage
-    Object.keys(localStorage).forEach(key => {
-      if (!keysToKeep.has(key)) {
-        localStorage.removeItem(key);
-      }
-    });
+  async function handleClearCache() {  
+    try {
+      // Clear all cached results in Dexie
+      await db.cache.clear();
+      console.log("Dexie cache cleared.");
+    } catch (error) {
+      console.error("Error clearing Dexie cache:", error);
+    }
   
     showNotification("Cache successfully cleared! ✅");
+  }  
+
+  async function setCachedResults(key, results) {
+    const cacheData = { key, results, timestamp: Date.now() };
+    try {
+      await db.cache.put(cacheData);
+    } catch (e) {
+      console.error("Error setting cached results in IndexedDB:", e);
+    }
   }
 
-  function setCachedResults(key, results) {
-    const cacheData = { results: results, timestamp: Date.now() };
-    localStorage.setItem(key, JSON.stringify(cacheData));
-  }
-  function getCachedResults(key) {
-    const cachedData = localStorage.getItem(key);
-    if (cachedData) {
-      try {
-        const parsed = JSON.parse(cachedData);
-        if (
-          parsed &&
-          Array.isArray(parsed.results) &&
-          Date.now() - parsed.timestamp < CACHE_LIFETIME
-        ) {
-          return parsed.results;
-        }
-      } catch (e) {
-        localStorage.removeItem(key);
+  async function getCachedResults(key) {
+    try {
+      const entry = await db.cache.get(key);
+      if (entry && Array.isArray(entry.results) && Date.now() - entry.timestamp < CACHE_LIFETIME) {
+        return entry.results;
       }
+    } catch (e) {
+      console.error("Error retrieving cached results from IndexedDB:", e);
     }
     return null;
   }
 
-// ---------------- API Request Function ----------------
-function getHeadersFromPage() {
-  return new Promise((resolve) => {
-    // Instead of querying the active tab, query any tab with the multipass URL.
-    chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
-      if (tabs && tabs.length > 0) {
-        // Use the first multipass tab found.
-        const multipassTab = tabs[0];
-        chrome.tabs.sendMessage(multipassTab.id, { action: "getHeaders" }, (response) => {
-          if (response && response.headers) {
-            resolve(response.headers);
-          } else {
-            resolve(null);
-          }
-        });
-      } else {
-        resolve(null);
-      }
-    });
-  });
-}
-
-async function checkRouteSegment(origin, destination, date) {
-  let attempts = 0;
-  while (attempts < MAX_RETRY_ATTEMPTS) {
-    await throttleRequest();
-    try {
-      await new Promise(resolve => setTimeout(resolve, delay));
-
-      let dynamicUrl = await getDynamicUrl();
-
-      const pageDataStr = localStorage.getItem("wizz_page_data") || "{}";
-      const pageData = JSON.parse(pageDataStr);
-      const data = {
-        flightType: "OW",
-        origin: origin,
-        destination: destination,
-        departure: date,
-        arrival: "",
-        intervalSubtype: null
-      };
-
-      let headers = { "Content-Type": "application/json" };
-
-      // Use cached headers if available and still valid.
-      if (pageData.headers && Date.now() - pageData.timestamp < 60 * 60 * 1000) {
-        if (debug) console.log("Using cached headers");
-        headers = { ...headers, ...pageData.headers };
-      } else {
-        const fetchedHeaders = await getHeadersFromPage();
-        if (fetchedHeaders) {
-          headers = { ...headers, ...fetchedHeaders };
+  // ---------------- API Request Function ----------------
+  function getHeadersFromPage() {
+    return new Promise((resolve) => {
+      // Instead of querying the active tab, query any tab with the multipass URL.
+      chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
+        if (tabs && tabs.length > 0) {
+          // Use the first multipass tab found.
+          const multipassTab = tabs[0];
+          chrome.tabs.sendMessage(multipassTab.id, { action: "getHeaders" }, (response) => {
+            if (response && response.headers) {
+              resolve(response.headers);
+            } else {
+              resolve(null);
+            }
+          });
         } else {
-          if (debug) console.log("Failed to get headers from page, using defaults");
+          resolve(null);
         }
-      }
-
-      const fetchResponse = await fetch(dynamicUrl, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(data)
       });
-
-      if (!fetchResponse.ok) {
-        if (fetchResponse.status === 400) {
-          if (debug) console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
-          return [];
-        }
-        if (debug) throw new Error(`HTTP error: ${fetchResponse.status}`);
-      }
-
-      const contentType = fetchResponse.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await fetchResponse.text();
-        if (text.trim().startsWith("<!DOCTYPE")) {
-          if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
-          localStorage.removeItem("wizz_page_data");
-          await refreshMultipassTab();
-          dynamicUrl = await getDynamicUrl();
-          // Throw a specific error that we can catch below
-          throw new Error("Invalid response format: expected JSON but received HTML");
-        }
-      }
-
-      const responseData = await fetchResponse.json();
-      if (debug) console.log(`Response for segment ${origin} → ${destination}:`, responseData);
-      return responseData.flightsOutbound || [];
-      
-    } catch (error) {
-      if (error.message.includes("426")) {
-        const waitTime = 60000;
-        if (debug) console.warn(`Rate limit encountered (426) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
-        showTimeoutCountdown(waitTime);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      } else if (error.message.includes("429")) {
-        const waitTime = 40000;
-        if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
-        showTimeoutCountdown(waitTime);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      } else if (error.message.includes("Invalid response format")) {
-        // Do NOT wait here; instead, simply log the issue and break out of the retry loop.
-        if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. Skipping wait.`);
-        break;
-      } else {
-        if (debug) throw error;
-      }
-      attempts++;
-    }
+    });
   }
-  if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
-}
+
+  async function checkRouteSegment(origin, destination, date) {
+    let attempts = 0;
+    while (attempts < MAX_RETRY_ATTEMPTS) {
+      await throttleRequest();
+      try {
+        await new Promise(resolve => setTimeout(resolve, delay));
+
+        let dynamicUrl = await getDynamicUrl();
+
+        const pageDataStr = localStorage.getItem("wizz_page_data") || "{}";
+        const pageData = JSON.parse(pageDataStr);
+        const data = {
+          flightType: "OW",
+          origin: origin,
+          destination: destination,
+          departure: date,
+          arrival: "",
+          intervalSubtype: null
+        };
+
+        let headers = { "Content-Type": "application/json" };
+
+        // Use cached headers if available and still valid.
+        if (pageData.headers && Date.now() - pageData.timestamp < 60 * 60 * 1000) {
+          if (debug) console.log("Using cached headers");
+          headers = { ...headers, ...pageData.headers };
+        } else {
+          const fetchedHeaders = await getHeadersFromPage();
+          if (fetchedHeaders) {
+            headers = { ...headers, ...fetchedHeaders };
+          } else {
+            if (debug) console.log("Failed to get headers from page, using defaults");
+          }
+        }
+
+        const fetchResponse = await fetch(dynamicUrl, {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify(data)
+        });
+
+        if (!fetchResponse.ok) {
+          if (fetchResponse.status === 400) {
+            if (debug) console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
+            return [];
+          }
+          if (debug) throw new Error(`HTTP error: ${fetchResponse.status}`);
+        }
+
+        const contentType = fetchResponse.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          const text = await fetchResponse.text();
+          if (text.trim().startsWith("<!DOCTYPE")) {
+            if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
+            localStorage.removeItem("wizz_page_data");
+            await refreshMultipassTab();
+            dynamicUrl = await getDynamicUrl();
+            // Throw a specific error that we can catch below
+            throw new Error("Invalid response format: expected JSON but received HTML");
+          }
+        }
+
+        const responseData = await fetchResponse.json();
+        if (debug) console.log(`Response for segment ${origin} → ${destination}:`, responseData);
+        return responseData.flightsOutbound || [];
+        
+      } catch (error) {
+        if (error.message.includes("426")) {
+          const waitTime = 60000;
+          if (debug) console.warn(`Rate limit encountered (426) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+          showTimeoutCountdown(waitTime);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else if (error.message.includes("429")) {
+          const waitTime = 40000;
+          if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+          showTimeoutCountdown(waitTime);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else if (error.message.includes("Invalid response format")) {
+          // Do NOT wait here; instead, simply log the issue and break out of the retry loop.
+          if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. Skipping wait.`);
+          break;
+        } else {
+          if (debug) throw error;
+        }
+        attempts++;
+      }
+    }
+    if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
+  }
 
   // ---------------- Graph Building and DFS Functions ----------------
   function buildGraph(routesData) {
@@ -1083,7 +1057,7 @@ async function checkRouteSegment(origin, destination, date) {
               if (dateToSearch > bookingHorizon) break;
               const dateStr = dateToSearch.toISOString().slice(0, 10);
               const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
-              let flights = getCachedResults(cacheKey);
+              let flights = await getCachedResults(cacheKey);
               if (flights !== null) {
                 flights = flights.map(unifyRawFlight);
               } else {
@@ -1091,7 +1065,7 @@ async function checkRouteSegment(origin, destination, date) {
                 try {
                   flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
                   flights = flights.map(unifyRawFlight);
-                  setCachedResults(cacheKey, flights);
+                  await setCachedResults(cacheKey, flights);
                 } catch (error) {
                   flights = [];
                 }
@@ -1241,7 +1215,7 @@ async function checkRouteSegment(origin, destination, date) {
           continue;
         }
         const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-        let cachedDirect = getCachedResults(cacheKey);
+        let cachedDirect = await getCachedResults(cacheKey);
         if (cachedDirect) {
           cachedDirect = cachedDirect.map(unifyRawFlight);
           if (shouldAppend) {
@@ -1259,10 +1233,10 @@ async function checkRouteSegment(origin, destination, date) {
             if (shouldAppend) {
               flights.forEach(flight => appendRouteToDisplay(flight));
             }
-            setCachedResults(cacheKey, flights);
+            await setCachedResults(cacheKey, flights);
             validDirectFlights = validDirectFlights.concat(flights);
           } else {
-            setCachedResults(cacheKey, []);
+            await setCachedResults(cacheKey, []);
           }
         } catch (error) {
           console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
