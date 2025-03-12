@@ -10,11 +10,11 @@
     #ui-scale::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
-      width: 18px;
-      height: 18px;
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
       background: #C90076;
-      border: 2px solid white;
+      border: 4px solid white;
       cursor: pointer;
       margin-top: -8px;
     }
@@ -178,7 +178,7 @@
       <!-- Options Toggle (Entire Options Hidden by Default) -->
       <div class="mb-4">
         <!-- Options Panel (Hidden by Default) -->
-        <div id="options-container" class="mt-3 hidden space-y-4">
+        <div id="options-container" class="mt-3 hidden space-y-4 p-4 rounded-md border-2 border-[#20006D]">
           <!-- Basic Options: Preferred Airport, Connection Times, and Stopover Options -->
           <!-- Preferred Airport, Connection Time, and Clear Cache in One Line -->
           <div class="flex items-end justify-between gap-4">
@@ -192,8 +192,8 @@
             <!-- Connection Time (Centered Title & Smaller Inputs) -->
             <div class="flex flex-col items-center">
               <!-- Centered Header -->
-              <label class="block text-gray-700 font-medium mb-1 text-center">CONNECTION (minutes)</label>
-              <div class="flex items-center gap-3">
+              <label class="block text-gray-700 font-medium mb-1 text-center">Connection (minutes)</label>
+              <div class="flex items-center gap-1">
                 <div class="flex flex-col items-center">
                   <label class="block text-gray-700 text-xs font-medium mb-1 text-center">MIN</label>
                   <input type="number" id="min-connection-time" value="90"
@@ -209,13 +209,14 @@
 
             <!-- Clear Cache Button (Right Aligned & Auto Width) -->
             <button id="clear-cache-button"
-              class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 whitespace-nowrap self-end cursor-pointer">
-              CLEAR CACHE
+              class="px-2 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 whitespace-nowrap self-end cursor-pointer">
+              <div>CLEAR</div>
+              <div>CACHE</div>
             </button>
           </div>
 
 
-          <!-- UI Scale & Clear Cache & Update Button -->
+          <!-- UI Scale & Update Button -->
           <div class="grid grid-cols-1 gap-3">
             <div class="mt-0">
               <label class="block text-sm font-medium text-gray-700 mb-1">UI Scale</label>
@@ -227,7 +228,7 @@
             </div>
           <!-- Expert Settings Toggle -->
           <div>
-            <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-3 py-2 rounded">
+            <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-3 py-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
               SHOW EXPERT SETTINGS
             </button>
             <!-- Expert Settings (Hidden by Default) -->

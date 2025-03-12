@@ -5,12 +5,10 @@ import {
     airportFlags
   } from './airports.js';
   // ----------------------- Global Settings -----------------------
-  const MIN_CONNECTION_MINUTES = 90;
-  const BASE_DELAY_MS = 500;
-  const MAX_RETRY_ATTEMPTS = 2;  
-
   // Throttle and caching parameters (loaded from localStorage if available)
-  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 600;
+  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 500;
+  const MAX_RETRY_ATTEMPTS = 2;  
+  const delay = Math.floor(Math.random() * (1000 - REQUESTS_FREQUENCY_MS + 1)) + REQUESTS_FREQUENCY_MS;
   let PAUSE_DURATION_MS = Number(localStorage.getItem('pauseDurationSeconds'))
     ? Number(localStorage.getItem('pauseDurationSeconds')) * 1000
     : 15000;
@@ -21,8 +19,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let lastKnownResultsCount = 0;
-  let debug = true;
+  let debug = false;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -101,7 +98,7 @@ import {
       requestsThisWindow = 0;
     }
     requestsThisWindow++;
-    await new Promise(resolve => setTimeout(resolve, REQUESTS_FREQUENCY_MS));
+    await new Promise(resolve => setTimeout(resolve, delay));
 
     throttleResetTimer = setTimeout(() => {
       requestsThisWindow = 0;
@@ -644,7 +641,6 @@ async function checkRouteSegment(origin, destination, date) {
   while (attempts < MAX_RETRY_ATTEMPTS) {
     await throttleRequest();
     try {
-      const delay = Math.floor(Math.random() * (1000 - BASE_DELAY_MS + 1)) + BASE_DELAY_MS;
       await new Promise(resolve => setTimeout(resolve, delay));
 
       let dynamicUrl = await getDynamicUrl();
