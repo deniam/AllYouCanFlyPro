@@ -10,11 +10,11 @@
     #ui-scale::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
-      width: 18px;
-      height: 18px;
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
       background: #C90076;
-      border: 2px solid white;
+      border: 4px solid white;
       cursor: pointer;
       margin-top: -8px;
     }
@@ -72,7 +72,7 @@
         <!-- Departure Container as flex item -->
         <div class="flex-1">
           <label for="origin-multi" class="sr-only">Origin</label>
-          <div id="origin-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md px-3 py-2">
+          <div id="origin-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pr-4">
             <!-- dynamic input rows get inserted here -->
           </div>
         </div>
@@ -87,100 +87,136 @@
         <!-- Destination Input -->
         <div class="flex-1">
           <label for="destination-multi" class="sr-only">Destination</label>
-          <div id="destination-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md px-3 py-2">
+          <div id="destination-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pl-4">
             <!-- dynamic input rows get inserted here -->
           </div>
         </div>
       </div>
 
-      <!-- Date Selection -->
-      <div class="mb-2 flex gap-1">
-        <!-- Departure Date -->
-        <div class="w-1/2 relative">
-          <label for="departure-date" class="block text-sm font-medium text-gray-700 mb-1">Departure Date</label>
+      <!-- Date Selection: Two Equal Columns for Departure and Return -->
+      <div class="mb-2 flex gap-1 items-center">
+        <!-- Departure Date Container -->
+        <div class="flex-1 relative">
+          <!-- <label for="departure-date" class="block text-sm font-medium text-gray-700 mb-1">Departure Date</label> -->
           <input type="text" id="departure-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Departure Date">
           <div id="departure-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
         </div>
-        <!-- Return Date (Only for round-trip) -->
-        <div class="w-1/2 relative" id="return-date-container" style="display: none;">
-          <label for="return-date" class="block text-sm font-medium text-gray-700 mb-1">Return Date</label>
-          <input type="text" id="return-date" disabled readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Return Date">
-          <div id="return-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
+        <!-- Return Date / Add Return Date Button Container -->
+        <div class="flex-1 relative" id="return-date-wrapper">
+          <!-- Initially show the Add Return Date button -->
+          <div id="add-return-date-button-container">
+            <button id="trip-type-toggle" class="flex items-center justify-center w-full gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+              <span id="trip-type-text">Add Return Date</span>
+            </button>
+          </div>
+          <!-- Return Date Container (hidden by default) -->
+          <div id="return-date-container" style="display: none;">
+            <!-- <label for="return-date" class="block text-sm font-medium text-gray-700 mb-1">Return Date</label> -->
+            <div class="flex items-center">
+              <input type="text" id="return-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Return Date">
+              <button id="remove-return-date" class="ml-1 p-1 bg-[#20006D] text-white text-xs rounded-lg hover:bg-[#A00065] flex items-center justify-center w-5 h-5 shadow-md transition cursor-pointer">
+                ✕
+              </button>
+            </div>
+            <div id="return-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
+          </div>
         </div>
       </div>
 
-      <!-- Trip Type -->
-        <div class="mb-4 flex items-center gap-2">
-          <!-- Trip Type Toggle Button -->
-          <button id="trip-type-toggle" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
-            <span id="trip-type-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M13 5l7 7-7 7"/>
+            <!-- Search, Stopover Options, and Options Buttons -->
+      <div class="mb-4 flex items-center justify-between">
+        <!-- Search Flights Button -->
+        <button id="search-button" class="flex items-center gap-1 px-3 py-3 bg-[#C90076] text-white text-medium font-large font-bold rounded-lg hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#20006D] transition cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>
+          SEARCH
+        </button>
+
+        <!-- Right Section: Stopovers and Options -->
+        <div class="flex items-center gap-2">
+          <!-- Stopover Options Dropdown -->
+          <div class="relative">
+            <button id="stopover-dropdown-button" class="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition cursor-pointer">
+              <span id="selected-stopover">Non-stop only</span>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
               </svg>
-            </span>
-            <span id="trip-type-text">One-way</span>
-          </button>
-        
+            </button>
+            
+            <!-- Stopover Options Dropdown Content -->
+            <div id="stopover-dropdown" class="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg hidden z-10">
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="Non-stop only" checked>
+                <span>Non-stop only</span>
+              </label>
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="One stop or fewer">
+                <span>One stop or fewer</span>
+              </label>
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="One stop (overnight)">
+                <span>One stop (overnight)</span>
+              </label>
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="Two stops or fewer">
+                <span>Two stops or fewer</span>
+              </label>
+            </div>
+          </div>
+
           <!-- Options Button -->
           <button id="toggle-options" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
               <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
             </svg>
-            Options
-          </button>
-        
-          <!-- Search Flights Button -->
-          <button id="search-button" class="flex items-center gap-1 px-2 py-2 ml-auto bg-[#C90076] text-white font-medium rounded-lg hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#20006D] transition cursor-pointer">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg>
-            Search Flights
+            OPTIONS
           </button>
         </div>
+      </div>
 
       <!-- Options Toggle (Entire Options Hidden by Default) -->
       <div class="mb-4">
         <!-- Options Panel (Hidden by Default) -->
-        <div id="options-container" class="mt-3 hidden space-y-4">
+        <div id="options-container" class="mt-3 hidden space-y-4 p-4 rounded-md border-2 border-[#20006D]">
           <!-- Basic Options: Preferred Airport, Connection Times, and Stopover Options -->
-          <div class="grid grid-cols-1 gap-3">
-            <!-- Preferred Airport -->
-            <div>
-              <label class="block text-gray-700 font-medium mb-1">Preferred Airport:</label>
+          <!-- Preferred Airport, Connection Time, and Clear Cache in One Line -->
+          <div class="flex items-end justify-between gap-4">
+            <!-- Preferred Airport (Takes More Space) -->
+            <div class="flex-1 relative">
+              <label class="block text-gray-700 font-medium mb-1">PREFERRED AIRPORT</label>
               <input type="text" id="preferred-airport" placeholder="Enter preferred airport"
                 class="w-full bg-gray-100 border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]">
-              <div id="airport-suggestions-preferred" class="absolute hidden bg-white border border-gray-300 rounded shadow-lg z-20 text-gray-800 text-sm"></div>
             </div>
-            <!-- Connection Times -->
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-gray-700 font-medium mb-1">Min Connection Time (min):</label>
-                <input type="number" id="min-connection-time" value="90"
-                  class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
+
+            <!-- Connection Time (Centered Title & Smaller Inputs) -->
+            <div class="flex flex-col items-center">
+              <!-- Centered Header -->
+              <label class="block text-gray-700 font-medium mb-1 text-center">Connection (minutes)</label>
+              <div class="flex items-center gap-1">
+                <div class="flex flex-col items-center">
+                  <label class="block text-gray-700 text-xs font-medium mb-1 text-center">MIN</label>
+                  <input type="number" id="min-connection-time" value="90"
+                    class="bg-gray-100 border border-gray-300 rounded px-1 py-1 text-right focus:outline-none focus:ring-1 focus:ring-[#C90076] w-[55px]">
+                </div>
+                <div class="flex flex-col items-center">
+                  <label class="block text-gray-700 text-xs font-medium mb-1 text-center">MAX</label>
+                  <input type="number" id="max-connection-time" value="1440"
+                    class="bg-gray-100 border border-gray-300 rounded px-1 py-1 text-right focus:outline-none focus:ring-1 focus:ring-[#C90076] w-[55px]">
+                </div>
               </div>
-              <div>
-                <label class="block text-gray-700 font-medium mb-1">Max Connection Time (min):</label>
-                <input type="number" id="max-connection-time" value="360"
-                  class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
-              </div>
             </div>
-            <!-- Stopover Options -->
-            <div class="flex flex-col gap-1">
-              <label class="inline-flex items-center text-gray-700 cursor-pointer">
-                <input type="checkbox" class="form-checkbox text-[#C90076]" id="transfer-checkbox">
-                <span class="ml-2">Allow connections (1 transfer)</span>
-              </label>
-              <label class="inline-flex items-center text-gray-700 cursor-pointer">
-                <input type="checkbox" class="form-checkbox text-[#C90076]" id="two-transfer-checkbox">
-                <span class="ml-2">Allow two connections (overnight transfer)</span>
-              </label>
-              <label class="inline-flex items-center text-gray-700 cursor-pointer">
-                <input type="checkbox" class="form-checkbox text-[#C90076]" id="overnight-checkbox">
-                <span class="ml-2">Allow overnight transfer</span>
-              </label>
-            </div>
+
+            <!-- Clear Cache Button (Right Aligned & Auto Width) -->
+            <button id="clear-cache-button"
+              class="px-2 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 whitespace-nowrap self-end cursor-pointer">
+              <div>CLEAR</div>
+              <div>CACHE</div>
+            </button>
           </div>
-          <!-- UI Scale & Clear Cache & Update Button -->
+
+
+          <!-- UI Scale & Update Button -->
           <div class="grid grid-cols-1 gap-3">
             <div class="mt-0">
               <label class="block text-sm font-medium text-gray-700 mb-1">UI Scale</label>
@@ -190,15 +226,10 @@
                   class="relative w-full appearance-none h-2 bg-transparent cursor-pointer">
               </div>
             </div>
-            <div>
-              <button id="clear-cache-button" class="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
-                Clear Cache
-              </button>              
-            </div>
           <!-- Expert Settings Toggle -->
           <div>
-            <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-3 py-2 rounded">
-              Show Expert Settings
+            <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-3 py-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
+              SHOW EXPERT SETTINGS
             </button>
             <!-- Expert Settings (Hidden by Default) -->
             <div id="expert-settings" class="mt-3 hidden border-t pt-3">
@@ -229,7 +260,7 @@
           
             <div>
               <button id="update-preferred-airport" class="w-full bg-[#20006D] text-white rounded px-4 py-2 hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076]">
-                Update
+                UPDATE
               </button>
             </div>
           </div>
@@ -237,9 +268,11 @@
       </div>
 
       <!-- Results and Sort Container (initially hidden) -->
-      <!-- The container that holds the total results label and the sort dropdown -->
       <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
         <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>
+        <button id="download-csv-button" class="px-2 py-1 bg-[#20006D] text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden">
+          ⬇️ CSV
+        </button>
         <div class="flex items-center gap-2">
           <label for="sort-select" class="text-sm font-medium text-gray-700">Sort by</label>
           <select id="sort-select" class="block w-32 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
