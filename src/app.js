@@ -21,6 +21,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
+  let lastKnownResultsCount = 0;
   let debug = true;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
@@ -189,6 +190,7 @@ import {
             div.textContent = entry;
             div.addEventListener("click", () => {
               inputEl.value = entry;
+              inputEl.dispatchEvent(new Event("input"));
               suggestionsEl.classList.add("hidden");
             });
             suggestionsEl.appendChild(div);
@@ -274,7 +276,7 @@ import {
   
     // Hide suggestions on clicking outside the input or suggestion box
     document.addEventListener("click", event => {
-      if (!inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
+      if (inputEl && suggestionsEl && !inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
         suggestionsEl.classList.add("hidden");
       }
     });
@@ -616,9 +618,28 @@ function unifyRawFlight(rawFlight) {
   }
 
 // ---------------- API Request Function ----------------
-async function checkRouteSegment(origin, destination, date) {
-  
+function getHeadersFromPage() {
+  return new Promise((resolve) => {
+    // Instead of querying the active tab, query any tab with the multipass URL.
+    chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        // Use the first multipass tab found.
+        const multipassTab = tabs[0];
+        chrome.tabs.sendMessage(multipassTab.id, { action: "getHeaders" }, (response) => {
+          if (response && response.headers) {
+            resolve(response.headers);
+          } else {
+            resolve(null);
+          }
+        });
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
 
+async function checkRouteSegment(origin, destination, date) {
   let attempts = 0;
   while (attempts < MAX_RETRY_ATTEMPTS) {
     await throttleRequest();
@@ -626,10 +647,8 @@ async function checkRouteSegment(origin, destination, date) {
       const delay = Math.floor(Math.random() * (1000 - BASE_DELAY_MS + 1)) + BASE_DELAY_MS;
       await new Promise(resolve => setTimeout(resolve, delay));
 
-      // Get (or re-fetch) the dynamic URL
       let dynamicUrl = await getDynamicUrl();
 
-      // Get cached page data for headers
       const pageDataStr = localStorage.getItem("wizz_page_data") || "{}";
       const pageData = JSON.parse(pageDataStr);
       const data = {
@@ -640,21 +659,20 @@ async function checkRouteSegment(origin, destination, date) {
         arrival: "",
         intervalSubtype: null
       };
+
       let headers = { "Content-Type": "application/json" };
+
+      // Use cached headers if available and still valid.
       if (pageData.headers && Date.now() - pageData.timestamp < 60 * 60 * 1000) {
         if (debug) console.log("Using cached headers");
         headers = { ...headers, ...pageData.headers };
       } else {
-        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-          const currentTab = tabs[0];
-          chrome.tabs.sendMessage(currentTab.id, { action: "getHeaders" }, function (response) {
-            if (response && response.headers) {
-              headers = { ...headers, ...response.headers };
-            } else {
-              if (debug) console.log("Failed to get headers from page, using defaults");
-            }
-          });
-        });
+        const fetchedHeaders = await getHeadersFromPage();
+        if (fetchedHeaders) {
+          headers = { ...headers, ...fetchedHeaders };
+        } else {
+          if (debug) console.log("Failed to get headers from page, using defaults");
+        }
       }
 
       const fetchResponse = await fetch(dynamicUrl, {
@@ -675,23 +693,34 @@ async function checkRouteSegment(origin, destination, date) {
       if (!contentType.includes("application/json")) {
         const text = await fetchResponse.text();
         if (text.trim().startsWith("<!DOCTYPE")) {
-          if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and retrying.");
+          if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
           localStorage.removeItem("wizz_page_data");
-          if (debug) throw new Error("Invalid response format: expected JSON but received HTML");
+          await refreshMultipassTab();
+          dynamicUrl = await getDynamicUrl();
+          // Throw a specific error that we can catch below
+          throw new Error("Invalid response format: expected JSON but received HTML");
         }
       }
 
       const responseData = await fetchResponse.json();
       if (debug) console.log(`Response for segment ${origin} → ${destination}:`, responseData);
-      if (debug) console.log(responseData.flightsOutbound)
       return responseData.flightsOutbound || [];
       
     } catch (error) {
-      if (error.message.includes("429") || error.message.includes("426") || error.message.includes("Invalid response format")) {
-        const waitTime = error.message.includes("426") ? 60000 : 40000;
-        if (debug) console.warn(`Rate limit or invalid dynamic URL encountered for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+      if (error.message.includes("426")) {
+        const waitTime = 60000;
+        if (debug) console.warn(`Rate limit encountered (426) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
         showTimeoutCountdown(waitTime);
         await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else if (error.message.includes("429")) {
+        const waitTime = 40000;
+        if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+        showTimeoutCountdown(waitTime);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else if (error.message.includes("Invalid response format")) {
+        // Do NOT wait here; instead, simply log the issue and break out of the retry loop.
+        if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. Skipping wait.`);
+        break;
       } else {
         if (debug) throw error;
       }
@@ -700,6 +729,7 @@ async function checkRouteSegment(origin, destination, date) {
   }
   if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
 }
+
   // ---------------- Graph Building and DFS Functions ----------------
   function buildGraph(routesData) {
     const graph = {};
@@ -887,13 +917,15 @@ async function checkRouteSegment(origin, destination, date) {
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         let currentTab = tabs[0];
-        if (!currentTab || !currentTab.url.includes("multipass.wizzair.com")) {
-          chrome.tabs.create({
-            url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets"
-          }, async (newTab) => {
-            await waitForTabToComplete(newTab.id);
-            await new Promise((r) => setTimeout(r, 1000));
-            chrome.tabs.sendMessage(newTab.id, { action: "getDynamicUrl" }, (response) => {
+        if (!currentTab || !currentTab.url || !currentTab.url.includes("multipass.wizzair.com") || !currentTab.active) {
+          try {
+            await refreshMultipassTab();
+          } catch (err) {
+            if (debug) console.error("Failed to refresh multipass tab:", err);
+          }
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabsAfter) => {
+            currentTab = tabsAfter[0];
+            chrome.tabs.sendMessage(currentTab.id, { action: "getDynamicUrl" }, (response) => {
               if (chrome.runtime.lastError) {
                 reject(new Error(chrome.runtime.lastError.message));
                 return;
@@ -937,6 +969,7 @@ async function checkRouteSegment(origin, destination, date) {
       });
     });
   }
+  
   function waitForTabToComplete(tabId) {
     return new Promise((resolve) => {
       const listener = (updatedTabId, changeInfo) => {
@@ -948,6 +981,34 @@ async function checkRouteSegment(origin, destination, date) {
       chrome.tabs.onUpdated.addListener(listener);
     });
   }
+
+  async function refreshMultipassTab() {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
+        if (!tabs || tabs.length === 0) {
+          // No multipass tab exists, so create a new one.
+          chrome.tabs.create(
+            { url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" },
+            (newTab) => {
+              waitForTabToComplete(newTab.id).then(resolve).catch(reject);
+            }
+          );
+        } else {
+          // Look for a non-active tab first.
+          let tabToReload = tabs.find(tab => !tab.active);
+          if (!tabToReload) {
+            // If all tabs are active, pick the first one.
+            tabToReload = tabs[0];
+          }
+          chrome.tabs.reload(tabToReload.id, {}, () => {
+            waitForTabToComplete(tabToReload.id).then(resolve).catch(reject);
+          });
+        }
+      });
+    });
+  }
+  
+  
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
     // --- Updated searchConnectingRoutes ---
   // Searches for connecting (multi‑leg) routes.
@@ -1218,211 +1279,231 @@ async function checkRouteSegment(origin, destination, date) {
   }
   // ---------------- Main Search Handler ----------------
   // --- Updated Round-Trip Pairing and Rendering in handleSearch ---
-  async function handleSearch() {
-    globalResults = [];
-    totalResultsEl.textContent = "Total results: 0";
-  
-    const departureInputRaw = document.getElementById("departure-date").value.trim();
-    const searchButton = document.getElementById("search-button");
-  
-    if (searchButton.textContent.includes("Stop Search")) {
-      searchCancelled = true;
-      if (throttleResetTimer) {
-        clearTimeout(throttleResetTimer);
-        throttleResetTimer = null;
-      }
-      if (timeoutInterval) {
-        clearInterval(timeoutInterval);
-        timeoutInterval = null;
-      }
-      const timeoutEl = document.getElementById("timeout-status");
-      timeoutEl.textContent = "";
-      timeoutEl.style.display = "none";
-      progressContainer.style.display = "none";
+  // Global variable to track if a search is active.
+let searchActive = false;
+
+// ---------------- Main Search Handler ----------------
+async function handleSearch() {
+  const searchButton = document.getElementById("search-button");
+
+  // If a search is already active, treat the click as a cancel request.
+  if (searchActive) {
+    searchCancelled = true;
+    if (throttleResetTimer) {
+      clearTimeout(throttleResetTimer);
+      throttleResetTimer = null;
+    }
+    if (timeoutInterval) {
+      clearInterval(timeoutInterval);
+      timeoutInterval = null;
+    }
+    const timeoutEl = document.getElementById("timeout-status");
+    timeoutEl.textContent = "";
+    timeoutEl.style.display = "none";
+    progressContainer.style.display = "none";
+    // Do not clear globalResults so that already fetched results remain visible.
+    searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
+      viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+        <path stroke-linecap="round" stroke-linejoin="round" 
+          d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+      </svg> SEARCH`;
+    // Mark search as no longer active.
+    searchActive = false;
+    return;
+  }
+
+  // Starting a new search: clear previous results and mark search as active.
+  globalResults = [];
+  totalResultsEl.textContent = "Total results: 0";
+  searchActive = true;
+  searchCancelled = false;
+  searchButton.textContent = "Stop Search";
+
+  // Reset request counter after 5 seconds (if needed)
+  setTimeout(() => {
+    requestsThisWindow = 0;
+  }, 5000);
+
+  let returnInputRaw = "";
+  if (window.currentTripType === "return") {
+    returnInputRaw = document.getElementById("return-date").value.trim();
+    if (!returnInputRaw) {
+      alert("Please select a return date for round-trip search.");
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
         viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
           <path stroke-linecap="round" stroke-linejoin="round" 
             d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
         </svg> SEARCH`;
+      searchActive = false;
       return;
     }
-    setTimeout(() => {
-      requestsThisWindow = 0;
-    }, 5000);
-    searchCancelled = false;
-    searchButton.textContent = "Stop Search";
+  }
+
+  let originInputs = getMultiAirportValues("origin-multi");
+  if (originInputs.length === 0) {
+    alert("Please enter at least one departure airport.");
+    searchButton.innerHTML = " SEARCH";
+    searchActive = false;
+    return;
+  }
+  let origins = originInputs.map(s => resolveAirport(s)).flat();
   
-    let returnInputRaw = "";
-    if (window.currentTripType === "return") {
-      returnInputRaw = document.getElementById("return-date").value.trim();
-      if (!returnInputRaw) {
-        alert("Please select a return date for round-trip search.");
-        searchButton.innerHTML = " SEARCH";
-        return;
-      }
+  let destinationInputs = getMultiAirportValues("destination-multi");
+  let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
+    ? ["ANY"]
+    : destinationInputs.map(s => resolveAirport(s)).flat();
+  
+  const tripType = window.currentTripType || "oneway";
+  let departureDates = [];
+  const departureInputRaw = document.getElementById("departure-date").value.trim();
+  if (departureInputRaw === "ALL") {
+    const today = new Date();
+    for (let i = 0; i <= 3; i++) {
+      const d = new Date(today.getTime() + i * 24 * 60 * 60 * 1000);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      departureDates.push(`${yyyy}-${mm}-${dd}`);
     }
+  } else {
+    departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
+  }
   
-    let originInputs = getMultiAirportValues("origin-multi");
-    if (originInputs.length === 0) {
-      alert("Please enter at least one departure airport.");
-      searchButton.innerHTML = " SEARCH";
-      return;
-    }
-    let origins = originInputs.map(s => resolveAirport(s)).flat();
-    
-    let destinationInputs = getMultiAirportValues("destination-multi");
-    let destinations = destinationInputs.length === 0 || destinationInputs.includes("ANY")
-      ? ["ANY"]
-      : destinationInputs.map(s => resolveAirport(s)).flat();
+  document.querySelector(".route-list").innerHTML = "";
+  // Begin progress update
+  updateProgress(0, 1, "Initializing search");
   
-    const tripType = window.currentTripType || "oneway";
-    let departureDates = [];
-    if (departureInputRaw === "ALL") {
-      const today = new Date();
-      for (let i = 0; i <= 3; i++) {
-        const d = new Date(today.getTime() + i * 24 * 60 * 60 * 1000);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        departureDates.push(`${yyyy}-${mm}-${dd}`);
+  const stopoverText = document.getElementById("selected-stopover").textContent;
+  let maxTransfers = 0;
+  if (stopoverText === "One stop or fewer" || stopoverText === "One stop (overnight)") {
+    maxTransfers = 1;
+  } else if (stopoverText === "Two stops or fewer") {
+    maxTransfers = 2;
+  } else {
+    maxTransfers = 0;
+  }
+  
+  try {
+    if (tripType === "oneway") {
+      for (const dateStr of departureDates) {
+        if (searchCancelled) break;
+        if (maxTransfers > 0) {
+          await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
+        } else {
+          await searchDirectRoutes(origins, destinations, dateStr);
+        }
       }
     } else {
-      departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
-    }
-  
-    document.querySelector(".route-list").innerHTML = "";
-    globalResults = [];
-    updateProgress(0, 1, "Initializing search");
-  
-    const stopoverText = document.getElementById("selected-stopover").textContent;
-    let maxTransfers = 0;
-    if (stopoverText === "One stop or fewer" || stopoverText === "One stop (overnight)") {
-      maxTransfers = 1;
-    } else if (stopoverText === "Two stops or fewer") {
-        maxTransfers = 2;
-    } else {
-        maxTransfers = 0;
-    }
-    
-    try {
-      if (tripType === "oneway") {
-        for (const dateStr of departureDates) {
-          if (searchCancelled) break;
-          if (maxTransfers > 0) {
-            await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
-          } else {
-            await searchDirectRoutes(origins, destinations, dateStr);
-          }
+      // Round-trip search:
+      suppressDisplay = true;
+      let outboundFlights = [];
+      for (const outboundDate of departureDates) {
+        if (searchCancelled) break;
+        let outboundFlightsForDate = [];
+        if (maxTransfers > 0) {
+          outboundFlightsForDate = outboundFlightsForDate.concat(
+            await searchConnectingRoutes(origins, destinations, outboundDate, maxTransfers)
+          );
+        } else {
+          outboundFlightsForDate = outboundFlightsForDate.concat(
+            await searchDirectRoutes(origins, destinations, outboundDate)
+          );
         }
-      } else {
-        // Round-trip search:
-        suppressDisplay = true;
-        let outboundFlights = [];
-        for (const outboundDate of departureDates) {
-          if (searchCancelled) break;
-          let outboundFlightsForDate = [];
-          if (maxTransfers > 0) {
-            outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchConnectingRoutes(origins, destinations, outboundDate, maxTransfers)
-            );
-          } else {
-            outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchDirectRoutes(origins, destinations, outboundDate)
-            );
-          }
-          outboundFlights = outboundFlights.concat(outboundFlightsForDate);
+        outboundFlights = outboundFlights.concat(outboundFlightsForDate);
+      }
+      // Deduplicate outbound flights.
+      const uniqueOutbound = [];
+      const outboundKeys = new Set();
+      for (const flight of outboundFlights) {
+        const key = flight.route.join("-") + "|" + flight.calculatedDuration.departureDate.getTime();
+        if (!outboundKeys.has(key)) {
+          outboundKeys.add(key);
+          uniqueOutbound.push(flight);
         }
-        // Deduplicate outbound flights.
-        const uniqueOutbound = [];
-        const outboundKeys = new Set();
-        for (const flight of outboundFlights) {
-          const key = flight.route.join("-") + "|" + flight.calculatedDuration.departureDate.getTime();
-          if (!outboundKeys.has(key)) {
-            outboundKeys.add(key);
-            uniqueOutbound.push(flight);
-          }
-        }
-        outboundFlights = uniqueOutbound;
-        globalResults = outboundFlights;
-        // Prepare inbound queries.
-        let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
-        let inboundQueries = {};
-        window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
-        const originalOrigins = resolveAirport(window.originalOriginInput);
-        for (const outbound of outboundFlights) {
-          let outboundDestination = outbound.arrivalStation;
-          for (const rDate of returnDates) {
-            for (const origin of originalOrigins) {
-              const key = `${outboundDestination}-${origin}-${rDate}`;
-              if (!inboundQueries[key]) {
-                if (maxTransfers > 0) {
-                  inboundQueries[key] = (async () => {
-                    const connectingResults = await searchConnectingRoutes([outbound.arrivalStation], [origin], rDate, maxTransfers, false);
-                    const directResults = await searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false);
-                    return [...connectingResults, ...directResults];
-                  })();
-                } else {
-                  inboundQueries[key] = searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false);
-                }
+      }
+      outboundFlights = uniqueOutbound;
+      globalResults = outboundFlights;
+      // Prepare inbound queries.
+      let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
+      let inboundQueries = {};
+      window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
+      const originalOrigins = resolveAirport(window.originalOriginInput);
+      for (const outbound of outboundFlights) {
+        let outboundDestination = outbound.arrivalStation;
+        for (const rDate of returnDates) {
+          for (const origin of originalOrigins) {
+            const key = `${outboundDestination}-${origin}-${rDate}`;
+            if (!inboundQueries[key]) {
+              if (maxTransfers > 0) {
+                inboundQueries[key] = (async () => {
+                  const connectingResults = await searchConnectingRoutes([outbound.arrivalStation], [origin], rDate, maxTransfers, false);
+                  const directResults = await searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false);
+                  return [...connectingResults, ...directResults];
+                })();
+              } else {
+                inboundQueries[key] = searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false);
               }
             }
           }
         }
+      }
   
-        const inboundResults = {};
-        for (const key of Object.keys(inboundQueries)) {
-          try {
-            inboundResults[key] = await inboundQueries[key];
-          } catch (error) {
-            console.error(`Error searching inbound flights for ${key}: ${error.message}`);
-            inboundResults[key] = [];
+      const inboundResults = {};
+      for (const key of Object.keys(inboundQueries)) {
+        try {
+          inboundResults[key] = await inboundQueries[key];
+        } catch (error) {
+          console.error(`Error searching inbound flights for ${key}: ${error.message}`);
+          inboundResults[key] = [];
+        }
+      }
+      for (const outbound of outboundFlights) {
+        let outboundDestination = outbound.arrivalStation;
+        let matchedInbound = [];
+        for (const rDate of returnDates) {
+          for (const origin of originalOrigins) {
+            const key = `${outboundDestination}-${origin}-${rDate}`;
+            let inboundForKey = inboundResults[key] || [];
+            const filteredInbound = inboundForKey.filter(inbound =>
+              Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000) >= 360 &&
+              inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate
+            );
+            matchedInbound = matchedInbound.concat(filteredInbound);
           }
         }
-        for (const outbound of outboundFlights) {
-          let outboundDestination = outbound.arrivalStation;
-          let matchedInbound = [];
-          for (const rDate of returnDates) {
-            for (const origin of originalOrigins) {
-              const key = `${outboundDestination}-${origin}-${rDate}`;
-              let inboundForKey = inboundResults[key] || [];
-              const filteredInbound = inboundForKey.filter(inbound =>
-                Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000) >= 360 &&
-                inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate
-              );
-              matchedInbound = matchedInbound.concat(filteredInbound);
-            }
+        const seenInbound = new Set();
+        const dedupedInbound = [];
+        for (const flight of matchedInbound) {
+          const depTime = flight.calculatedDuration.departureDate.getTime();
+          const dedupKey = flight.flightCode + "_" + depTime;
+          if (!seenInbound.has(dedupKey)) {
+            seenInbound.add(dedupKey);
+            dedupedInbound.push(flight);
           }
-          const seenInbound = new Set();
-          const dedupedInbound = [];
-          for (const flight of matchedInbound) {
-            const depTime = flight.calculatedDuration.departureDate.getTime();
-            const dedupKey = flight.flightCode + "_" + depTime;
-            if (!seenInbound.has(dedupKey)) {
-              seenInbound.add(dedupKey);
-              dedupedInbound.push(flight);
-            }
-          }
-          outbound.returnFlights = dedupedInbound;
         }
-        const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
-        globalResults = validRoundTripFlights;
-        suppressDisplay = false;
-        displayRoundTripResultsAll(validRoundTripFlights);
+        outbound.returnFlights = dedupedInbound;
       }
-    } catch (error) {
-      document.querySelector(".route-list").innerHTML = `<p>Error: ${error.message}</p>`;
-      console.error("Search error:", error);
-    } finally {
-      if (globalResults.length === 0 && tripType === "oneway") {
-        document.querySelector(".route-list").innerHTML = "<p>There are no available flights on this route.</p>";
-      }
-      hideProgress();
-      searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-        </svg> SEARCH`;
+      const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
+      globalResults = validRoundTripFlights;
+      suppressDisplay = false;
+      displayRoundTripResultsAll(validRoundTripFlights);
     }
+  } catch (error) {
+    document.querySelector(".route-list").innerHTML = `<p>Error: ${error.message}</p>`;
+    console.error("Search error:", error);
+  } finally {
+    // If no results found for one-way, display message.
+    if (globalResults.length === 0 && tripType === "oneway") {
+      document.querySelector(".route-list").innerHTML = "<p>There are no available flights on this route.</p>";
+    }
+    hideProgress();
+    searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+      </svg> SEARCH`;
+    // Mark search as not active.
+    searchActive = false;
   }
-  
+}
 
   // ---------------- Additional UI Functions ----------------
   
@@ -1816,75 +1897,80 @@ function createSegmentRow(segment) {
     return code.slice(0, 2) + ' ' + code.slice(2);
   }
 // --------CSV export-------------
-  function downloadResultsAsCSV() {
-    if (!globalResults || globalResults.length === 0) {
-      alert("No search results to export.");
-      return;
-    }
-    
-      // Extracting origin, destination, and dates from the input fields
-    const origin = document.getElementById("origin-multi").querySelector("input")?.value.trim() || "unknown";
-    const destination = document.getElementById("destination-multi").querySelector("input")?.value.trim() || "unknown";
-    const departureDate = document.getElementById("departure-date").value.trim() || "no-date";
-    const returnDate = document.getElementById("return-date").value.trim() || "oneway";
-
-    // Formatting filename: origin-destination-departureDate-returnDate.csv
-    const fileName = `${origin}-${destination}-${departureDate}-${returnDate}.csv`.replace(/\s+/g, "_").replace(/[^\w.-]/g, "");
-    const headers = [
-      "Departure Airport",        // departureStationText
-      "Departure Code",           // departureStationCode
-      "Arrival Airport",          // arrivalStationText
-      "Arrival Code",             // arrivalStationCode
-      "Departure Date",           // departureDate
-      "Departure Time",           // displayDeparture
-      "Departure Offset",         // departureOffsetText
-      "Arrival Date",             // arrivalDate
-      "Arrival Time",             // displayArrival
-      "Arrival Offset",           // arrivalOffsetText
-      "Duration (min)",           // calculatedDuration.totalMinutes
-      "Fare",                     // fare
-      "Currency",                 // currency
-      "Carrier",                  // carrierText
-      "Flight ID"                 // flightId
-    ];
-  
-    const csvRows = [headers.join(",")];
-  
-    globalResults.forEach(flight => {
-      const row = [
-        `"${flight.departureStationText}"`,         // Departure Airport Name
-        `"${flight.departureStationCode}"`,         // Departure Airport Code
-        `"${flight.arrivalStationText}"`,           // Arrival Airport Name
-        `"${flight.arrivalStationCode}"`,           // Arrival Airport Code
-        `"${flight.departureDate}"`,                // Departure Date
-        `"${flight.displayDeparture}"`,             // Departure Time
-        `"${flight.departureOffsetText}"`,          // Departure Offset
-        `"${flight.arrivalDate}"`,                  // Arrival Date
-        `"${flight.displayArrival}"`,               // Arrival Time
-        `"${flight.arrivalOffsetText}"`,            // Arrival Offset
-        flight.calculatedDuration.totalMinutes,     // Duration in minutes
-        `"${flight.fare}"`,                                // Fare price
-        `"${flight.currency}"`,                     // Currency
-        `"${flight.carrierText}"`,                  // Carrier Name
-        flight.flightId                      // Flight ID
-      ];
-      csvRows.push(row.join(","));
-    });
-  
-    const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
-  
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+function downloadResultsAsCSV() {
+  if (!globalResults || globalResults.length === 0) {
+    alert("No search results to export.");
+    return;
   }
-  
-  document.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("download-csv-button").addEventListener("click", downloadResultsAsCSV);
+
+  // Extracting origin, destination, and dates from the input fields
+  const origin = document.getElementById("origin-multi").querySelector("input")?.value.trim() || "unknown";
+  const destination = document.getElementById("destination-multi").querySelector("input")?.value.trim() || "unknown";
+  const departureDate = document.getElementById("departure-date").value.trim() || "no-date";
+  const returnDate = document.getElementById("return-date").value.trim() || "oneway";
+
+  // Formatting filename: origin-destination-departureDate-returnDate.csv
+  const fileName = `${origin}-${destination}-${departureDate}-${returnDate}.csv`
+    .replace(/\s+/g, "_")
+    .replace(/[^\w.-]/g, "");
+
+  const headers = [
+    "Departure Airport",       
+    "DCode",       
+    "Arrival Airport",         
+    "ACode",            
+    "Departure Date",          
+    "DTime",          
+    "DOffset",        
+    "Arrival Date",            
+    "ATime",            
+    "AOffset",          
+    "Duration",        
+    "Fare",                    
+    "Currency",                
+    "Carrier",                 
+    "Flight ID"                
+  ];
+
+  const csvRows = [headers.join("\t")];
+
+  // Iterate through globalResults and extract relevant flight data
+  globalResults.forEach(flight => {
+    const row = [
+      `"${flight.departureStationText}"`,
+      `"${flight.departureStationCode}"`,
+      `"${flight.arrivalStationText}"`,
+      `"${flight.arrivalStationCode}"`,
+      `"${flight.departureDate}"`,
+      `"${flight.displayDeparture}"`,
+      `"${flight.departureOffsetText}"`,
+      `"${flight.arrivalDate}"`,
+      `"${flight.displayArrival}"`,
+      `"${flight.arrivalOffsetText}"`,
+      `${Math.floor(flight.calculatedDuration.totalMinutes / 60)}:${String(flight.calculatedDuration.totalMinutes % 60).padStart(2, '0')}`, // hh:mm format
+      `="${parseFloat(flight.fare).toFixed(2)}"`, 
+      `"${flight.currency}"`,
+      `"${flight.carrierText}"`,
+      flight.flightId
+    ].join("\t");
+
+    csvRows.push(row);
   });
+
+  const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", fileName);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// Ensure button is correctly registered for clicks
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("download-csv-button").addEventListener("click", downloadResultsAsCSV);
+});
 
   // Function to toggle CSV button visibility before search
 function updateCSVButtonVisibility() {
@@ -2029,8 +2115,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
   
       if (cellDate < minDate || cellDate > lastBookable) {
-        dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
+        dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500", );
       } else {
+        dateCell.classList.add("font-bold");
         dateCell.addEventListener("click", () => {
           if (selectedDates.has(dateStr)) {
             selectedDates.delete(dateStr);
@@ -2197,6 +2284,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const firstInput = originContainer.querySelector("input");
       if (firstInput) {
         firstInput.value = storedPreferredAirport;
+        updateAirportRows(originContainer);
       }
     initializeMultiAirportField("destination-multi", "destination");
   
@@ -2332,81 +2420,5 @@ document.addEventListener("DOMContentLoaded", () => {
     scaleSlider.addEventListener("input", function() {
       document.body.style.zoom = this.value / 100;
     });
-  
-    // ---------------- Sorting Results Handler ----------------
-  // document.getElementById("sort-select").addEventListener("change", function () {
-  //   const sortOption = document.getElementById("sort-select").value;
-  //   if (sortOption === "default") {
-  //     globalResults.sort((a, b) => a.originalIndex - b.originalIndex);
-  //   } else if (sortOption === "departure") {
-  //     globalResults.sort((a, b) => {
-  //       return new Date(a.calculatedDuration.departureDate).getTime() - new Date(b.calculatedDuration.departureDate).getTime();
-  //     });
-  //   } else if (sortOption === "airport") {
-  //     globalResults.sort((a, b) => {
-  //       let nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
-  //       let nameB = (airportNames[b.route[0]] || b.route[0]).toLowerCase();
-  //       return nameA.localeCompare(nameB);
-  //     });
-  //   } else if (sortOption === "arrival") {
-  //     globalResults.sort((a, b) => {
-  //       const getFinalArrivalTime = (flight) => {
-  //         if (flight.returnFlights && flight.returnFlights.length > 0) {
-  //           // For round-trip, use the final return flight segment's arrival time.
-  //           return new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
-  //         } else {
-  //           return new Date(flight.calculatedDuration.arrivalDate).getTime();
-  //         }
-  //       };
-  //       return getFinalArrivalTime(a) - getFinalArrivalTime(b);
-  //     });
-  //   } else if (sortOption === "duration") {
-  //     globalResults.sort((a, b) => {
-  //       const getDuration = (flight) => {
-  //         if (flight.returnFlights && flight.returnFlights.length > 0) {
-  //           // Overall duration from outbound departure to final inbound arrival.
-  //           const outboundDeparture = new Date(flight.calculatedDuration.departureDate).getTime();
-  //           const inboundArrival = new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
-  //           return (inboundArrival - outboundDeparture) / 60000;
-  //         } else {
-  //           return flight.calculatedDuration.totalMinutes;
-  //         }
-  //       };
-  //       return getDuration(a) - getDuration(b);
-  //     });
-  //   }
-  //   const resultsDiv = document.querySelector(".route-list");
-  //   resultsDiv.innerHTML = "";
-  //   if (window.currentTripType === "return") {
-  //     const filteredResults = globalResults.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
-  //     const totalResultsEl = document.createElement("p");
-  //     totalResultsEl.textContent = `Total results: ${filteredResults.length}`;
-  //     totalResultsEl.className = "text-lg font-semibold text-[#20006D] mb-4";
-  //     resultsDiv.appendChild(totalResultsEl);
-  //     filteredResults.forEach(outbound => {
-  //       rehydrateDates(outbound);
-  //       const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
-  //       resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
-  //       outbound.returnFlights.forEach((ret, idx) => {
-  //         rehydrateDates(ret);
-  //         const outboundLastArrival = outbound.segments ? outbound.segments[outbound.segments.length - 1].arrivalDate : outbound.calculatedDuration.arrivalDate;
-  //         const inboundFirstDeparture = ret.segments && ret.segments[0] ? ret.segments[0].departureDate : ret.calculatedDuration.departureDate;
-  //         if (!outboundLastArrival || !inboundFirstDeparture ||
-  //             isNaN(outboundLastArrival.getTime()) || isNaN(inboundFirstDeparture.getTime())) {
-  //           return;
-  //         }
-  //         const stopoverMs = inboundFirstDeparture - outboundLastArrival;
-  //         const stopoverMinutes = Math.max(0, Math.round(stopoverMs / 60000));
-  //         const sh = Math.floor(stopoverMinutes / 60);
-  //         const sm = stopoverMinutes % 60;
-  //         const stopoverText = `Stopover: ${sh}h ${sm}m`;
-  //         const inboundHtml = renderRouteBlock(ret, `Return Flight ${idx + 1}`, stopoverText);
-  //         resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
-  //       });
-  //     });
-  //   } else {
-  //     displayGlobalResults(globalResults);
-  //   }
-  // });
-});
+  });
   
