@@ -19,7 +19,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let debug = false;
+  let debug = true;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -579,7 +579,7 @@ function unifyRawFlight(rawFlight) {
   }
   function handleClearCache() {
     // Define a set of keys to preserve
-    const keysToKeep = new Set(["wizz_page_data", "preferredAirport"]);
+    const keysToKeep = new Set(["wizz_page_data", "preferredAirport", "pauseDurationSeconds", "minConnectionTime", "maxConnectionTime", "cacheLifetimeHours", "maxRequestsInRow", "requestsFrequencyMs"]);
   
     // Loop over all keys in localStorage
     Object.keys(localStorage).forEach(key => {
@@ -1303,7 +1303,6 @@ async function handleSearch() {
         <path stroke-linecap="round" stroke-linejoin="round" 
           d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
       </svg> SEARCH`;
-    // Mark search as no longer active.
     searchActive = false;
     return;
   }
@@ -1343,12 +1342,12 @@ async function handleSearch() {
     return;
   }
   let origins = originInputs.map(s => resolveAirport(s)).flat();
-  
+
   let destinationInputs = getMultiAirportValues("destination-multi");
   let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
     ? ["ANY"]
     : destinationInputs.map(s => resolveAirport(s)).flat();
-  
+
   const tripType = window.currentTripType || "oneway";
   let departureDates = [];
   const departureInputRaw = document.getElementById("departure-date").value.trim();
@@ -1364,11 +1363,10 @@ async function handleSearch() {
   } else {
     departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
   }
-  
+
   document.querySelector(".route-list").innerHTML = "";
-  // Begin progress update
   updateProgress(0, 1, "Initializing search");
-  
+
   const stopoverText = document.getElementById("selected-stopover").textContent;
   let maxTransfers = 0;
   if (stopoverText === "One stop or fewer" || stopoverText === "One stop (overnight)") {
@@ -1378,7 +1376,7 @@ async function handleSearch() {
   } else {
     maxTransfers = 0;
   }
-  
+
   try {
     if (tripType === "oneway") {
       for (const dateStr of departureDates) {
@@ -1431,28 +1429,46 @@ async function handleSearch() {
             const key = `${outboundDestination}-${origin}-${rDate}`;
             if (!inboundQueries[key]) {
               if (maxTransfers > 0) {
-                inboundQueries[key] = (async () => {
-                  const connectingResults = await searchConnectingRoutes([outbound.arrivalStation], [origin], rDate, maxTransfers, false);
-                  const directResults = await searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false);
+                inboundQueries[key] = async () => {
+                  const connectingResults = await searchConnectingRoutes(
+                    [outbound.arrivalStation],
+                    [origin],
+                    rDate,
+                    maxTransfers,
+                    false
+                  );
+                  const directResults = await searchDirectRoutes(
+                    [outbound.arrivalStation],
+                    [origin],
+                    rDate,
+                    false
+                  );
                   return [...connectingResults, ...directResults];
-                })();
+                };
               } else {
-                inboundQueries[key] = searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false);
+                inboundQueries[key] = async () => {
+                  return await searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false);
+                };
               }
             }
           }
         }
       }
-  
+
       const inboundResults = {};
-      for (const key of Object.keys(inboundQueries)) {
+      const inboundKeys = Object.keys(inboundQueries);
+      // Process inbound queries sequentially to respect throttling.
+      for (const key of inboundKeys) {
+        await throttleRequest();
         try {
-          inboundResults[key] = await inboundQueries[key];
+          inboundResults[key] = await inboundQueries[key]();
         } catch (error) {
           console.error(`Error searching inbound flights for ${key}: ${error.message}`);
           inboundResults[key] = [];
         }
       }
+
+      // Match inbound flights with corresponding outbound flights.
       for (const outbound of outboundFlights) {
         let outboundDestination = outbound.arrivalStation;
         let matchedInbound = [];
@@ -1496,8 +1512,8 @@ async function handleSearch() {
     searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
       </svg> SEARCH`;
-    // Mark search as not active.
     searchActive = false;
+    updateCSVButtonVisibility();
   }
 }
 
@@ -1969,16 +1985,35 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
   // Function to toggle CSV button visibility before search
-function updateCSVButtonVisibility() {
-  const stopoverText = document.getElementById("selected-stopover").textContent;
-  const csvButton = document.getElementById("download-csv-button");
-
-  if (stopoverText === "Non-stop only") {
-    csvButton.classList.remove("hidden"); // Show button
-  } else {
-    csvButton.classList.add("hidden"); // Hide button
+  function updateCSVButtonVisibility() {
+    const csvButton = document.getElementById("download-csv-button");
+    
+    // Hide the button if there are no results.
+    if (!globalResults || globalResults.length === 0) {
+      csvButton.classList.add("hidden");
+      return;
+    }
+    
+    // A flight is considered direct if its segments array is undefined or has exactly one element.
+    // For round-trip flights, both the outbound and every inbound flight must be direct.
+    const allDirect = globalResults.every(flight => {
+      const outboundDirect = !flight.segments || flight.segments.length === 1;
+      let inboundDirect = true;
+      if (flight.returnFlights && flight.returnFlights.length > 0) {
+        inboundDirect = flight.returnFlights.every(inbound => {
+          return !inbound.segments || inbound.segments.length === 1;
+        });
+      }
+      return outboundDirect && inboundDirect;
+    });
+    
+    if (allDirect) {
+      csvButton.classList.remove("hidden");
+    } else {
+      csvButton.classList.add("hidden");
+    }
   }
-}
+  
 
 // Attach event listener to the Stopover dropdown selection
 document.addEventListener("DOMContentLoaded", () => {
