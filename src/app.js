@@ -21,7 +21,7 @@ import {
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let debug = false;
+  let debug = true;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -956,7 +956,9 @@ async function checkRouteSegment(origin, destination, date) {
     const routesData = await fetchDestinations();
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
     const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
-    const allowOvernight = document.getElementById("overnight-checkbox").checked;
+    const stopoverText = document.getElementById("selected-stopover").textContent;
+    const allowOvernight = stopoverText === "One stop (overnight)";
+
     const bookingHorizon = new Date();
     bookingHorizon.setDate(bookingHorizon.getDate() + 3);
   
@@ -1213,10 +1215,10 @@ async function checkRouteSegment(origin, destination, date) {
   async function handleSearch() {
     globalResults = [];
     totalResultsEl.textContent = "Total results: 0";
-
+  
     const departureInputRaw = document.getElementById("departure-date").value.trim();
     const searchButton = document.getElementById("search-button");
-    
+  
     if (searchButton.textContent.includes("Stop Search")) {
       searchCancelled = true;
       if (throttleResetTimer) {
@@ -1227,7 +1229,6 @@ async function checkRouteSegment(origin, destination, date) {
         clearInterval(timeoutInterval);
         timeoutInterval = null;
       }
-      // Hide the timeout status notification immediately
       const timeoutEl = document.getElementById("timeout-status");
       timeoutEl.textContent = "";
       timeoutEl.style.display = "none";
@@ -1236,7 +1237,7 @@ async function checkRouteSegment(origin, destination, date) {
         viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
           <path stroke-linecap="round" stroke-linejoin="round" 
             d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-        </svg> Search Flights`;
+        </svg> SEARCH`;
       return;
     }
     setTimeout(() => {
@@ -1250,7 +1251,7 @@ async function checkRouteSegment(origin, destination, date) {
       returnInputRaw = document.getElementById("return-date").value.trim();
       if (!returnInputRaw) {
         alert("Please select a return date for round-trip search.");
-        searchButton.innerHTML = " Search Flights";
+        searchButton.innerHTML = " SEARCH";
         return;
       }
     }
@@ -1258,7 +1259,7 @@ async function checkRouteSegment(origin, destination, date) {
     let originInputs = getMultiAirportValues("origin-multi");
     if (originInputs.length === 0) {
       alert("Please enter at least one departure airport.");
-      searchButton.innerHTML = " Search Flights";
+      searchButton.innerHTML = " SEARCH";
       return;
     }
     let origins = originInputs.map(s => resolveAirport(s)).flat();
@@ -1267,7 +1268,7 @@ async function checkRouteSegment(origin, destination, date) {
     let destinations = destinationInputs.length === 0 || destinationInputs.includes("ANY")
       ? ["ANY"]
       : destinationInputs.map(s => resolveAirport(s)).flat();
-
+  
     const tripType = window.currentTripType || "oneway";
     let departureDates = [];
     if (departureInputRaw === "ALL") {
@@ -1283,17 +1284,24 @@ async function checkRouteSegment(origin, destination, date) {
       departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
     }
   
-  
     document.querySelector(".route-list").innerHTML = "";
     globalResults = [];
     updateProgress(0, 1, "Initializing search");
   
+    const stopoverText = document.getElementById("selected-stopover").textContent;
+    let maxTransfers = 0;
+    if (stopoverText === "One stop or fewer" || stopoverText === "One stop (overnight)") {
+      maxTransfers = 1;
+    } else if (stopoverText === "Two stops or fewer") {
+        maxTransfers = 2;
+    } else {
+        maxTransfers = 0;
+    }
+    
     try {
       if (tripType === "oneway") {
         for (const dateStr of departureDates) {
           if (searchCancelled) break;
-          const maxTransfers = document.getElementById("two-transfer-checkbox").checked ? 2 :
-                               (document.getElementById("transfer-checkbox").checked ? 1 : 0);
           if (maxTransfers > 0) {
             await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
           } else {
@@ -1304,8 +1312,6 @@ async function checkRouteSegment(origin, destination, date) {
         // Round-trip search:
         suppressDisplay = true;
         let outboundFlights = [];
-        const maxTransfers = document.getElementById("two-transfer-checkbox").checked ? 2 :
-                             (document.getElementById("transfer-checkbox").checked ? 1 : 0);
         for (const outboundDate of departureDates) {
           if (searchCancelled) break;
           let outboundFlightsForDate = [];
@@ -1335,7 +1341,6 @@ async function checkRouteSegment(origin, destination, date) {
         // Prepare inbound queries.
         let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
         let inboundQueries = {};
-        // Store original origin values (airport codes)
         window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
         const originalOrigins = resolveAirport(window.originalOriginInput);
         for (const outbound of outboundFlights) {
@@ -1357,7 +1362,7 @@ async function checkRouteSegment(origin, destination, date) {
             }
           }
         }
-
+  
         const inboundResults = {};
         for (const key of Object.keys(inboundQueries)) {
           try {
@@ -1367,7 +1372,6 @@ async function checkRouteSegment(origin, destination, date) {
             inboundResults[key] = [];
           }
         }
-        // === In the Round-Trip Search section of handleSearch (inbound query handling) ===
         for (const outbound of outboundFlights) {
           let outboundDestination = outbound.arrivalStation;
           let matchedInbound = [];
@@ -1375,7 +1379,6 @@ async function checkRouteSegment(origin, destination, date) {
             for (const origin of originalOrigins) {
               const key = `${outboundDestination}-${origin}-${rDate}`;
               let inboundForKey = inboundResults[key] || [];
-              // Filter: require connection time of at least 360 minutes and inbound departure > outbound arrival.
               const filteredInbound = inboundForKey.filter(inbound =>
                 Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000) >= 360 &&
                 inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate
@@ -1395,31 +1398,6 @@ async function checkRouteSegment(origin, destination, date) {
           }
           outbound.returnFlights = dedupedInbound;
         }
-
-        // const resultsDiv = document.querySelector(".route-list");
-        // resultsDiv.innerHTML = "";
-        // const filteredOutbounds = outboundFlights.filter(flight =>
-        //   flight.returnFlights && flight.returnFlights.length > 0
-        // );
-        // // const totalResultsEl = document.createElement("p");
-        // // totalResultsEl.textContent = `Total results: ${filteredOutbounds.length}`;
-        // // totalResultsEl.className = "text-lg font-semibold text-[#20006D] mb-4";
-        // // resultsDiv.appendChild(totalResultsEl);
-        // filteredOutbounds.forEach(outbound => {
-        //   const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
-        //   resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
-        //   if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-        //     outbound.returnFlights.forEach((ret, idx) => {
-        //       const stopoverMs = ret.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate;
-        //       const stopoverMinutes = Math.max(0, Math.round(stopoverMs / 60000));
-        //       const ch = Math.floor(stopoverMinutes / 60);
-        //       const cm = stopoverMinutes % 60;
-        //       const stopoverText = `Stopover: ${ch}h ${cm}m`;
-        //       const inboundHtml = renderRouteBlock(ret, `Return Flight ${idx + 1}`, stopoverText);
-        //       resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
-        //     });
-        //   }
-        // });
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
         suppressDisplay = false;
@@ -1435,9 +1413,10 @@ async function checkRouteSegment(origin, destination, date) {
       hideProgress();
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-        </svg> Search Flights`
+        </svg> SEARCH`;
     }
   }
+  
 
   // ---------------- Additional UI Functions ----------------
   
@@ -2194,6 +2173,28 @@ function createSegmentRow(segment) {
   returnDateContainer.style.display = "none";
   tripTypeToggle.style.display = "block";
 
+  // === 9. Connections
+  document.getElementById("stopover-dropdown-button").addEventListener("click", function () {
+    document.getElementById("stopover-dropdown").classList.toggle("hidden");
+  });
+
+  // Close dropdown when clicking outside
+  document.addEventListener("click", function (event) {
+    const dropdown = document.getElementById("stopover-dropdown");
+    const button = document.getElementById("stopover-dropdown-button");
+    if (!dropdown.contains(event.target) && !button.contains(event.target)) {
+      dropdown.classList.add("hidden");
+    }
+  });
+
+  // Update selected stopover text
+  document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
+    radio.addEventListener("change", function () {
+      document.getElementById("selected-stopover").textContent = this.value;
+      document.getElementById("stopover-dropdown").classList.add("hidden");
+    });
+  });
+  // === 10. Return flights
   // When the user clicks the "Add Return Date" button:
   tripTypeToggle.addEventListener("click", () => {
     if (window.currentTripType === "oneway") {
@@ -2207,7 +2208,7 @@ function createSegmentRow(segment) {
       returnCalendarPopup.classList.remove("hidden");
     }
   });
-
+  
   // When the user clicks the remove (✕) button in the Return Date container:
   removeReturnDateBtn.addEventListener("click", () => {
     window.currentTripType = "oneway";
@@ -2223,7 +2224,7 @@ function createSegmentRow(segment) {
   });
 
 
-    // === 9. UI Scale change ===
+    // === 11. UI Scale change ===
     const scaleSlider = document.getElementById("ui-scale");
     document.body.style.zoom = scaleSlider.value / 100;
     scaleSlider.addEventListener("input", function() {

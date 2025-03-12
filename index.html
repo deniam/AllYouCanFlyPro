@@ -123,23 +123,56 @@
         </div>
       </div>
 
-      <!-- Options and Search Buttons -->
-      <div class="mb-4 flex items-center gap-2">
+            <!-- Search, Stopover Options, and Options Buttons -->
+      <div class="mb-4 flex items-center justify-between">
+        <!-- Search Flights Button -->
+        <button id="search-button" class="flex items-center gap-1 px-3 py-3 bg-[#C90076] text-white text-medium font-large font-bold rounded-lg hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#20006D] transition cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>
+          SEARCH
+        </button>
+
+        <!-- Right Section: Stopovers and Options -->
+        <div class="flex items-center gap-2">
+          <!-- Stopover Options Dropdown -->
+          <div class="relative">
+            <button id="stopover-dropdown-button" class="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition cursor-pointer">
+              <span id="selected-stopover">Non-stop only</span>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+            
+            <!-- Stopover Options Dropdown Content -->
+            <div id="stopover-dropdown" class="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg hidden z-10">
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="Non-stop only" checked>
+                <span>Non-stop only</span>
+              </label>
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="One stop or fewer">
+                <span>One stop or fewer</span>
+              </label>
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="One stop (overnight)">
+                <span>One stop (overnight)</span>
+              </label>
+              <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
+                <input type="radio" name="stopover" class="hidden" value="Two stops or fewer">
+                <span>Two stops or fewer</span>
+              </label>
+            </div>
+          </div>
+
           <!-- Options Button -->
           <button id="toggle-options" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
               <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
             </svg>
-            Options
+            OPTIONS
           </button>
-        
-          <!-- Search Flights Button -->
-          <button id="search-button" class="flex items-center gap-1 px-2 py-2 ml-auto bg-[#C90076] text-white font-medium rounded-lg hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#20006D] transition cursor-pointer">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg>
-            SEARCH
-          </button>
+        </div>
       </div>
 
       <!-- Options Toggle (Entire Options Hidden by Default) -->
@@ -168,22 +201,7 @@
                   class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
               </div>
             </div>
-            <!-- Stopover Options -->
-            <div class="flex flex-col gap-1">
-              <label class="inline-flex items-center text-gray-700 cursor-pointer">
-                <input type="checkbox" class="form-checkbox text-[#C90076]" id="transfer-checkbox">
-                <span class="ml-2">Allow connections (1 transfer)</span>
-              </label>
-              <label class="inline-flex items-center text-gray-700 cursor-pointer">
-                <input type="checkbox" class="form-checkbox text-[#C90076]" id="two-transfer-checkbox">
-                <span class="ml-2">Allow two connections (overnight transfer)</span>
-              </label>
-              <label class="inline-flex items-center text-gray-700 cursor-pointer">
-                <input type="checkbox" class="form-checkbox text-[#C90076]" id="overnight-checkbox">
-                <span class="ml-2">Allow overnight transfer</span>
-              </label>
-            </div>
-          </div>
+
           <!-- UI Scale & Clear Cache & Update Button -->
           <div class="grid grid-cols-1 gap-3">
             <div class="mt-0">
