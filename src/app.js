@@ -161,7 +161,12 @@ import {
     // Retrieve recent entries for this input (if any)
     function getRecentEntries() {
       const stored = localStorage.getItem(recentKey);
-      return stored ? JSON.parse(stored) : [];
+      let recents = stored ? JSON.parse(stored) : [];
+
+      if (!recents.includes("Anywhere")) {
+        recents.unshift("Anywhere");
+      }
+      return recents;
     }
 
     function addRecentEntry(entry) {
@@ -201,7 +206,8 @@ import {
         suggestionsEl.classList.add("hidden");
         return;
       }
-  
+      
+
       // Special case: if user types "any", show "Anywhere"
       if (query === "any") {
         const div = document.createElement("div");
@@ -1809,6 +1815,102 @@ function createSegmentRow(segment) {
     if (!code || code.length < 3) return code;
     return code.slice(0, 2) + ' ' + code.slice(2);
   }
+// --------CSV export-------------
+  function downloadResultsAsCSV() {
+    if (!globalResults || globalResults.length === 0) {
+      alert("No search results to export.");
+      return;
+    }
+    
+      // Extracting origin, destination, and dates from the input fields
+    const origin = document.getElementById("origin-multi").querySelector("input")?.value.trim() || "unknown";
+    const destination = document.getElementById("destination-multi").querySelector("input")?.value.trim() || "unknown";
+    const departureDate = document.getElementById("departure-date").value.trim() || "no-date";
+    const returnDate = document.getElementById("return-date").value.trim() || "oneway";
+
+    // Formatting filename: origin-destination-departureDate-returnDate.csv
+    const fileName = `${origin}-${destination}-${departureDate}-${returnDate}.csv`.replace(/\s+/g, "_").replace(/[^\w.-]/g, "");
+    const headers = [
+      "Departure Airport",        // departureStationText
+      "Departure Code",           // departureStationCode
+      "Arrival Airport",          // arrivalStationText
+      "Arrival Code",             // arrivalStationCode
+      "Departure Date",           // departureDate
+      "Departure Time",           // displayDeparture
+      "Departure Offset",         // departureOffsetText
+      "Arrival Date",             // arrivalDate
+      "Arrival Time",             // displayArrival
+      "Arrival Offset",           // arrivalOffsetText
+      "Duration (min)",           // calculatedDuration.totalMinutes
+      "Fare",                     // fare
+      "Currency",                 // currency
+      "Carrier",                  // carrierText
+      "Flight ID"                 // flightId
+    ];
+  
+    const csvRows = [headers.join(",")];
+  
+    globalResults.forEach(flight => {
+      const row = [
+        `"${flight.departureStationText}"`,         // Departure Airport Name
+        `"${flight.departureStationCode}"`,         // Departure Airport Code
+        `"${flight.arrivalStationText}"`,           // Arrival Airport Name
+        `"${flight.arrivalStationCode}"`,           // Arrival Airport Code
+        `"${flight.departureDate}"`,                // Departure Date
+        `"${flight.displayDeparture}"`,             // Departure Time
+        `"${flight.departureOffsetText}"`,          // Departure Offset
+        `"${flight.arrivalDate}"`,                  // Arrival Date
+        `"${flight.displayArrival}"`,               // Arrival Time
+        `"${flight.arrivalOffsetText}"`,            // Arrival Offset
+        flight.calculatedDuration.totalMinutes,     // Duration in minutes
+        `"${flight.fare}"`,                                // Fare price
+        `"${flight.currency}"`,                     // Currency
+        `"${flight.carrierText}"`,                  // Carrier Name
+        flight.flightId                      // Flight ID
+      ];
+      csvRows.push(row.join(","));
+    });
+  
+    const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+  
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+  
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("download-csv-button").addEventListener("click", downloadResultsAsCSV);
+  });
+
+  // Function to toggle CSV button visibility before search
+function updateCSVButtonVisibility() {
+  const stopoverText = document.getElementById("selected-stopover").textContent;
+  const csvButton = document.getElementById("download-csv-button");
+
+  if (stopoverText === "Non-stop only") {
+    csvButton.classList.remove("hidden"); // Show button
+  } else {
+    csvButton.classList.add("hidden"); // Hide button
+  }
+}
+
+// Attach event listener to the Stopover dropdown selection
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
+    radio.addEventListener("change", () => {
+      updateCSVButtonVisibility(); // Update visibility when stopover selection changes
+    });
+  });
+
+  // Also check visibility when the page loads
+  updateCSVButtonVisibility();
+});
+
+  
   // ---------------- Calendar ----------------
   function renderCalendarMonth(
     popupEl,
