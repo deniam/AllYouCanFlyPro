@@ -567,6 +567,19 @@ function unifyRawFlight(rawFlight) {
     showNotification("Cache successfully cleared! ✅");
   }  
 
+  async function cleanupCache() {
+    try {
+      const now = Date.now();
+      const expiredEntries = await db.cache.where("timestamp").below(now - CACHE_LIFETIME).toArray();
+      for (const entry of expiredEntries) {
+        await db.cache.delete(entry.key);
+        if (debug) console.log(`Удалена устаревшая запись кэша: ${entry.key}`);
+      }
+    } catch (e) {
+      console.error("Ошибка при очистке кэша:", e);
+    }
+  }
+
   async function setCachedResults(key, results) {
     const cacheData = { key, results, timestamp: Date.now() };
     try {
@@ -688,8 +701,9 @@ function unifyRawFlight(rawFlight) {
           showTimeoutCountdown(waitTime);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         } else if (error.message.includes("Invalid response format")) {
-          // Do NOT wait here; instead, simply log the issue and break out of the retry loop.
-          if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. Skipping wait.`);
+          const waitTime = 2000;
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. – waiting for ${waitTime / 1000} seconds`);
           break;
         } else {
           if (debug) throw error;
@@ -822,6 +836,21 @@ function unifyRawFlight(rawFlight) {
   
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
+    // Check if we have a cached routes object (wizz_page_data) that is still valid (e.g. within 1 hour)
+    const cachedDataStr = localStorage.getItem("wizz_page_data");
+    if (cachedDataStr) {
+      try {
+        const cachedData = JSON.parse(cachedDataStr);
+        if (Date.now() - cachedData.timestamp < 60 * 60 * 1000 && cachedData.routes) {
+          if (debug) console.log("Using cached destinations from localStorage");
+          return cachedData.routes;
+        }
+      } catch (e) {
+        console.error("Error parsing cached destinations:", e);
+      }
+    }
+  
+    // If no valid cache, query the multipass tab.
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, async (tabs) => {
         let multipassTab;
@@ -859,6 +888,7 @@ function unifyRawFlight(rawFlight) {
           });
           return;
         }
+        // Ensure the tab is fully loaded.
         if (multipassTab.status !== "complete") {
           await waitForTabToComplete(multipassTab.id);
         }
@@ -867,6 +897,17 @@ function unifyRawFlight(rawFlight) {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
           } else if (response && response.success) {
+            // Save the routes in localStorage for future calls.
+            const pageData = {
+              routes: response.routes,
+              timestamp: Date.now(),
+              dynamicUrl: response.dynamicUrl || null,
+              headers: response.headers || null
+            };
+            localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+            if (debug) {
+              console.log("Resolved with routes from multipass:", response.routes);
+            }
             resolve(response.routes);
           } else {
             reject(new Error(response && response.error ? response.error : "Unknown error fetching routes."));
@@ -875,6 +916,7 @@ function unifyRawFlight(rawFlight) {
       });
     });
   }
+  
   async function getDynamicUrl() {
     const pageDataStr = localStorage.getItem("wizz_page_data");
     if (pageDataStr) {
@@ -1057,11 +1099,12 @@ function unifyRawFlight(rawFlight) {
               if (dateToSearch > bookingHorizon) break;
               const dateStr = dateToSearch.toISOString().slice(0, 10);
               const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
+
               let flights = await getCachedResults(cacheKey);
               if (flights !== null) {
                 flights = flights.map(unifyRawFlight);
               } else {
-                await throttleRequest();
+                // await throttleRequest();
                 try {
                   flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
                   flights = flights.map(unifyRawFlight);
@@ -1168,85 +1211,141 @@ function unifyRawFlight(rawFlight) {
   
     // --- Updated searchDirectRoutes ---
   // Searches for direct (non‑connecting) flights using only the server–provided arrival stations.
-  async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true) {
-    const routesData = await fetchDestinations();
+  // Modified searchDirectRoutes function
+  async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true, reverse = false) {
+    console.log("Starting searchDirectRoutes:", { origins, destinations, selectedDate, shouldAppend, reverse });
+  
+    // In reverse mode, we assume that outbound flights have been previously found.
+    // globalResults is assumed to hold outbound flights (each with departureStation and arrivalStation).
+    let allowedReversePairs = null;
+    if (reverse && globalResults && globalResults.length > 0) {
+      allowedReversePairs = new Set();
+      globalResults.forEach(flight => {
+        // For an outbound flight from X to Y, the reverse pair is Y → X.
+        allowedReversePairs.add(`${flight.arrivalStation}-${flight.departureStation}`);
+      });
+      console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
+    }
+  
+    // In reverse mode, swap origins and destinations if not already done by the caller.
+    if (reverse) {
+      console.log("Reverse mode enabled: swapping origins and destinations.");
+      [origins, destinations] = [destinations, origins];
+      console.log("After swap, origins:", origins, "destinations:", destinations);
+    }
+  
+    // Get routes data – we always use the cached routes from localStorage.
+    let routesData = await fetchDestinations();
+    console.log(`Fetched ${routesData.length} routes from fetchDestinations.`);
+  
+    // If origins is "ANY" but destinations are specific, filter origins to those with at least one matching arrival.
     if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
+      console.log("Origin is 'ANY', filtering origins based on provided destinations:", destinations);
       const destSet = new Set(destinations);
       const filteredOrigins = routesData.filter(route =>
-        route.arrivalStations && route.arrivalStations.some(arr => {
-          const arrCode = typeof arr === "object" ? arr.id : arr;
-          return destSet.has(arrCode);
-        })
-      ).map(route =>
-        typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
-      );
+        route.arrivalStations &&
+        route.arrivalStations.some(arr => destSet.has(typeof arr === "object" ? arr.id : arr))
+      ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
       origins = [...new Set(filteredOrigins)];
+      console.log("Filtered origins:", origins);
     }
+  
     let validDirectFlights = [];
+    // Process each origin.
     for (const origin of origins) {
-      if (searchCancelled) break;
+      if (searchCancelled) {
+        console.log("Search cancelled. Exiting loop.");
+        break;
+      }
+      console.log(`Processing origin: ${origin}`);
+  
+      // Find route data for this origin.
       let routeData = routesData.find(route => {
-        if (typeof route.departureStation === "string") {
-          return route.departureStation === origin;
-        } else {
-          return route.departureStation.id === origin;
-        }
+        return typeof route.departureStation === "string"
+          ? route.departureStation === origin
+          : route.departureStation.id === origin;
       });
-      if (!routeData || !routeData.arrivalStations) continue;
-      const totalArrivals = routeData.arrivalStations.length;
+      if (!routeData || !routeData.arrivalStations) {
+        console.log(`No route data found for origin ${origin}. Skipping.`);
+        continue;
+      }
+      console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}.`);
+  
+      // Filter arrival stations based on provided destinations.
+      const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
+        ? routeData.arrivalStations
+        : routeData.arrivalStations.filter(arr => {
+            const arrCode = typeof arr === "object" ? arr.id : arr;
+            return destinations.includes(arrCode);
+          });
+      if (matchingArrivals.length === 0) {
+        console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations}. Skipping.`);
+        continue;
+      }
+      console.log(`Matching arrivals for ${origin}:`, matchingArrivals);
+  
+      const totalArrivals = matchingArrivals.length;
       let processed = 0;
       updateProgress(processed, totalArrivals, `Checking direct flights for ${origin}`);
-      const getMatchingArrivals = (destinations, routeData) => {
-        if (destinations.length === 1 && destinations[0] === "ANY") {
-          return routeData.arrivalStations;
+  
+      for (const arrival of matchingArrivals) {
+        if (searchCancelled) {
+          console.log("Search cancelled during processing. Exiting inner loop.");
+          break;
         }
-        return routeData.arrivalStations.filter(arr => {
-          const arrCode = typeof arr === "object" ? arr.id : arr;
-          return destinations.includes(arrCode);
-        });
-      };
-      const finalArrivals = getMatchingArrivals(destinations, routeData);
-      for (const arrival of finalArrivals) {
-        if (searchCancelled) break;
         let arrivalCode = arrival.id || arrival;
-        if (isExcludedRoute(origin, arrivalCode)) {
-          processed++;
-          updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
-          continue;
+        console.log(`Checking route ${origin} → ${arrivalCode}`);
+  
+        // In reverse mode, first check if this reverse pair is allowed (from outbound flights).
+        if (reverse && allowedReversePairs) {
+          const reversePairKey = `${origin}-${arrivalCode}`;
+          if (!allowedReversePairs.has(reversePairKey)) {
+            console.log(`No outbound flight found for reverse route ${origin} → ${arrivalCode}. Skipping.`);
+            continue;
+          } else {
+            console.log(`Reverse route ${origin} → ${arrivalCode} is allowed based on outbound flights.`);
+          }
         }
+  
+        // Build the cache key for the search parameters.
         const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
+        console.log(`Checking cache for ${cacheKey}`);
         let cachedDirect = await getCachedResults(cacheKey);
         if (cachedDirect) {
+          console.log(`Cache hit for ${cacheKey}. Using cached flights.`);
           cachedDirect = cachedDirect.map(unifyRawFlight);
-          if (shouldAppend) {
-            cachedDirect.forEach(flight => appendRouteToDisplay(flight));
-          }
+          if (shouldAppend) cachedDirect.forEach(flight => appendRouteToDisplay(flight));
           validDirectFlights = validDirectFlights.concat(cachedDirect);
           processed++;
-          updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
+          updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
           continue;
         }
+  
+        console.log(`No cached flight for ${cacheKey}; fetching from server.`);
         try {
+          // await throttleRequest();
           let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
           if (flights.length > 0) {
+            console.log(`Found ${flights.length} flights for ${origin} → ${arrivalCode}.`);
             flights = flights.map(unifyRawFlight);
-            if (shouldAppend) {
-              flights.forEach(flight => appendRouteToDisplay(flight));
-            }
+            if (shouldAppend) flights.forEach(flight => appendRouteToDisplay(flight));
             await setCachedResults(cacheKey, flights);
             validDirectFlights = validDirectFlights.concat(flights);
           } else {
+            console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
             await setCachedResults(cacheKey, []);
           }
         } catch (error) {
           console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
         }
         processed++;
-        updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
+        updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
       }
     }
+    console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
     return validDirectFlights;
   }
+  
   // ---------------- Main Search Handler ----------------
   // --- Updated Round-Trip Pairing and Rendering in handleSearch ---
   // Global variable to track if a search is active.
@@ -1254,6 +1353,7 @@ let searchActive = false;
 
 // ---------------- Main Search Handler ----------------
 async function handleSearch() {
+  await cleanupCache();
   const searchButton = document.getElementById("search-button");
 
   // If a search is already active, treat the click as a cancel request.
@@ -1291,13 +1391,13 @@ async function handleSearch() {
   // Reset request counter after 5 seconds (if needed)
   setTimeout(() => {
     requestsThisWindow = 0;
-  }, 5000);
+  }, 1000);
 
   let returnInputRaw = "";
   if (window.currentTripType === "return") {
     returnInputRaw = document.getElementById("return-date").value.trim();
     if (!returnInputRaw) {
-      alert("Please select a return date for round-trip search.");
+      showNotification("Please select a return date for round-trip search.");
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
         viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
           <path stroke-linecap="round" stroke-linejoin="round" 
@@ -1310,7 +1410,7 @@ async function handleSearch() {
 
   let originInputs = getMultiAirportValues("origin-multi");
   if (originInputs.length === 0) {
-    alert("Please enter at least one departure airport.");
+    showNotification("Please select a departure date first.");
     searchButton.innerHTML = " SEARCH";
     searchActive = false;
     return;
@@ -1433,7 +1533,6 @@ async function handleSearch() {
       const inboundKeys = Object.keys(inboundQueries);
       // Process inbound queries sequentially to respect throttling.
       for (const key of inboundKeys) {
-        await throttleRequest();
         try {
           inboundResults[key] = await inboundQueries[key]();
         } catch (error) {
@@ -1742,35 +1841,6 @@ async function handleSearch() {
     }
   }
 
-  
-  /** 
-   * Returns the final arrival time of the entire round trip. 
-   * If no inbound flights, use the outbound arrival date.
-   */
-  function getFinalArrivalTime(outbound) {
-    if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-      // E.g. compare the last inbound flight's arrival date
-      // or the earliest, depending on how you want to define "final arrival".
-      const lastInbound = outbound.returnFlights[outbound.returnFlights.length - 1];
-      return new Date(lastInbound.calculatedDuration.arrivalDate).getTime();
-    } else {
-      // No inbound flights; fall back to outbound arrival
-      return new Date(outbound.calculatedDuration.arrivalDate).getTime();
-    }
-  }
-  
-  /**
-   * Returns the total round trip duration in minutes, from outbound departure 
-   * to final inbound arrival. If no inbound flights, fallback to outbound’s duration.
-   */
-  function getRoundTripTotalDuration(outbound) {
-    const outboundDeparture = new Date(outbound.calculatedDuration.departureDate).getTime();
-    const finalArrival = getFinalArrivalTime(outbound);
-    // Subtract in minutes
-    return Math.round((finalArrival - outboundDeparture) / 60000);
-  }
-  
-  
 //-------------------Rendeting results-----------------------------
 function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
   const isReturn = label && label.toLowerCase().includes("inbound flight");
@@ -1885,7 +1955,7 @@ function createSegmentRow(segment) {
 // --------CSV export-------------
 function downloadResultsAsCSV() {
   if (!globalResults || globalResults.length === 0) {
-    alert("No search results to export.");
+    showNotification("No search results to export.");
     return;
   }
 
@@ -2026,8 +2096,10 @@ document.addEventListener("DOMContentLoaded", () => {
     headerRow.appendChild(prevBtn);
   
     // --- Title ---
-    const monthNames = ["January", "February", "March", "April", "May", "June",
-                        "July", "August", "September", "October", "November", "December"];
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
     const title = document.createElement("div");
     title.className = "font-bold text-sm mx-2 flex-1 text-center";
     title.textContent = `${monthNames[month]} ${year}`;
@@ -2094,6 +2166,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
     const lastBookable = new Date(todayMidnight.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
   
+    // Fill in blank cells for days before the first day of the month
     for (let i = 0; i < startingWeekday; i++) {
       const blank = document.createElement("div");
       blank.className = "p-2";
@@ -2110,24 +2183,23 @@ document.addEventListener("DOMContentLoaded", () => {
       const dateStr = `${yyyy}-${mm}-${dd}`;
       const dayOfWeek = (startingWeekday + (d - 1)) % 7;
   
-      if (dayOfWeek === 5 || dayOfWeek === 6) {
+      // Apply selected or weekend styling:
+      if (selectedDates.has(dateStr)) {
+        dateCell.classList.add("bg-blue-300");
+      } else if (dayOfWeek === 5 || dayOfWeek === 6) {
         dateCell.classList.add("bg-pink-50");
       }
       dateCell.textContent = d;
-
-      if (selectedDates.has(dateStr)) {
-        dateCell.classList.add("bg-blue-300");
-      }
   
       if (cellDate < minDate || cellDate > lastBookable) {
-        dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500", );
+        dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
       } else {
         dateCell.classList.add("font-bold");
         dateCell.addEventListener("click", () => {
           if (selectedDates.has(dateStr)) {
             selectedDates.delete(dateStr);
             dateCell.classList.remove("bg-blue-300");
-            // If it’s a weekend day, reapply the weekend style.
+            // If it's a weekend day, reapply the weekend style.
             if (dayOfWeek === 5 || dayOfWeek === 6) {
               dateCell.classList.add("bg-pink-50");
             }
@@ -2141,12 +2213,12 @@ document.addEventListener("DOMContentLoaded", () => {
           const sortedArr = Array.from(selectedDates).sort();
           inputEl.value = sortedArr.join(", ");
           inputEl.dispatchEvent(new Event("change"));
-        });        
+        });
       }
       datesGrid.appendChild(dateCell);
     }
     popupEl.appendChild(datesGrid);
-    
+  
     const doneContainer = document.createElement("div");
     doneContainer.className = "flex justify-end mt-2";
     const doneBtn = document.createElement("button");
@@ -2163,6 +2235,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const [year, month, day] = dateStr.split("-").map(Number);
     return new Date(year, month - 1, day);
   }
+
   
   function initMultiCalendar(inputId, popupId, maxDaysAhead = 3) {
     const inputEl = document.getElementById(inputId);
