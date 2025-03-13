@@ -2298,7 +2298,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ---------------- Initialize on DOMContentLoaded ----------------
   
   document.addEventListener("DOMContentLoaded", () => {
-    // === 1. Load settings from localStorage ===
+    // ========== 1. Load settings from localStorage ==========
     const storedPreferredAirport = localStorage.getItem("preferredAirport") || "";
     document.getElementById("preferred-airport").value = storedPreferredAirport;
     document.getElementById("min-connection-time").value = localStorage.getItem("minConnectionTime") || 90;
@@ -2308,7 +2308,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
     document.getElementById("cache-lifetime").value = localStorage.getItem("cacheLifetimeHours") || 4;
   
-    // Toggle Expert Settings inside Options Panel
+    // ========== 2. Toggle Expert Settings ==========
     document.getElementById("toggle-expert-settings").addEventListener("click", (event) => {
       const expertSettings = document.getElementById("expert-settings");
       if (expertSettings.classList.contains("hidden")) {
@@ -2319,7 +2319,8 @@ document.addEventListener("DOMContentLoaded", () => {
         event.target.textContent = "Show Expert Settings";
       }
     });
-    // === 2. Setup the multi-functional Update button ===
+  
+    // ========== 3. Setup Update Preferred Airport Button ==========
     const updateButton = document.getElementById("update-preferred-airport");
     updateButton.addEventListener("click", () => {
       const preferredAirport = document.getElementById("preferred-airport").value.trim();
@@ -2327,68 +2328,43 @@ document.addEventListener("DOMContentLoaded", () => {
         showNotification("Please enter a valid airport. ⚠️");
         return;
       }
-      // Save preferred airport in localStorage
       localStorage.setItem("preferredAirport", preferredAirport);
-      // Instead of setting a value on the container, update the first input in the origin container:
       const originContainer = document.getElementById("origin-multi");
       const firstInput = originContainer.querySelector("input");
       if (firstInput) {
         firstInput.value = preferredAirport;
         updateAirportRows(originContainer);
       }
-  
       // Save additional settings
-      const minConn = document.getElementById("min-connection-time").value;
-      localStorage.setItem("minConnectionTime", minConn);
-      const maxConn = document.getElementById("max-connection-time").value;
-      localStorage.setItem("maxConnectionTime", maxConn);
-      const maxReq = document.getElementById("max-requests").value;
-      localStorage.setItem("maxRequestsInRow", maxReq);
-      const reqFreq = document.getElementById("requests-frequency").value;
-      localStorage.setItem("requestsFrequencyMs", reqFreq);
-      const pauseDur = document.getElementById("pause-duration").value;
-      localStorage.setItem("pauseDurationSeconds", pauseDur);
-      const cacheLife = document.getElementById("cache-lifetime").value;
-      localStorage.setItem("cacheLifetimeHours", cacheLife);
-  
-      showNotification(`Settings updated successfully! ✅`);
+      localStorage.setItem("minConnectionTime", document.getElementById("min-connection-time").value);
+      localStorage.setItem("maxConnectionTime", document.getElementById("max-connection-time").value);
+      localStorage.setItem("maxRequestsInRow", document.getElementById("max-requests").value);
+      localStorage.setItem("requestsFrequencyMs", document.getElementById("requests-frequency").value);
+      localStorage.setItem("pauseDurationSeconds", document.getElementById("pause-duration").value);
+      localStorage.setItem("cacheLifetimeHours", document.getElementById("cache-lifetime").value);
+      showNotification("Settings updated successfully! ✅");
     });
   
-    // === 3. Setup autocomplete for inputs ===
-    
+    // ========== 4. Setup Autocomplete and Multi-Airport Fields ==========
     setupAutocomplete("preferred-airport", "airport-suggestions-preferred");
     initializeMultiAirportField("origin-multi", "origin");
-      const originContainer = document.getElementById("origin-multi");
-      const firstInput = originContainer.querySelector("input");
-      if (firstInput) {
-        firstInput.value = storedPreferredAirport;
-        updateAirportRows(originContainer);
-      }
+    const originContainer = document.getElementById("origin-multi");
+    const firstOriginInput = originContainer.querySelector("input");
+    if (firstOriginInput) {
+      firstOriginInput.value = storedPreferredAirport;
+      updateAirportRows(originContainer);
+    }
     initializeMultiAirportField("destination-multi", "destination");
   
-    // === 4. Initialize calendars ===
+    // ========== 5. Initialize Calendars ==========
     initMultiCalendar("departure-date", "departure-calendar-popup", 3);
     initMultiCalendar("return-date", "return-calendar-popup", 3);
   
-    // === 5. Setup date input event handlers ===
-    document.getElementById("departure-date").addEventListener("change", () => {
-      const departureVal = document.getElementById("departure-date").value.trim();
-      const returnInput = document.getElementById("return-date");
-      if (departureVal) {
-        returnInput.disabled = false;
-        updateReturnCalendarMinDate(departureVal);
-      } else {
-        returnInput.disabled = true;
-      }
-    });
-    document.getElementById("return-date").addEventListener("click", (e) => {
-      const departureVal = document.getElementById("departure-date").value.trim();
-      if (!departureVal) {
-        e.preventDefault();
-        alert("Please select a departure date first.");
-      }
-    });
-    // Function for updating return calendar minimum date
+    // ========== 6. Setup Date Input Handlers ==========
+    const departureDateInput = document.getElementById("departure-date");
+    const returnDateInput = document.getElementById("return-date");
+  
+    // Function to update the minimum selectable date for the return calendar
     function updateReturnCalendarMinDate(departureDateStr) {
       const returnCalendarPopup = document.getElementById("return-calendar-popup");
       const minDate = parseLocalDate(departureDateStr);
@@ -2403,7 +2379,50 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     }
   
-    // === 6. Setup other event handlers ===
+    // Function to update the state of the "Add Return Date" button
+    function updateReturnDateButtonState() {
+      if (departureDateInput.value.trim()) {
+        tripTypeToggle.disabled = false;
+        tripTypeToggle.classList.remove("opacity-50", "bg-gray-400");
+        tripTypeToggle.classList.add("bg-[#20006D]", "hover:bg-[#A00065]");
+      } else {
+        tripTypeToggle.disabled = true;
+        tripTypeToggle.classList.remove("bg-[#20006D]", "hover:bg-[#A00065]");
+        tripTypeToggle.classList.add("opacity-50", "bg-gray-400");
+      }
+    }
+  
+    // When the departure date changes:
+    departureDateInput.addEventListener("change", () => {
+      const departureVal = departureDateInput.value.trim();
+      const returnInput = document.getElementById("return-date");
+      if (departureVal) {
+        returnInput.disabled = false;
+        updateReturnCalendarMinDate(departureVal);
+      } else {
+        returnInput.disabled = true;
+        // If a return date was already added, reset it when departure date is cleared.
+        if (window.currentTripType === "return") {
+          window.currentTripType = "oneway";
+          returnDateInput.value = "";
+          returnDateContainer.style.display = "none";
+          const returnCalendarPopup = document.getElementById("return-calendar-popup");
+          returnCalendarPopup.classList.add("hidden");
+          tripTypeToggle.style.display = "block";
+        }
+      }
+      updateReturnDateButtonState();
+    });
+  
+    // Prevent clicking the return date input if no departure date is selected.
+    document.getElementById("return-date").addEventListener("click", (e) => {
+      if (!departureDateInput.value.trim()) {
+        e.preventDefault();
+        showNotification("Please select a departure date first.");
+      }
+    });
+  
+    // ========== 7. Setup Other Event Handlers ==========
     document.getElementById("search-button").addEventListener("click", handleSearch);
     document.getElementById("max-requests").addEventListener("change", updateThrottleSettings);
     document.getElementById("requests-frequency").addEventListener("change", updateThrottleSettings);
@@ -2413,7 +2432,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("swap-button").addEventListener("click", swapInputs);
     document.getElementById("toggle-options").addEventListener("click", toggleOptions);
   
-    // === 7. Options button styling ===
+    // ========== 8. Options Button Styling ==========
     const optionsBtn = document.getElementById("toggle-options");
     optionsBtn.addEventListener("click", () => {
       optionsBtn.classList.remove("bg-[#C90076]");
@@ -2428,81 +2447,69 @@ document.addEventListener("DOMContentLoaded", () => {
       optionsBtn.classList.add("bg-[#20006D]");
     });
   
-    // === 8. Trip type switching (oneway / return) ===
-    // Set the initial trip type.
+    // ========== 9. Trip Type Switching & "Add Return Date" Button ==========
     window.currentTripType = "oneway";
-  const tripTypeToggle = document.getElementById("trip-type-toggle");
-  const tripTypeText = document.getElementById("trip-type-text");
-  const returnDateContainer = document.getElementById("return-date-container");
-  const removeReturnDateBtn = document.getElementById("remove-return-date");
-
-  // Ensure initial state: one-way with the "Add Return Date" button visible and return date container hidden.
-  tripTypeText.textContent = "Add Return Date";
-  returnDateContainer.style.display = "none";
-  tripTypeToggle.style.display = "block";
-
-  // === 9. Connections
-  document.getElementById("stopover-dropdown-button").addEventListener("click", function () {
-    document.getElementById("stopover-dropdown").classList.toggle("hidden");
-  });
-
-  // Close dropdown when clicking outside
-  document.addEventListener("click", function (event) {
-    const dropdown = document.getElementById("stopover-dropdown");
-    const button = document.getElementById("stopover-dropdown-button");
-    if (!dropdown.contains(event.target) && !button.contains(event.target)) {
-      dropdown.classList.add("hidden");
-    }
-  });
-
-  // Update selected stopover text
-  document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
-    radio.addEventListener("change", function () {
-      document.getElementById("selected-stopover").textContent = this.value;
-      document.getElementById("stopover-dropdown").classList.add("hidden");
-    });
-  });
-  // === 10. Return flights
-  // When the user clicks the "Add Return Date" button:
-  tripTypeToggle.addEventListener("click", () => {
-    if (window.currentTripType === "oneway") {
-      window.currentTripType = "return";
-      // Hide the "Add Return Date" button
-      tripTypeToggle.style.display = "none";
-      // Show the return date container
-      returnDateContainer.style.display = "block";
-      const returnDateInput = document.getElementById("return-date");
-    const returnCalendarPopup = document.getElementById("return-calendar-popup");
-
-    // Calendar initialization
-    if (!returnCalendarPopup.classList.contains("initialized")) {
-      initMultiCalendar("return-date", "return-calendar-popup", 3);
-      returnCalendarPopup.classList.add("initialized"); // Initialized
-    }
-
-    // Click to open calendar
-    setTimeout(() => {
-      returnDateInput.dispatchEvent(new Event("click"));
-    }, 100);
-  }
-});
+    const tripTypeToggle = document.getElementById("trip-type-toggle");
+    const tripTypeText = document.getElementById("trip-type-text");
+    const returnDateContainer = document.getElementById("return-date-container");
+    const removeReturnDateBtn = document.getElementById("remove-return-date");
   
-  // When the user clicks the remove (✕) button in the Return Date container:
-  removeReturnDateBtn.addEventListener("click", () => {
-    window.currentTripType = "oneway";
-    // Hide the return date container
+    // Set initial state: one-way mode with the "Add Return Date" button visible
+    tripTypeText.textContent = "Add Return Date";
     returnDateContainer.style.display = "none";
-    // Clear the return date input
-    document.getElementById("return-date").value = "";
-    // Hide the return calendar popup
-    const returnCalendarPopup = document.getElementById("return-calendar-popup");
-    returnCalendarPopup.classList.add("hidden");
-    // Show the "Add Return Date" button again
     tripTypeToggle.style.display = "block";
-  });
-
-
-    // === 11. UI Scale change ===
+    updateReturnDateButtonState(); // Initialize button state based on departure date
+  
+    // "Add Return Date" button click handler
+    tripTypeToggle.addEventListener("click", () => {
+      if (!departureDateInput.value.trim()) {
+        // Safety check (should not happen as button is disabled)
+        return;
+      }
+      window.currentTripType = "return";
+      tripTypeToggle.style.display = "none";
+      returnDateContainer.style.display = "block";
+      const returnCalendarPopup = document.getElementById("return-calendar-popup");
+      // Initialize the return calendar if not already done
+      if (!returnCalendarPopup.classList.contains("initialized")) {
+        initMultiCalendar("return-date", "return-calendar-popup", 3);
+        returnCalendarPopup.classList.add("initialized");
+      }
+      // Automatically open the return calendar
+      setTimeout(() => {
+        returnDateInput.dispatchEvent(new Event("click"));
+      }, 100);
+    });
+  
+    // "Remove Return Date" button click handler
+    removeReturnDateBtn.addEventListener("click", () => {
+      window.currentTripType = "oneway";
+      returnDateContainer.style.display = "none";
+      returnDateInput.value = "";
+      const returnCalendarPopup = document.getElementById("return-calendar-popup");
+      returnCalendarPopup.classList.add("hidden");
+      tripTypeToggle.style.display = "block";
+    });
+  
+    // ========== 10. Stopover Dropdown ==========
+    document.getElementById("stopover-dropdown-button").addEventListener("click", function () {
+      document.getElementById("stopover-dropdown").classList.toggle("hidden");
+    });
+    document.addEventListener("click", function (event) {
+      const dropdown = document.getElementById("stopover-dropdown");
+      const button = document.getElementById("stopover-dropdown-button");
+      if (!dropdown.contains(event.target) && !button.contains(event.target)) {
+        dropdown.classList.add("hidden");
+      }
+    });
+    document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
+      radio.addEventListener("change", function () {
+        document.getElementById("selected-stopover").textContent = this.value;
+        document.getElementById("stopover-dropdown").classList.add("hidden");
+      });
+    });
+  
+    // ========== 11. UI Scale Change ==========
     const scaleSlider = document.getElementById("ui-scale");
     document.body.style.zoom = scaleSlider.value / 100;
     scaleSlider.addEventListener("input", function() {
