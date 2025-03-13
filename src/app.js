@@ -1932,7 +1932,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
           ${unifiedFlight.formattedFlightDate}
         </div>
-        <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
+        <div class="text-xs font-semibold bg-gray-800 text-white text-right px-2 py-1 mb-1 rounded">
           Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
         </div>
       </div>
@@ -2111,32 +2111,27 @@ document.addEventListener("DOMContentLoaded", () => {
   // Function to toggle CSV button visibility before search
   function updateCSVButtonVisibility() {
     const csvButton = document.getElementById("download-csv-button");
-    
+
     // Hide the button if there are no results.
     if (!globalResults || globalResults.length === 0) {
-      csvButton.classList.add("hidden");
-      return;
+        csvButton.classList.add("hidden");
+        return;
     }
-    
-    // A flight is considered direct if its segments array is undefined or has exactly one element.
-    // For round-trip flights, both the outbound and every inbound flight must be direct.
-    const allDirect = globalResults.every(flight => {
-      const outboundDirect = !flight.segments || flight.segments.length === 1;
-      let inboundDirect = true;
-      if (flight.returnFlights && flight.returnFlights.length > 0) {
-        inboundDirect = flight.returnFlights.every(inbound => {
-          return !inbound.segments || inbound.segments.length === 1;
-        });
-      }
-      return outboundDirect && inboundDirect;
+
+    // Check if all flights are direct and none have return flights
+    const onlyDirectOneWay = globalResults.every(flight => {
+        const isDirect = !flight.segments || flight.segments.length === 1;
+        const isOneWay = !flight.returnFlights || flight.returnFlights.length === 0; // Ensure no return flights
+        return isDirect && isOneWay;
     });
-    
-    if (allDirect) {
-      csvButton.classList.remove("hidden");
+
+    if (onlyDirectOneWay) {
+        csvButton.classList.remove("hidden"); // Show button for direct one-way flights
     } else {
-      csvButton.classList.add("hidden");
+        csvButton.classList.add("hidden"); // Hide button if any flight has return flights or multiple segments
     }
-  }
+}
+
   
 
 // Attach event listener to the Stopover dropdown selection
