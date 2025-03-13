@@ -1168,47 +1168,45 @@ function unifyRawFlight(rawFlight) {
   
     // --- Updated searchDirectRoutes ---
   // Searches for direct (non‑connecting) flights using only the server–provided arrival stations.
-  async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true) {
-    const routesData = await fetchDestinations();
-    if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
-      const destSet = new Set(destinations);
-      const filteredOrigins = routesData.filter(route =>
-        route.arrivalStations && route.arrivalStations.some(arr => {
-          const arrCode = typeof arr === "object" ? arr.id : arr;
-          return destSet.has(arrCode);
-        })
-      ).map(route =>
-        typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
-      );
-      origins = [...new Set(filteredOrigins)];
-    }
-    let validDirectFlights = [];
-    for (const origin of origins) {
-      if (searchCancelled) break;
-      let routeData = routesData.find(route => {
-        if (typeof route.departureStation === "string") {
-          return route.departureStation === origin;
-        } else {
-          return route.departureStation.id === origin;
-        }
-      });
-      if (!routeData || !routeData.arrivalStations) continue;
-      const totalArrivals = routeData.arrivalStations.length;
-      let processed = 0;
-      updateProgress(processed, totalArrivals, `Checking direct flights for ${origin}`);
+  // Modified searchDirectRoutes function
+async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true) {
+  const routesData = await fetchDestinations();
+  let validDirectFlights = [];
+
+  // Check if the origin input was "ANY" (from "Anywhere") but destination is specific.
+  // In that case, instead of processing each route separately, we aggregate matching routes.
+  if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
+    // Gather all routes that have at least one matching arrival (i.e. a destination in the user input)
+    const matchingRoutes = [];
+    routesData.forEach(route => {
+      if (!route.arrivalStations) return;
       const getMatchingArrivals = (destinations, routeData) => {
-        if (destinations.length === 1 && destinations[0] === "ANY") {
-          return routeData.arrivalStations;
-        }
         return routeData.arrivalStations.filter(arr => {
           const arrCode = typeof arr === "object" ? arr.id : arr;
           return destinations.includes(arrCode);
         });
       };
-      const finalArrivals = getMatchingArrivals(destinations, routeData);
-      for (const arrival of finalArrivals) {
+      const matchedArrivals = getMatchingArrivals(destinations, route);
+      if (matchedArrivals.length > 0) {
+        // For later display, keep track of the departure code (or id) and the matching arrivals.
+        const originCode = (typeof route.departureStation === "string")
+          ? route.departureStation
+          : route.departureStation.id;
+        matchingRoutes.push({ origin: originCode, arrivals: matchedArrivals });
+      }
+    });
+
+    // Calculate the total number of arrival segments to be checked
+    const totalArrivals = matchingRoutes.reduce((sum, item) => sum + item.arrivals.length, 0);
+    let processed = 0;
+
+    // Iterate over every matching route and each of its arrival flights
+    for (const item of matchingRoutes) {
+      const origin = item.origin;
+      for (const arrival of item.arrivals) {
         if (searchCancelled) break;
         let arrivalCode = arrival.id || arrival;
+        // Skip if the route is excluded
         if (isExcludedRoute(origin, arrivalCode)) {
           processed++;
           updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
@@ -1247,6 +1245,73 @@ function unifyRawFlight(rawFlight) {
     }
     return validDirectFlights;
   }
+
+  // If origin is not "ANY", process as before
+  for (const origin of origins) {
+    if (searchCancelled) break;
+    let routeData = routesData.find(route => {
+      if (typeof route.departureStation === "string") {
+        return route.departureStation === origin;
+      } else {
+        return route.departureStation.id === origin;
+      }
+    });
+    if (!routeData || !routeData.arrivalStations) continue;
+    const totalArrivals = routeData.arrivalStations.length;
+    let processed = 0;
+    updateProgress(processed, totalArrivals, `Checking direct flights for ${origin}`);
+    const getMatchingArrivals = (destinations, routeData) => {
+      if (destinations.length === 1 && destinations[0] === "ANY") {
+        return routeData.arrivalStations;
+      }
+      return routeData.arrivalStations.filter(arr => {
+        const arrCode = typeof arr === "object" ? arr.id : arr;
+        return destinations.includes(arrCode);
+      });
+    };
+    const finalArrivals = getMatchingArrivals(destinations, routeData);
+    for (const arrival of finalArrivals) {
+      if (searchCancelled) break;
+      let arrivalCode = arrival.id || arrival;
+      if (isExcludedRoute(origin, arrivalCode)) {
+        processed++;
+        updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
+        continue;
+      }
+      const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
+      let cachedDirect = await getCachedResults(cacheKey);
+      if (cachedDirect) {
+        cachedDirect = cachedDirect.map(unifyRawFlight);
+        if (shouldAppend) {
+          cachedDirect.forEach(flight => appendRouteToDisplay(flight));
+        }
+        validDirectFlights = validDirectFlights.concat(cachedDirect);
+        processed++;
+        updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
+        continue;
+      }
+      try {
+        let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
+        if (flights.length > 0) {
+          flights = flights.map(unifyRawFlight);
+          if (shouldAppend) {
+            flights.forEach(flight => appendRouteToDisplay(flight));
+          }
+          await setCachedResults(cacheKey, flights);
+          validDirectFlights = validDirectFlights.concat(flights);
+        } else {
+          await setCachedResults(cacheKey, []);
+        }
+      } catch (error) {
+        console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
+      }
+      processed++;
+      updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
+    }
+  }
+  return validDirectFlights;
+}
+
   // ---------------- Main Search Handler ----------------
   // --- Updated Round-Trip Pairing and Rendering in handleSearch ---
   // Global variable to track if a search is active.
@@ -1291,13 +1356,13 @@ async function handleSearch() {
   // Reset request counter after 5 seconds (if needed)
   setTimeout(() => {
     requestsThisWindow = 0;
-  }, 5000);
+  }, 1000);
 
   let returnInputRaw = "";
   if (window.currentTripType === "return") {
     returnInputRaw = document.getElementById("return-date").value.trim();
     if (!returnInputRaw) {
-      alert("Please select a return date for round-trip search.");
+      showNotification("Please select a return date for round-trip search.");
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
         viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
           <path stroke-linecap="round" stroke-linejoin="round" 
@@ -1310,7 +1375,7 @@ async function handleSearch() {
 
   let originInputs = getMultiAirportValues("origin-multi");
   if (originInputs.length === 0) {
-    alert("Please enter at least one departure airport.");
+    showNotification("Please select a departure date first.");
     searchButton.innerHTML = " SEARCH";
     searchActive = false;
     return;
@@ -1742,35 +1807,6 @@ async function handleSearch() {
     }
   }
 
-  
-  /** 
-   * Returns the final arrival time of the entire round trip. 
-   * If no inbound flights, use the outbound arrival date.
-   */
-  function getFinalArrivalTime(outbound) {
-    if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-      // E.g. compare the last inbound flight's arrival date
-      // or the earliest, depending on how you want to define "final arrival".
-      const lastInbound = outbound.returnFlights[outbound.returnFlights.length - 1];
-      return new Date(lastInbound.calculatedDuration.arrivalDate).getTime();
-    } else {
-      // No inbound flights; fall back to outbound arrival
-      return new Date(outbound.calculatedDuration.arrivalDate).getTime();
-    }
-  }
-  
-  /**
-   * Returns the total round trip duration in minutes, from outbound departure 
-   * to final inbound arrival. If no inbound flights, fallback to outbound’s duration.
-   */
-  function getRoundTripTotalDuration(outbound) {
-    const outboundDeparture = new Date(outbound.calculatedDuration.departureDate).getTime();
-    const finalArrival = getFinalArrivalTime(outbound);
-    // Subtract in minutes
-    return Math.round((finalArrival - outboundDeparture) / 60000);
-  }
-  
-  
 //-------------------Rendeting results-----------------------------
 function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
   const isReturn = label && label.toLowerCase().includes("inbound flight");
@@ -1885,7 +1921,7 @@ function createSegmentRow(segment) {
 // --------CSV export-------------
 function downloadResultsAsCSV() {
   if (!globalResults || globalResults.length === 0) {
-    alert("No search results to export.");
+    showNotification("No search results to export.");
     return;
   }
 
@@ -2026,8 +2062,10 @@ document.addEventListener("DOMContentLoaded", () => {
     headerRow.appendChild(prevBtn);
   
     // --- Title ---
-    const monthNames = ["January", "February", "March", "April", "May", "June",
-                        "July", "August", "September", "October", "November", "December"];
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
     const title = document.createElement("div");
     title.className = "font-bold text-sm mx-2 flex-1 text-center";
     title.textContent = `${monthNames[month]} ${year}`;
@@ -2094,6 +2132,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
     const lastBookable = new Date(todayMidnight.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
   
+    // Fill in blank cells for days before the first day of the month
     for (let i = 0; i < startingWeekday; i++) {
       const blank = document.createElement("div");
       blank.className = "p-2";
@@ -2110,24 +2149,23 @@ document.addEventListener("DOMContentLoaded", () => {
       const dateStr = `${yyyy}-${mm}-${dd}`;
       const dayOfWeek = (startingWeekday + (d - 1)) % 7;
   
-      if (dayOfWeek === 5 || dayOfWeek === 6) {
+      // Apply selected or weekend styling:
+      if (selectedDates.has(dateStr)) {
+        dateCell.classList.add("bg-blue-300");
+      } else if (dayOfWeek === 5 || dayOfWeek === 6) {
         dateCell.classList.add("bg-pink-50");
       }
       dateCell.textContent = d;
-
-      if (selectedDates.has(dateStr)) {
-        dateCell.classList.add("bg-blue-300");
-      }
   
       if (cellDate < minDate || cellDate > lastBookable) {
-        dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500", );
+        dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
       } else {
         dateCell.classList.add("font-bold");
         dateCell.addEventListener("click", () => {
           if (selectedDates.has(dateStr)) {
             selectedDates.delete(dateStr);
             dateCell.classList.remove("bg-blue-300");
-            // If it’s a weekend day, reapply the weekend style.
+            // If it's a weekend day, reapply the weekend style.
             if (dayOfWeek === 5 || dayOfWeek === 6) {
               dateCell.classList.add("bg-pink-50");
             }
@@ -2141,12 +2179,12 @@ document.addEventListener("DOMContentLoaded", () => {
           const sortedArr = Array.from(selectedDates).sort();
           inputEl.value = sortedArr.join(", ");
           inputEl.dispatchEvent(new Event("change"));
-        });        
+        });
       }
       datesGrid.appendChild(dateCell);
     }
     popupEl.appendChild(datesGrid);
-    
+  
     const doneContainer = document.createElement("div");
     doneContainer.className = "flex justify-end mt-2";
     const doneBtn = document.createElement("button");
@@ -2163,6 +2201,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const [year, month, day] = dateStr.split("-").map(Number);
     return new Date(year, month - 1, day);
   }
+
   
   function initMultiCalendar(inputId, popupId, maxDaysAhead = 3) {
     const inputEl = document.getElementById(inputId);
