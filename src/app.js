@@ -2113,9 +2113,25 @@ document.addEventListener("DOMContentLoaded", () => {
   
     popupEl.appendChild(headerRow);
   
-    // Handle Prev/Next navigation (Fix: stopPropagation)
+    // Compute minDate from minSelectableDate if provided
+    const minDate = minSelectableDate ? parseLocalDate(minSelectableDate) : new Date(new Date().setHours(0, 0, 0, 0));
+    const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
+    const lastBookable = new Date(todayMidnight.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
+  
+    // Disable Prev navigation if current month is before the minimum selectable month
+    const currentMonthDate = new Date(year, month);
+    const minMonthDate = new Date(minDate.getFullYear(), minDate.getMonth());
+    if (currentMonthDate < minMonthDate) {
+      prevBtn.disabled = true;
+      prevBtn.classList.add("opacity-50", "cursor-not-allowed");
+    } else {
+      prevBtn.disabled = false;
+      prevBtn.classList.remove("opacity-50", "cursor-not-allowed");
+    }
+  
+    // Handle Prev/Next navigation (stopPropagation to prevent closing)
     prevBtn.addEventListener("click", (event) => {
-      event.stopPropagation(); // Prevent calendar from closing
+      event.stopPropagation();
       let newMonth = month - 1;
       let newYear = year;
       if (newMonth < 0) {
@@ -2126,7 +2142,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   
     nextBtn.addEventListener("click", (event) => {
-      event.stopPropagation(); // Prevent calendar from closing
+      event.stopPropagation();
       let newMonth = month + 1;
       let newYear = year;
       if (newMonth > 11) {
@@ -2144,11 +2160,7 @@ document.addEventListener("DOMContentLoaded", () => {
     daysShort.forEach((dayName, i) => {
       const dayEl = document.createElement("div");
       dayEl.textContent = dayName;
-      if (i === 5 || i === 6) {
-        dayEl.classList.add("text-[#C90076]", "font-semibold");
-      } else {
-        dayEl.classList.add("text-[#20006D]", "font-semibold");
-      }
+      dayEl.classList.add(i === 5 || i === 6 ? "text-[#C90076]" : "text-[#20006D]", "font-semibold");
       dayNamesRow.appendChild(dayEl);
     });
     popupEl.appendChild(dayNamesRow);
@@ -2162,9 +2174,6 @@ document.addEventListener("DOMContentLoaded", () => {
     startingWeekday = (startingWeekday + 6) % 7; // Shift Monday to 0
   
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const minDate = minSelectableDate ? parseLocalDate(minSelectableDate) : new Date(new Date().setHours(0, 0, 0, 0));
-    const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
-    const lastBookable = new Date(todayMidnight.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
   
     // Fill in blank cells for days before the first day of the month
     for (let i = 0; i < startingWeekday; i++) {
@@ -2183,7 +2192,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const dateStr = `${yyyy}-${mm}-${dd}`;
       const dayOfWeek = (startingWeekday + (d - 1)) % 7;
   
-      // Apply selected or weekend styling:
+      // Apply selected or weekend styling
       if (selectedDates.has(dateStr)) {
         dateCell.classList.add("bg-blue-300");
       } else if (dayOfWeek === 5 || dayOfWeek === 6) {
@@ -2191,7 +2200,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       dateCell.textContent = d;
   
-      if (cellDate < minDate || cellDate > lastBookable) {
+      // Disable cell if cellDate is earlier than minDate or later than lastBookable
+      if (cellDate.getTime() < minDate.getTime() || cellDate.getTime() > lastBookable.getTime()) {
         dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
       } else {
         dateCell.classList.add("font-bold");
@@ -2199,13 +2209,12 @@ document.addEventListener("DOMContentLoaded", () => {
           if (selectedDates.has(dateStr)) {
             selectedDates.delete(dateStr);
             dateCell.classList.remove("bg-blue-300");
-            // If it's a weekend day, reapply the weekend style.
+            // Reapply weekend style if applicable
             if (dayOfWeek === 5 || dayOfWeek === 6) {
               dateCell.classList.add("bg-pink-50");
             }
           } else {
             selectedDates.add(dateStr);
-            // Remove weekend style if present so the selection color shows.
             dateCell.classList.remove("bg-pink-50");
             dateCell.classList.add("bg-blue-300");
           }
@@ -2230,12 +2239,11 @@ document.addEventListener("DOMContentLoaded", () => {
     doneContainer.appendChild(doneBtn);
     popupEl.appendChild(doneContainer);
   }
-  
+    
   function parseLocalDate(dateStr) {
     const [year, month, day] = dateStr.split("-").map(Number);
     return new Date(year, month - 1, day);
-  }
-
+  }  
   
   function initMultiCalendar(inputId, popupId, maxDaysAhead = 3) {
     const inputEl = document.getElementById(inputId);
@@ -2253,8 +2261,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // When user clicks the input, show the calendar
     inputEl.addEventListener("click", (e) => {
       e.stopPropagation();
-      
-      // 1) Parse input value into a Set of selected dates
+  
+      // Parse input value into a Set of selected dates
       const rawValue = inputEl.value.trim();
       let selectedDates = new Set();
       if (rawValue) {
@@ -2263,9 +2271,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       }
   
-      // 2) If there’s at least one selected date, jump calendar to that month
+      // If there’s at least one selected date, jump calendar to that month
       if (selectedDates.size > 0) {
-        const firstSelected = [...selectedDates][0];  // take the first date in the set
+        const firstSelected = [...selectedDates][0]; // use only the first selected date
         const parsedDate = parseLocalDate(firstSelected);
         if (parsedDate.toString() !== "Invalid Date") {
           currentYear = parsedDate.getFullYear();
@@ -2273,16 +2281,29 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
   
-      // 3) Render the calendar with the selectedDates
+      // If this is the return date calendar, use only the first departure date as minSelectableDate
+      let minSelectable = null;
+      if (inputId === "return-date") {
+        const depRaw = document.getElementById("departure-date").value.trim();
+        if (depRaw) {
+          const depDates = depRaw.split(",").map(s => s.trim()).filter(Boolean);
+          if (depDates.length > 0) {
+            minSelectable = depDates[0];
+          }
+        }
+      }
+  
+      // Render the calendar with selected dates and minSelectable date (if any)
       renderCalendarMonth(
         popupEl,
         inputId,
         currentYear,
         currentMonth,
         maxDaysAhead,
-        selectedDates
+        selectedDates,
+        minSelectable
       );
-      
+  
       // Show the popup
       popupEl.classList.remove("hidden");
     });
@@ -2294,7 +2315,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
-  
+
   // ---------------- Initialize on DOMContentLoaded ----------------
   
   document.addEventListener("DOMContentLoaded", () => {
@@ -2364,10 +2385,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const departureDateInput = document.getElementById("departure-date");
     const returnDateInput = document.getElementById("return-date");
   
-    // Function to update the minimum selectable date for the return calendar
+    // Function to update the minimum selectable return date (only dates >= departure date are active)
     function updateReturnCalendarMinDate(departureDateStr) {
+      // If multiple departure dates are provided, consider only the first one.
+      const depDates = departureDateStr.split(",").map(s => s.trim()).filter(Boolean);
+      const minDepDate = depDates.length > 0 ? depDates[0] : departureDateStr;
       const returnCalendarPopup = document.getElementById("return-calendar-popup");
-      const minDate = parseLocalDate(departureDateStr);
+      const minDate = parseLocalDate(minDepDate);
       renderCalendarMonth(
         returnCalendarPopup,
         "return-date",
@@ -2375,11 +2399,11 @@ document.addEventListener("DOMContentLoaded", () => {
         minDate.getMonth(),
         3,
         new Set(),
-        departureDateStr
+        minDepDate
       );
     }
   
-    // Function to update the state of the "Add Return Date" button
+    // Function to update the "Add Return Date" button state (disabled if no departure date)
     function updateReturnDateButtonState() {
       if (departureDateInput.value.trim()) {
         tripTypeToggle.disabled = false;
@@ -2399,9 +2423,26 @@ document.addEventListener("DOMContentLoaded", () => {
       if (departureVal) {
         returnInput.disabled = false;
         updateReturnCalendarMinDate(departureVal);
+
+            // For a comma-separated list of departure dates, consider only the first as the min
+        const depDates = departureVal.split(",").map(s => s.trim()).filter(Boolean);
+        const minDepDate = depDates.length > 0 ? parseLocalDate(depDates[0]) : null;
+        if (minDepDate && returnInput.value.trim()) {
+          // Split the return dates, filter out any that are earlier than the new minimum
+          let returnDates = returnInput.value.split(",").map(s => s.trim()).filter(Boolean);
+          const validReturnDates = returnDates.filter(dateStr => {
+            const d = parseLocalDate(dateStr);
+            return d.getTime() >= minDepDate.getTime();
+          });
+          // If some dates were removed, update the input and notify the user.
+          if (validReturnDates.length !== returnDates.length) {
+            returnInput.value = validReturnDates.join(", ");
+            showNotification("Some return dates were removed because they are earlier than the departure date.");
+          }
+        }
       } else {
         returnInput.disabled = true;
-        // If a return date was already added, reset it when departure date is cleared.
+        // If the trip type is "return", reset the return date when departure is cleared
         if (window.currentTripType === "return") {
           window.currentTripType = "oneway";
           returnDateInput.value = "";
@@ -2414,7 +2455,7 @@ document.addEventListener("DOMContentLoaded", () => {
       updateReturnDateButtonState();
     });
   
-    // Prevent clicking the return date input if no departure date is selected.
+    // Prevent clicking the return date input if no departure date is selected
     document.getElementById("return-date").addEventListener("click", (e) => {
       if (!departureDateInput.value.trim()) {
         e.preventDefault();
@@ -2423,7 +2464,38 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   
     // ========== 7. Setup Other Event Handlers ==========
-    document.getElementById("search-button").addEventListener("click", handleSearch);
+    // Search button event handler with validation for required fields
+    const searchButton = document.getElementById("search-button");
+    searchButton.addEventListener("click", () => {
+      const errors = [];
+      // Validate departure date
+      if (!departureDateInput.value.trim()) {
+        errors.push("Please select a departure date.");
+      }
+      // Validate airports for departure and destination
+      const originAirports = getMultiAirportValues("origin-multi");
+      const destinationAirports = getMultiAirportValues("destination-multi");
+      if (originAirports.length === 0) {
+        errors.push("Please select at least one departure airport.");
+      }
+      if (destinationAirports.length === 0) {
+        errors.push("Please select at least one destination airport.");
+      }
+      // For round-trip, validate return date
+      if (window.currentTripType === "return") {
+        if (!returnDateInput.value.trim()) {
+          errors.push("For round-trip flights, please select a return date.");
+        }
+      }
+      if (errors.length > 0) {
+        showNotification(errors.join(" "));
+        return;
+      }
+      // All validations passed, proceed to search
+      handleSearch();
+    });
+  
+    // Other event handlers for throttle and options
     document.getElementById("max-requests").addEventListener("change", updateThrottleSettings);
     document.getElementById("requests-frequency").addEventListener("change", updateThrottleSettings);
     document.getElementById("pause-duration").addEventListener("change", updateThrottleSettings);
@@ -2454,23 +2526,23 @@ document.addEventListener("DOMContentLoaded", () => {
     const returnDateContainer = document.getElementById("return-date-container");
     const removeReturnDateBtn = document.getElementById("remove-return-date");
   
-    // Set initial state: one-way mode with the "Add Return Date" button visible
+    // Set initial state: one-way mode (return container hidden, button visible)
     tripTypeText.textContent = "Add Return Date";
     returnDateContainer.style.display = "none";
     tripTypeToggle.style.display = "block";
-    updateReturnDateButtonState(); // Initialize button state based on departure date
+    updateReturnDateButtonState();
   
     // "Add Return Date" button click handler
     tripTypeToggle.addEventListener("click", () => {
       if (!departureDateInput.value.trim()) {
-        // Safety check (should not happen as button is disabled)
+        // Safety check – button should be disabled
         return;
       }
       window.currentTripType = "return";
       tripTypeToggle.style.display = "none";
       returnDateContainer.style.display = "block";
       const returnCalendarPopup = document.getElementById("return-calendar-popup");
-      // Initialize the return calendar if not already done
+      // Initialize return calendar if not yet initialized
       if (!returnCalendarPopup.classList.contains("initialized")) {
         initMultiCalendar("return-date", "return-calendar-popup", 3);
         returnCalendarPopup.classList.add("initialized");
