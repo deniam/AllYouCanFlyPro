@@ -567,6 +567,19 @@ function unifyRawFlight(rawFlight) {
     showNotification("Cache successfully cleared! ✅");
   }  
 
+  async function cleanupCache() {
+    try {
+      const now = Date.now();
+      const expiredEntries = await db.cache.where("timestamp").below(now - CACHE_LIFETIME).toArray();
+      for (const entry of expiredEntries) {
+        await db.cache.delete(entry.key);
+        if (debug) console.log(`Удалена устаревшая запись кэша: ${entry.key}`);
+      }
+    } catch (e) {
+      console.error("Ошибка при очистке кэша:", e);
+    }
+  }
+
   async function setCachedResults(key, results) {
     const cacheData = { key, results, timestamp: Date.now() };
     try {
@@ -688,8 +701,9 @@ function unifyRawFlight(rawFlight) {
           showTimeoutCountdown(waitTime);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         } else if (error.message.includes("Invalid response format")) {
-          // Do NOT wait here; instead, simply log the issue and break out of the retry loop.
-          if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. Skipping wait.`);
+          const waitTime = 2000;
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. – waiting for ${waitTime / 1000} seconds`);
           break;
         } else {
           if (debug) throw error;
@@ -822,6 +836,21 @@ function unifyRawFlight(rawFlight) {
   
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
+    // Check if we have a cached routes object (wizz_page_data) that is still valid (e.g. within 1 hour)
+    const cachedDataStr = localStorage.getItem("wizz_page_data");
+    if (cachedDataStr) {
+      try {
+        const cachedData = JSON.parse(cachedDataStr);
+        if (Date.now() - cachedData.timestamp < 60 * 60 * 1000 && cachedData.routes) {
+          if (debug) console.log("Using cached destinations from localStorage");
+          return cachedData.routes;
+        }
+      } catch (e) {
+        console.error("Error parsing cached destinations:", e);
+      }
+    }
+  
+    // If no valid cache, query the multipass tab.
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, async (tabs) => {
         let multipassTab;
@@ -859,6 +888,7 @@ function unifyRawFlight(rawFlight) {
           });
           return;
         }
+        // Ensure the tab is fully loaded.
         if (multipassTab.status !== "complete") {
           await waitForTabToComplete(multipassTab.id);
         }
@@ -867,6 +897,17 @@ function unifyRawFlight(rawFlight) {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
           } else if (response && response.success) {
+            // Save the routes in localStorage for future calls.
+            const pageData = {
+              routes: response.routes,
+              timestamp: Date.now(),
+              dynamicUrl: response.dynamicUrl || null,
+              headers: response.headers || null
+            };
+            localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+            if (debug) {
+              console.log("Resolved with routes from multipass:", response.routes);
+            }
             resolve(response.routes);
           } else {
             reject(new Error(response && response.error ? response.error : "Unknown error fetching routes."));
@@ -875,6 +916,7 @@ function unifyRawFlight(rawFlight) {
       });
     });
   }
+  
   async function getDynamicUrl() {
     const pageDataStr = localStorage.getItem("wizz_page_data");
     if (pageDataStr) {
@@ -1057,11 +1099,12 @@ function unifyRawFlight(rawFlight) {
               if (dateToSearch > bookingHorizon) break;
               const dateStr = dateToSearch.toISOString().slice(0, 10);
               const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
+
               let flights = await getCachedResults(cacheKey);
               if (flights !== null) {
                 flights = flights.map(unifyRawFlight);
               } else {
-                await throttleRequest();
+                // await throttleRequest();
                 try {
                   flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
                   flights = flights.map(unifyRawFlight);
@@ -1169,149 +1212,140 @@ function unifyRawFlight(rawFlight) {
     // --- Updated searchDirectRoutes ---
   // Searches for direct (non‑connecting) flights using only the server–provided arrival stations.
   // Modified searchDirectRoutes function
-async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true) {
-  const routesData = await fetchDestinations();
-  let validDirectFlights = [];
-
-  // Check if the origin input was "ANY" (from "Anywhere") but destination is specific.
-  // In that case, instead of processing each route separately, we aggregate matching routes.
-  if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
-    // Gather all routes that have at least one matching arrival (i.e. a destination in the user input)
-    const matchingRoutes = [];
-    routesData.forEach(route => {
-      if (!route.arrivalStations) return;
-      const getMatchingArrivals = (destinations, routeData) => {
-        return routeData.arrivalStations.filter(arr => {
-          const arrCode = typeof arr === "object" ? arr.id : arr;
-          return destinations.includes(arrCode);
-        });
-      };
-      const matchedArrivals = getMatchingArrivals(destinations, route);
-      if (matchedArrivals.length > 0) {
-        // For later display, keep track of the departure code (or id) and the matching arrivals.
-        const originCode = (typeof route.departureStation === "string")
-          ? route.departureStation
-          : route.departureStation.id;
-        matchingRoutes.push({ origin: originCode, arrivals: matchedArrivals });
+  async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true, reverse = false) {
+    console.log("Starting searchDirectRoutes:", { origins, destinations, selectedDate, shouldAppend, reverse });
+  
+    // In reverse mode, we assume that outbound flights have been previously found.
+    // globalResults is assumed to hold outbound flights (each with departureStation and arrivalStation).
+    let allowedReversePairs = null;
+    if (reverse && globalResults && globalResults.length > 0) {
+      allowedReversePairs = new Set();
+      globalResults.forEach(flight => {
+        // For an outbound flight from X to Y, the reverse pair is Y → X.
+        allowedReversePairs.add(`${flight.arrivalStation}-${flight.departureStation}`);
+      });
+      console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
+    }
+  
+    // In reverse mode, swap origins and destinations if not already done by the caller.
+    if (reverse) {
+      console.log("Reverse mode enabled: swapping origins and destinations.");
+      [origins, destinations] = [destinations, origins];
+      console.log("After swap, origins:", origins, "destinations:", destinations);
+    }
+  
+    // Get routes data – we always use the cached routes from localStorage.
+    let routesData = await fetchDestinations();
+    console.log(`Fetched ${routesData.length} routes from fetchDestinations.`);
+  
+    // If origins is "ANY" but destinations are specific, filter origins to those with at least one matching arrival.
+    if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
+      console.log("Origin is 'ANY', filtering origins based on provided destinations:", destinations);
+      const destSet = new Set(destinations);
+      const filteredOrigins = routesData.filter(route =>
+        route.arrivalStations &&
+        route.arrivalStations.some(arr => destSet.has(typeof arr === "object" ? arr.id : arr))
+      ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
+      origins = [...new Set(filteredOrigins)];
+      console.log("Filtered origins:", origins);
+    }
+  
+    let validDirectFlights = [];
+    // Process each origin.
+    for (const origin of origins) {
+      if (searchCancelled) {
+        console.log("Search cancelled. Exiting loop.");
+        break;
       }
-    });
-
-    // Calculate the total number of arrival segments to be checked
-    const totalArrivals = matchingRoutes.reduce((sum, item) => sum + item.arrivals.length, 0);
-    let processed = 0;
-
-    // Iterate over every matching route and each of its arrival flights
-    for (const item of matchingRoutes) {
-      const origin = item.origin;
-      for (const arrival of item.arrivals) {
-        if (searchCancelled) break;
-        let arrivalCode = arrival.id || arrival;
-        // Skip if the route is excluded
-        if (isExcludedRoute(origin, arrivalCode)) {
-          processed++;
-          updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
-          continue;
+      console.log(`Processing origin: ${origin}`);
+  
+      // Find route data for this origin.
+      let routeData = routesData.find(route => {
+        return typeof route.departureStation === "string"
+          ? route.departureStation === origin
+          : route.departureStation.id === origin;
+      });
+      if (!routeData || !routeData.arrivalStations) {
+        console.log(`No route data found for origin ${origin}. Skipping.`);
+        continue;
+      }
+      console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}.`);
+  
+      // Filter arrival stations based on provided destinations.
+      const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
+        ? routeData.arrivalStations
+        : routeData.arrivalStations.filter(arr => {
+            const arrCode = typeof arr === "object" ? arr.id : arr;
+            return destinations.includes(arrCode);
+          });
+      if (matchingArrivals.length === 0) {
+        console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations}. Skipping.`);
+        continue;
+      }
+      console.log(`Matching arrivals for ${origin}:`, matchingArrivals);
+  
+      const totalArrivals = matchingArrivals.length;
+      let processed = 0;
+      updateProgress(processed, totalArrivals, `Checking direct flights for ${origin}`);
+  
+      for (const arrival of matchingArrivals) {
+        if (searchCancelled) {
+          console.log("Search cancelled during processing. Exiting inner loop.");
+          break;
         }
+        let arrivalCode = arrival.id || arrival;
+        console.log(`Checking route ${origin} → ${arrivalCode}`);
+  
+        // In reverse mode, first check if this reverse pair is allowed (from outbound flights).
+        if (reverse && allowedReversePairs) {
+          const reversePairKey = `${origin}-${arrivalCode}`;
+          if (!allowedReversePairs.has(reversePairKey)) {
+            console.log(`No outbound flight found for reverse route ${origin} → ${arrivalCode}. Skipping.`);
+            continue;
+          } else {
+            console.log(`Reverse route ${origin} → ${arrivalCode} is allowed based on outbound flights.`);
+          }
+        }
+  
+        // Build the cache key for the search parameters.
         const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
+        console.log(`Checking cache for ${cacheKey}`);
         let cachedDirect = await getCachedResults(cacheKey);
         if (cachedDirect) {
+          console.log(`Cache hit for ${cacheKey}. Using cached flights.`);
           cachedDirect = cachedDirect.map(unifyRawFlight);
-          if (shouldAppend) {
-            cachedDirect.forEach(flight => appendRouteToDisplay(flight));
-          }
+          if (shouldAppend) cachedDirect.forEach(flight => appendRouteToDisplay(flight));
           validDirectFlights = validDirectFlights.concat(cachedDirect);
           processed++;
-          updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
+          updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
           continue;
         }
+  
+        console.log(`No cached flight for ${cacheKey}; fetching from server.`);
         try {
+          // await throttleRequest();
           let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
           if (flights.length > 0) {
+            console.log(`Found ${flights.length} flights for ${origin} → ${arrivalCode}.`);
             flights = flights.map(unifyRawFlight);
-            if (shouldAppend) {
-              flights.forEach(flight => appendRouteToDisplay(flight));
-            }
+            if (shouldAppend) flights.forEach(flight => appendRouteToDisplay(flight));
             await setCachedResults(cacheKey, flights);
             validDirectFlights = validDirectFlights.concat(flights);
           } else {
+            console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
             await setCachedResults(cacheKey, []);
           }
         } catch (error) {
           console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
         }
         processed++;
-        updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
+        updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
       }
     }
+    console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
     return validDirectFlights;
   }
-
-  // If origin is not "ANY", process as before
-  for (const origin of origins) {
-    if (searchCancelled) break;
-    let routeData = routesData.find(route => {
-      if (typeof route.departureStation === "string") {
-        return route.departureStation === origin;
-      } else {
-        return route.departureStation.id === origin;
-      }
-    });
-    if (!routeData || !routeData.arrivalStations) continue;
-    const totalArrivals = routeData.arrivalStations.length;
-    let processed = 0;
-    updateProgress(processed, totalArrivals, `Checking direct flights for ${origin}`);
-    const getMatchingArrivals = (destinations, routeData) => {
-      if (destinations.length === 1 && destinations[0] === "ANY") {
-        return routeData.arrivalStations;
-      }
-      return routeData.arrivalStations.filter(arr => {
-        const arrCode = typeof arr === "object" ? arr.id : arr;
-        return destinations.includes(arrCode);
-      });
-    };
-    const finalArrivals = getMatchingArrivals(destinations, routeData);
-    for (const arrival of finalArrivals) {
-      if (searchCancelled) break;
-      let arrivalCode = arrival.id || arrival;
-      if (isExcludedRoute(origin, arrivalCode)) {
-        processed++;
-        updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
-        continue;
-      }
-      const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-      let cachedDirect = await getCachedResults(cacheKey);
-      if (cachedDirect) {
-        cachedDirect = cachedDirect.map(unifyRawFlight);
-        if (shouldAppend) {
-          cachedDirect.forEach(flight => appendRouteToDisplay(flight));
-        }
-        validDirectFlights = validDirectFlights.concat(cachedDirect);
-        processed++;
-        updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
-        continue;
-      }
-      try {
-        let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
-        if (flights.length > 0) {
-          flights = flights.map(unifyRawFlight);
-          if (shouldAppend) {
-            flights.forEach(flight => appendRouteToDisplay(flight));
-          }
-          await setCachedResults(cacheKey, flights);
-          validDirectFlights = validDirectFlights.concat(flights);
-        } else {
-          await setCachedResults(cacheKey, []);
-        }
-      } catch (error) {
-        console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
-      }
-      processed++;
-      updateProgress(processed, totalArrivals, `Checked direct flights for ${origin} → ${arrivalCode}`);
-    }
-  }
-  return validDirectFlights;
-}
-
+  
   // ---------------- Main Search Handler ----------------
   // --- Updated Round-Trip Pairing and Rendering in handleSearch ---
   // Global variable to track if a search is active.
@@ -1319,6 +1353,7 @@ let searchActive = false;
 
 // ---------------- Main Search Handler ----------------
 async function handleSearch() {
+  await cleanupCache();
   const searchButton = document.getElementById("search-button");
 
   // If a search is already active, treat the click as a cancel request.
@@ -1498,7 +1533,6 @@ async function handleSearch() {
       const inboundKeys = Object.keys(inboundQueries);
       // Process inbound queries sequentially to respect throttling.
       for (const key of inboundKeys) {
-        await throttleRequest();
         try {
           inboundResults[key] = await inboundQueries[key]();
         } catch (error) {
