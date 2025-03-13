@@ -2471,11 +2471,21 @@ document.addEventListener("DOMContentLoaded", () => {
       tripTypeToggle.style.display = "none";
       // Show the return date container
       returnDateContainer.style.display = "block";
-      // Immediately open the Return Date calendar popup
-      const returnCalendarPopup = document.getElementById("return-calendar-popup");
-      returnCalendarPopup.classList.remove("hidden");
+      const returnDateInput = document.getElementById("return-date");
+    const returnCalendarPopup = document.getElementById("return-calendar-popup");
+
+    // Calendar initialization
+    if (!returnCalendarPopup.classList.contains("initialized")) {
+      initMultiCalendar("return-date", "return-calendar-popup", 3);
+      returnCalendarPopup.classList.add("initialized"); // Initialized
     }
-  });
+
+    // Click to open calendar
+    setTimeout(() => {
+      returnDateInput.dispatchEvent(new Event("click"));
+    }, 100);
+  }
+});
   
   // When the user clicks the remove (✕) button in the Return Date container:
   removeReturnDateBtn.addEventListener("click", () => {
