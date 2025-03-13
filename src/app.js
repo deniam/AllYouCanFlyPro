@@ -2,7 +2,7 @@ import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, airportFlags } from './air
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -62,15 +62,7 @@ import Dexie from '../src/libs/dexie.mjs';
     const percentage = total > 0 ? (current / total) * 100 : 0;
     progressBar.style.width = percentage + "%";
   }
-  function hideTimeoutCountdown() {
-    const timeoutEl = document.getElementById("timeout-status");
-    if (timeoutInterval) {
-      clearInterval(timeoutInterval);
-      timeoutInterval = null;
-    }
-    timeoutEl.textContent = "";
-    timeoutEl.style.display = "none";
-  }
+
   function hideProgress() {
     progressContainer.style.display = "none";
   }
@@ -88,6 +80,7 @@ import Dexie from '../src/libs/dexie.mjs';
     timeoutEl.textContent = "";
     timeoutEl.style.display = "none";
   }
+
   function showTimeoutCountdown(waitTimeMs) {
     resetCountdownTimers();
     const timeoutEl = document.getElementById("timeout-status");
@@ -179,18 +172,19 @@ import Dexie from '../src/libs/dexie.mjs';
     CACHE_LIFETIME = hours * 60 * 60 * 1000;
     localStorage.setItem("cacheLifetimeHours", hours);
   }
+  
   function setupAutocomplete(inputId, suggestionsId) {
     const inputEl = document.getElementById(inputId);
     const suggestionsEl = document.getElementById(suggestionsId);
-
+  
     const lowerInputId = inputId.toLowerCase();
     const recentKey = lowerInputId.includes("destination")
-    ? "recentAirports_destination"
-    : lowerInputId.includes("origin")
+      ? "recentAirports_destination"
+      : lowerInputId.includes("origin")
       ? "recentAirports_origin"
       : "recentAirports_" + inputId;
   
-    // Gather all used entries (in both origin and destination fields)
+    // Gather all used entries (from other origin/destination fields)
     function getAllUsedEntries() {
       const originUsed = Array.from(document.querySelectorAll("#origin-multi input"))
         .filter(el => el.id !== inputId)
@@ -201,58 +195,74 @@ import Dexie from '../src/libs/dexie.mjs';
       return new Set([...originUsed, ...destUsed]);
     }
   
-    // Retrieve recent entries for this input (if any)
+    // Retrieve recent entries for this input from localStorage.
     function getRecentEntries() {
       const stored = localStorage.getItem(recentKey);
       let recents = stored ? JSON.parse(stored) : [];
-
-      if (!recents.includes("Anywhere")) {
-        recents.unshift("Anywhere");
-      }
+      // Remove any occurrence of "Anywhere" (ignoring case) then ensure it's at the top.
+      recents = recents.filter(e => e.toLowerCase() !== "anywhere");
+      recents.unshift("Anywhere");
       return recents;
     }
-
+  
+    // Add a new entry (or update its position) to recent airports.
     function addRecentEntry(entry) {
       let recents = getRecentEntries();
       recents = recents.filter(e => e !== entry);
       recents.unshift(entry);
-      if (recents.length > 5) recents = recents.slice(0, 5);
+      if (recents.length > 6) recents = recents.slice(0, 6);
       localStorage.setItem(recentKey, JSON.stringify(recents));
     }
   
-    // Show recent suggestions when the field is focused and empty
-    inputEl.addEventListener("focus", () => {
-      if (!inputEl.value.trim()) {
-        const recent = getRecentEntries();
-        if (recent.length > 0) {
-          suggestionsEl.innerHTML = "";
-          recent.forEach(entry => {
-            const div = document.createElement("div");
-            div.className = "px-4 py-2 cursor-pointer hover:bg-gray-100";
-            div.textContent = entry;
-            div.addEventListener("click", () => {
-              inputEl.value = entry;
-              inputEl.dispatchEvent(new Event("input"));
-              suggestionsEl.classList.add("hidden");
-            });
-            suggestionsEl.appendChild(div);
-          });
-          suggestionsEl.classList.remove("hidden");
-        }
-      }
-    });
+    // Remove an entry from recent airports.
+    function removeRecentEntry(entry) {
+      let recents = getRecentEntries().filter(e => e !== entry);
+      localStorage.setItem(recentKey, JSON.stringify(recents));
+      // Refresh the suggestions based on current input.
+      showSuggestions(inputEl.value.trim().toLowerCase());
+    }
   
-    // Main autocomplete input event
-    inputEl.addEventListener("input", () => {
-      const query = inputEl.value.trim().toLowerCase();
+    // Show suggestions combining recent entries and live airport search.
+    // When query is empty, show recent entries (with delete buttons).
+    // When query is non-empty, show matching country/airport suggestions (and if the entry is recent, add a delete button).
+    function showSuggestions(query = "") {
       suggestionsEl.innerHTML = "";
+      const usedEntries = getAllUsedEntries();
+  
+      // If there is no query, use recent entries.
       if (!query) {
-        suggestionsEl.classList.add("hidden");
+        const recents = getRecentEntries();
+        if (recents.length === 0) {
+          suggestionsEl.classList.add("hidden");
+          return;
+        }
+        recents.forEach(entry => {
+          const div = document.createElement("div");
+          div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
+          div.textContent = entry;
+          div.addEventListener("click", () => {
+            inputEl.value = entry;
+            addRecentEntry(entry);
+            suggestionsEl.classList.add("hidden");
+          });
+          // Add a delete button for recent entries except "Anywhere"
+          if (entry.toLowerCase() !== "anywhere") {
+            const deleteBtn = document.createElement("button");
+            deleteBtn.textContent = "✕";
+            deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600";
+            deleteBtn.addEventListener("click", (event) => {
+              event.stopPropagation();
+              removeRecentEntry(entry);
+            });
+            div.appendChild(deleteBtn);
+          }
+          suggestionsEl.appendChild(div);
+        });
+        suggestionsEl.classList.remove("hidden");
         return;
       }
-      
-
-      // Special case: if user types "any", show "Anywhere"
+  
+      // Special case: if user types "any", show "Anywhere" immediately.
       if (query === "any") {
         const div = document.createElement("div");
         div.className = "px-4 py-2 cursor-pointer hover:bg-gray-100";
@@ -267,11 +277,7 @@ import Dexie from '../src/libs/dexie.mjs';
         return;
       }
   
-      // Build set of used entries (from other fields)
-      const usedEntries = getAllUsedEntries();
-  
-      // Build a set of used airport codes from used country names.
-      // For each used value that exactly matches a country, add all its airport codes.
+      // Build suggestions based on countries and airports.
       const usedCountryAirports = new Set();
       Object.keys(COUNTRY_AIRPORTS).forEach(country => {
         if (usedEntries.has(country.toLowerCase())) {
@@ -279,51 +285,78 @@ import Dexie from '../src/libs/dexie.mjs';
         }
       });
   
-      // Filter country suggestions: exclude a country if it was already entered.
       const countryMatches = Object.keys(COUNTRY_AIRPORTS)
         .filter(country => country.toLowerCase().includes(query) && !usedEntries.has(country.toLowerCase()))
         .map(country => ({ isCountry: true, code: country, name: country }));
   
-      // Filter airport suggestions: exclude ones already used or belonging to a used country.
       const airportMatches = AIRPORTS.filter(a => {
         const codeLower = a.code.toLowerCase();
         const nameLower = a.name.toLowerCase();
-        if (usedEntries.has(codeLower) || usedEntries.has(nameLower)) {
-          return false;
-        }
-        if (usedCountryAirports.has(codeLower)) {
-          return false;
-        }
+        if (usedEntries.has(codeLower) || usedEntries.has(nameLower)) return false;
+        if (usedCountryAirports.has(codeLower)) return false;
         return codeLower.includes(query) || nameLower.includes(query);
       }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
   
       let matches = [...countryMatches, ...airportMatches].slice(0, 5);
+  
+      // For the "preferred-airport" input, ensure "Anywhere" is at the top.
+      if (inputId === "preferred-airport") {
+        matches = matches.filter(match => match.name.toLowerCase() !== "anywhere");
+        matches.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
+        matches = matches.slice(0, 5);
+      }
+  
       if (matches.length === 0) {
         suggestionsEl.classList.add("hidden");
         return;
       }
+  
+      // Render each match
       matches.forEach(match => {
         const div = document.createElement("div");
-        div.className = "px-4 py-2 cursor-pointer hover:bg-gray-100";
+        div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
         div.textContent = match.name;
         div.addEventListener("click", () => {
           inputEl.value = match.name;
           addRecentEntry(match.name);
           suggestionsEl.classList.add("hidden");
         });
+        // If this match is present in recent entries, add the delete button.
+        if (getRecentEntries().includes(match.name) && match.name.toLowerCase() !== "anywhere") {
+          const deleteBtn = document.createElement("button");
+          deleteBtn.textContent = "✕";
+          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer"; // Added "cursor-pointer"
+          deleteBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            removeRecentEntry(match.name);
+          });
+          div.appendChild(deleteBtn);
+        }
         suggestionsEl.appendChild(div);
       });
       suggestionsEl.classList.remove("hidden");
+    }
+  
+    // Show recent suggestions when the input is focused and empty.
+    inputEl.addEventListener("focus", () => {
+      if (!inputEl.value.trim()) {
+        showSuggestions();
+      }
     });
   
-    // Hide suggestions on clicking outside the input or suggestion box
+    // Update suggestions as the user types.
+    inputEl.addEventListener("input", () => {
+      const query = inputEl.value.trim().toLowerCase();
+      showSuggestions(query);
+    });
+  
+    // Hide suggestions when clicking outside the input or suggestion box.
     document.addEventListener("click", event => {
       if (inputEl && suggestionsEl && !inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
         suggestionsEl.classList.add("hidden");
       }
     });
   }
-  
   
   // Helper to get values from all input fields within a given container
   function getMultiAirportValues(containerId) {
@@ -336,44 +369,43 @@ import Dexie from '../src/libs/dexie.mjs';
     });
     return values;
   }
-  
 
-function resolveAirport(input) {
-  if (!input) return [];
-  const trimmed = input.trim();
-  // Treat both "any" and "anywhere" as the wildcard
-  if (trimmed.toLowerCase() === "any" || trimmed.toLowerCase() === "anywhere") {
-    if (debug) console.log(`Resolved "${input}" as wildcard ANY`);
-    return ["ANY"];
-  }
-  const lower = trimmed.toLowerCase();
-  if (trimmed.length === 3) {
+  function resolveAirport(input) {
+    if (!input) return [];
+    const trimmed = input.trim();
+    // Treat both "any" and "anywhere" as the wildcard
+    if (trimmed.toLowerCase() === "any" || trimmed.toLowerCase() === "anywhere") {
+      if (debug) console.log(`Resolved "${input}" as wildcard ANY`);
+      return ["ANY"];
+    }
+    const lower = trimmed.toLowerCase();
+    if (trimmed.length === 3) {
+      const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
+      if (byCode) {
+        if (debug) console.log(`Resolved "${input}" as airport code: ${byCode.code}`);
+        return [byCode.code];
+      }
+    }
+    for (const country in COUNTRY_AIRPORTS) {
+      if (country.toLowerCase() === lower) {
+        if (debug) console.log(`Resolved "${input}" as country: ${country} with airports ${COUNTRY_AIRPORTS[country]}`);
+        return COUNTRY_AIRPORTS[country];
+      }
+    }
     const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
     if (byCode) {
-      if (debug) console.log(`Resolved "${input}" as airport code: ${byCode.code}`);
+      if (debug) console.log(`Resolved "${input}" as airport code (fallback): ${byCode.code}`);
       return [byCode.code];
     }
-  }
-  for (const country in COUNTRY_AIRPORTS) {
-    if (country.toLowerCase() === lower) {
-      if (debug) console.log(`Resolved "${input}" as country: ${country} with airports ${COUNTRY_AIRPORTS[country]}`);
-      return COUNTRY_AIRPORTS[country];
+    const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
+    if (matches.length > 0) {
+      const codes = matches.map(a => a.code);
+      if (debug) console.log(`Resolved "${input}" as airport names matching: ${codes}`);
+      return codes;
     }
+    if (debug) console.log(`No match found for "${input}", returning uppercase input`);
+    return [input.toUpperCase()];
   }
-  const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
-  if (byCode) {
-    if (debug) console.log(`Resolved "${input}" as airport code (fallback): ${byCode.code}`);
-    return [byCode.code];
-  }
-  const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
-  if (matches.length > 0) {
-    const codes = matches.map(a => a.code);
-    if (debug) console.log(`Resolved "${input}" as airport names matching: ${codes}`);
-    return codes;
-  }
-  if (debug) console.log(`No match found for "${input}", returning uppercase input`);
-  return [input.toUpperCase()];
-}
 
   /**
  * Parses a 12‑hour time string (e.g., "11:20 pm") and returns an object {hour, minute} in 24‑hour format.
@@ -393,178 +425,178 @@ function resolveAirport(input) {
     return { hour, minute };
   }
 
-/**
- * Converts a 12‑hour time string into a 24‑hour formatted string (e.g., "11:20 pm" → "23:20").
- */
-function convertTo24Hour(timeStr) {
-  const parsed = parse12HourTime(timeStr);
-  if (!parsed) return timeStr;
-  return `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
-}
-
-/**
- * Normalizes a time zone offset string.
- * For example, "UTC+1" becomes "+01:00" and "UTC" becomes "+00:00".
- */
-function normalizeOffset(offset) {
-  if (!offset || offset.trim() === "" || offset.toUpperCase() === "UTC") {
-    return "+00:00";
+  /**
+   * Converts a 12‑hour time string into a 24‑hour formatted string (e.g., "11:20 pm" → "23:20").
+   */
+  function convertTo24Hour(timeStr) {
+    const parsed = parse12HourTime(timeStr);
+    if (!parsed) return timeStr;
+    return `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
   }
-  if (offset.toUpperCase().startsWith("UTC")) {
-    let rest = offset.substring(3).trim();
-    if (!rest) return "+00:00";
-    if (!rest.startsWith("+") && !rest.startsWith("-")) {
-      rest = "+" + rest;
+
+  /**
+   * Normalizes a time zone offset string.
+   * For example, "UTC+1" becomes "+01:00" and "UTC" becomes "+00:00".
+   */
+  function normalizeOffset(offset) {
+    if (!offset || offset.trim() === "" || offset.toUpperCase() === "UTC") {
+      return "+00:00";
     }
-    if (!rest.includes(":")) {
-      let sign = rest.charAt(0);
-      let num = rest.substring(1);
-      if (num.length === 1) {
-        num = "0" + num;
+    if (offset.toUpperCase().startsWith("UTC")) {
+      let rest = offset.substring(3).trim();
+      if (!rest) return "+00:00";
+      if (!rest.startsWith("+") && !rest.startsWith("-")) {
+        rest = "+" + rest;
       }
-      rest = sign + num + ":00";
+      if (!rest.includes(":")) {
+        let sign = rest.charAt(0);
+        let num = rest.substring(1);
+        if (num.length === 1) {
+          num = "0" + num;
+        }
+        rest = sign + num + ":00";
+      }
+      return rest;
     }
-    return rest;
+    return offset;
   }
-  return offset;
-}
 
-/**
- * Combines a date string (in "YYYY‑MM‑DD" format) with a time object ({hour, minute})
- * into a Date object representing the “pure” local time.
- * This Date is constructed using UTC so that, for example, new Date(Date.UTC(2025, 2, 8, 23, 20, 0))
- * produces "2025‑03‑08T23:20:00.000Z".
- */
-function combineDateAndTime(dateStr, timeObj) {
-  const parts = dateStr.split("-");
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
-  return new Date(Date.UTC(year, month, day, timeObj.hour, timeObj.minute, 0));
-}
-
-/**
- * Formats a Date object as a flight date string, e.g., "Sat, 8 Mar, 2025".
- */
-function formatFlightDateSingle(date) {
-  if (!(date instanceof Date)) {
-    // Try to parse the string into a Date object.
-    date = parseServerDate(date);
+  /**
+   * Combines a date string (in "YYYY‑MM‑DD" format) with a time object ({hour, minute})
+   * into a Date object representing the “pure” local time.
+   * This Date is constructed using UTC so that, for example, new Date(Date.UTC(2025, 2, 8, 23, 20, 0))
+   * produces "2025‑03‑08T23:20:00.000Z".
+   */
+  function combineDateAndTime(dateStr, timeObj) {
+    const parts = dateStr.split("-");
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(Date.UTC(year, month, day, timeObj.hour, timeObj.minute, 0));
   }
-  if (!(date instanceof Date)) return "";
-  const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
-  return date.toLocaleDateString('en-US', options);
-}
+
+  /**
+   * Formats a Date object as a flight date string, e.g., "Sat, 8 Mar, 2025".
+   */
+  function formatFlightDateSingle(date) {
+    if (!(date instanceof Date)) {
+      // Try to parse the string into a Date object.
+      date = parseServerDate(date);
+    }
+    if (!(date instanceof Date)) return "";
+    const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
+    return date.toLocaleDateString('en-US', options);
+  }
 
 
-/**
- * Combines two Date objects (departure and arrival) into a formatted date range.
- * If both dates fall on the same day, returns a single formatted date;
- * otherwise, returns "Date1 - Date2".
- */
-function formatFlightDateCombined(depDate, arrDate) {
-  if (!(depDate instanceof Date) || !(arrDate instanceof Date)) return "";
-  if (depDate.toDateString() === arrDate.toDateString()) {
-    return formatFlightDateSingle(depDate);
-  } else {
-    return `${formatFlightDateSingle(depDate)} - ${formatFlightDateSingle(arrDate)}`;
+  /**
+   * Combines two Date objects (departure and arrival) into a formatted date range.
+   * If both dates fall on the same day, returns a single formatted date;
+   * otherwise, returns "Date1 - Date2".
+   */
+  function formatFlightDateCombined(depDate, arrDate) {
+    if (!(depDate instanceof Date) || !(arrDate instanceof Date)) return "";
+    if (depDate.toDateString() === arrDate.toDateString()) {
+      return formatFlightDateSingle(depDate);
+    } else {
+      return `${formatFlightDateSingle(depDate)} - ${formatFlightDateSingle(arrDate)}`;
+    }
   }
-}
 
-/**
- * Unifies a raw flight object from the server by recalculating the departure and arrival Date objects,
- * the display times, the flight duration (accounting for time zone differences), and a formatted date range.
- *
- * The incorrect "departureDateTimeIso" and "arrivalDateTimeIso" values are ignored.
- *
- * New keys added:
- * - departureOffset: normalized offset string (e.g., "+01:00")
- * - arrivalOffset: normalized offset string (e.g., "+00:00")
- * - displayDeparture: departure time in 24‑hour format (e.g., "23:20")
- * - displayArrival: arrival time in 24‑hour format (e.g., "01:35")
- * - calculatedDuration: { hours, minutes, totalMinutes, departureDate, arrivalDate }
- *   where departureDate and arrivalDate are the combined “pure” local times.
- * - formattedFlightDate: a string such as "Sat, 8 Mar, 2025 - Sun, 9 Mar, 2025"
- * - route: an array containing the departure and arrival airport names.
- */
-function unifyRawFlight(rawFlight) {
-  const depDateStr = rawFlight.departureDateIso
-    ? rawFlight.departureDateIso
-    : new Date(rawFlight.departureDate).toISOString().slice(0, 10);
-  const arrDateStr = rawFlight.arrivalDateIso
-    ? rawFlight.arrivalDateIso
-    : new Date(rawFlight.arrivalDate).toISOString().slice(0, 10);
-  const depTimeObj = parse12HourTime(rawFlight.departure);
-  const arrTimeObj = parse12HourTime(rawFlight.arrival);
-  if (!depTimeObj || !arrTimeObj) {
-    console.error("Time parsing failed for flight:", rawFlight);
-    return rawFlight;
+  /**
+   * Unifies a raw flight object from the server by recalculating the departure and arrival Date objects,
+   * the display times, the flight duration (accounting for time zone differences), and a formatted date range.
+   *
+  * The incorrect "departureDateTimeIso" and "arrivalDateTimeIso" values are ignored.
+  *
+  * New keys added:
+  * - departureOffset: normalized offset string (e.g., "+01:00")
+  * - arrivalOffset: normalized offset string (e.g., "+00:00")
+  * - displayDeparture: departure time in 24‑hour format (e.g., "23:20")
+  * - displayArrival: arrival time in 24‑hour format (e.g., "01:35")
+  * - calculatedDuration: { hours, minutes, totalMinutes, departureDate, arrivalDate }
+  *   where departureDate and arrivalDate are the combined “pure” local times.
+  * - formattedFlightDate: a string such as "Sat, 8 Mar, 2025 - Sun, 9 Mar, 2025"
+  * - route: an array containing the departure and arrival airport names.
+  */
+  function unifyRawFlight(rawFlight) {
+    const depDateStr = rawFlight.departureDateIso
+      ? rawFlight.departureDateIso
+      : new Date(rawFlight.departureDate).toISOString().slice(0, 10);
+    const arrDateStr = rawFlight.arrivalDateIso
+      ? rawFlight.arrivalDateIso
+      : new Date(rawFlight.arrivalDate).toISOString().slice(0, 10);
+    const depTimeObj = parse12HourTime(rawFlight.departure);
+    const arrTimeObj = parse12HourTime(rawFlight.arrival);
+    if (!depTimeObj || !arrTimeObj) {
+      console.error("Time parsing failed for flight:", rawFlight);
+      return rawFlight;
+    }
+    let localDeparture = combineDateAndTime(depDateStr, depTimeObj);
+    let localArrival = combineDateAndTime(arrDateStr, arrTimeObj);
+    const normDepOffset = normalizeOffset(rawFlight.departureOffsetText);
+    const normArrOffset = normalizeOffset(rawFlight.arrivalOffsetText);
+    const depOffsetHours = parseInt(normDepOffset.slice(0, 3), 10);
+    const arrOffsetHours = parseInt(normArrOffset.slice(0, 3), 10);
+    const utcDeparture = new Date(localDeparture.getTime() - depOffsetHours * 3600000);
+    const utcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
+    if (utcArrival <= utcDeparture) {
+      localArrival = new Date(localArrival.getTime() + 24 * 3600000);
+    }
+    const adjustedUtcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
+    const totalMinutes = Math.round((adjustedUtcArrival - utcDeparture) / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    const displayDep = convertTo24Hour(rawFlight.departure);
+    const displayArr = convertTo24Hour(rawFlight.arrival);
+    const formattedFlightDate = formatFlightDateCombined(localDeparture, localArrival);
+    const route = [rawFlight.departureStationText, rawFlight.arrivalStationText];
+    return {
+      key: rawFlight.key,
+      fareSellKey: rawFlight.fareSellKey,
+      departure: rawFlight.departure,
+      arrival: rawFlight.arrival,
+      departureStation: rawFlight.departureStation,
+      departureStationText: rawFlight.departureStationText,
+      arrivalStation: rawFlight.arrivalStation,
+      arrivalStationText: rawFlight.arrivalStationText,
+      departureDate: rawFlight.departureDate,
+      arrivalDate: rawFlight.arrivalDate,
+      departureStationCode: rawFlight.departureStationCode,
+      arrivalStationCode: rawFlight.arrivalStationCode,
+      reference: rawFlight.reference,
+      stops: rawFlight.stops,
+      flightCode: rawFlight.flightCode,
+      carrierText: rawFlight.carrierText,
+      currency: rawFlight.currency,
+      fare: rawFlight.fare,
+      discount: rawFlight.discount,
+      price: rawFlight.price,
+      taxes: rawFlight.taxes,
+      totalPrice: rawFlight.totalPrice,
+      displayPrice: rawFlight.displayPrice,
+      priceTag: rawFlight.priceTag,
+      flightId: rawFlight.flightId,
+      fareBasisCode: rawFlight.fareBasisCode,
+      actionText: rawFlight.actionText,
+      isFree: rawFlight.isFree,
+      departureOffsetText: rawFlight.departureOffsetText,
+      arrivalOffsetText: rawFlight.arrivalOffsetText,
+      departureOffset: normDepOffset,
+      arrivalOffset: normArrOffset,
+      displayDeparture: displayDep,
+      displayArrival: displayArr,
+      calculatedDuration: {
+        hours: hours,
+        minutes: minutes,
+        totalMinutes: totalMinutes,
+        departureDate: localDeparture,
+        arrivalDate: localArrival
+      },
+      formattedFlightDate: formattedFlightDate,
+      route: route
+    };
   }
-  let localDeparture = combineDateAndTime(depDateStr, depTimeObj);
-  let localArrival = combineDateAndTime(arrDateStr, arrTimeObj);
-  const normDepOffset = normalizeOffset(rawFlight.departureOffsetText);
-  const normArrOffset = normalizeOffset(rawFlight.arrivalOffsetText);
-  const depOffsetHours = parseInt(normDepOffset.slice(0, 3), 10);
-  const arrOffsetHours = parseInt(normArrOffset.slice(0, 3), 10);
-  const utcDeparture = new Date(localDeparture.getTime() - depOffsetHours * 3600000);
-  const utcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
-  if (utcArrival <= utcDeparture) {
-    localArrival = new Date(localArrival.getTime() + 24 * 3600000);
-  }
-  const adjustedUtcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
-  const totalMinutes = Math.round((adjustedUtcArrival - utcDeparture) / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  const displayDep = convertTo24Hour(rawFlight.departure);
-  const displayArr = convertTo24Hour(rawFlight.arrival);
-  const formattedFlightDate = formatFlightDateCombined(localDeparture, localArrival);
-  const route = [rawFlight.departureStationText, rawFlight.arrivalStationText];
-  return {
-    key: rawFlight.key,
-    fareSellKey: rawFlight.fareSellKey,
-    departure: rawFlight.departure,
-    arrival: rawFlight.arrival,
-    departureStation: rawFlight.departureStation,
-    departureStationText: rawFlight.departureStationText,
-    arrivalStation: rawFlight.arrivalStation,
-    arrivalStationText: rawFlight.arrivalStationText,
-    departureDate: rawFlight.departureDate,
-    arrivalDate: rawFlight.arrivalDate,
-    departureStationCode: rawFlight.departureStationCode,
-    arrivalStationCode: rawFlight.arrivalStationCode,
-    reference: rawFlight.reference,
-    stops: rawFlight.stops,
-    flightCode: rawFlight.flightCode,
-    carrierText: rawFlight.carrierText,
-    currency: rawFlight.currency,
-    fare: rawFlight.fare,
-    discount: rawFlight.discount,
-    price: rawFlight.price,
-    taxes: rawFlight.taxes,
-    totalPrice: rawFlight.totalPrice,
-    displayPrice: rawFlight.displayPrice,
-    priceTag: rawFlight.priceTag,
-    flightId: rawFlight.flightId,
-    fareBasisCode: rawFlight.fareBasisCode,
-    actionText: rawFlight.actionText,
-    isFree: rawFlight.isFree,
-    departureOffsetText: rawFlight.departureOffsetText,
-    arrivalOffsetText: rawFlight.arrivalOffsetText,
-    departureOffset: normDepOffset,
-    arrivalOffset: normArrOffset,
-    displayDeparture: displayDep,
-    displayArrival: displayArr,
-    calculatedDuration: {
-      hours: hours,
-      minutes: minutes,
-      totalMinutes: totalMinutes,
-      departureDate: localDeparture,
-      arrivalDate: localArrival
-    },
-    formattedFlightDate: formattedFlightDate,
-    route: route
-  };
-}
   /**
  * Formats an offset string for display.
  * For example, "+01:00" is shown as "UTC+1" and "+00:00" as "UTC".
@@ -817,11 +849,11 @@ function unifyRawFlight(rawFlight) {
     }
   }   
 
-  // ---------------- Global Results Display Functions ----------------
-  /**
- * Appends a unified route (either a direct flight or an aggregated connecting route) to the global results,
- * then triggers re‑rendering.
- */
+    // ---------------- Global Results Display Functions ----------------
+    /**
+   * Appends a unified route (either a direct flight or an aggregated connecting route) to the global results,
+   * then triggers re‑rendering.
+   */
   function appendRouteToDisplay(routeObj) {
     globalResults.push(routeObj);
     if (!suppressDisplay) {
