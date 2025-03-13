@@ -2,9 +2,11 @@ import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, airportFlags } from './air
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 500;
+  let debug = true;
+  let activeTimeout = null;
+  let timeoutInterval = null;
+  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
   const MAX_RETRY_ATTEMPTS = 2;  
-  const delay = Math.floor(Math.random() * (1000 - REQUESTS_FREQUENCY_MS + 1)) + REQUESTS_FREQUENCY_MS;
   let PAUSE_DURATION_MS = Number(localStorage.getItem('pauseDurationSeconds'))
     ? Number(localStorage.getItem('pauseDurationSeconds')) * 1000
     : 15000;
@@ -15,7 +17,6 @@ import Dexie from '../src/libs/dexie.mjs';
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
-  let debug = true;
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -61,24 +62,44 @@ import Dexie from '../src/libs/dexie.mjs';
     const percentage = total > 0 ? (current / total) * 100 : 0;
     progressBar.style.width = percentage + "%";
   }
-  function hideProgress() {
-    progressContainer.style.display = "none";
-  }
-  let timeoutInterval = null;
-  function showTimeoutCountdown(waitTimeMs) {
+  function hideTimeoutCountdown() {
     const timeoutEl = document.getElementById("timeout-status");
-    if (timeoutInterval !== null) {
+    if (timeoutInterval) {
       clearInterval(timeoutInterval);
       timeoutInterval = null;
     }
+    timeoutEl.textContent = "";
+    timeoutEl.style.display = "none";
+  }
+  function hideProgress() {
+    progressContainer.style.display = "none";
+  }
+  
+  function resetCountdownTimers() {
+    if (activeTimeout) {
+      clearTimeout(activeTimeout);
+      activeTimeout = null;
+    }
+    if (timeoutInterval) {
+      clearInterval(timeoutInterval);
+      timeoutInterval = null;
+    }
+    const timeoutEl = document.getElementById("timeout-status");
+    timeoutEl.textContent = "";
+    timeoutEl.style.display = "none";
+  }
+  function showTimeoutCountdown(waitTimeMs) {
+    resetCountdownTimers();
+    const timeoutEl = document.getElementById("timeout-status");
     let seconds = Math.floor(waitTimeMs / 1000);
     timeoutEl.style.display = "block";
     timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
-    const interval = setInterval(() => {
+    timeoutInterval = setInterval(() => {
       seconds--;
       timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
       if (seconds <= 0) {
-        clearInterval(interval);
+        clearInterval(timeoutInterval);
+        timeoutInterval = null;
         timeoutEl.textContent = "";
         timeoutEl.style.display = "none";
       }
@@ -86,27 +107,50 @@ import Dexie from '../src/libs/dexie.mjs';
   }
 
   let throttleResetTimer = null;
+
   async function throttleRequest() {
+    if (searchCancelled) return;
+  
     if (throttleResetTimer) {
       clearTimeout(throttleResetTimer);
       throttleResetTimer = null;
     }
-
+  
     if (requestsThisWindow >= MAX_REQUESTS_IN_ROW) {
       if (debug) console.log(`Reached ${MAX_REQUESTS_IN_ROW} consecutive requests; pausing for ${PAUSE_DURATION_MS}ms`);
       showTimeoutCountdown(PAUSE_DURATION_MS);
       await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION_MS));
       requestsThisWindow = 0;
     }
+  
+    const startTime = performance.now();
     requestsThisWindow++;
-    await new Promise(resolve => setTimeout(resolve, delay));
-
+  
+    // Recalculate delay on every request
+    const delay = REQUESTS_FREQUENCY_MS + Math.floor(151 * (performance.now() % 1));
+    await new Promise(resolve => {
+      activeTimeout = setTimeout(() => {
+        if (!searchCancelled) {
+          resolve();
+        }
+      }, delay);
+    });
+    if (debug) console.log(`Current request delay: ${delay} ms`);
+    if (searchCancelled) {
+      if (debug) console.log("Search was cancelled during throttleRequest. Stopping execution.");
+      return;
+    }
+  
+    const endTime = performance.now();
+    const actualDelay = endTime - startTime;
+    if (debug) console.log(`Actual request delay: ${actualDelay.toFixed(2)} ms (Expected: ${delay} ms)`);
+  
     throttleResetTimer = setTimeout(() => {
       requestsThisWindow = 0;
       if (debug) console.log("Throttle counter reset due to 10s inactivity.");
     }, 10000);
   }
-
+  
   function getLocalDateFromOffset(date, offsetText) {
     if (!date || !(date instanceof Date)) {
       console.error("Invalid date passed to getLocalDateFromOffset:", date);
@@ -559,7 +603,7 @@ function unifyRawFlight(rawFlight) {
     try {
       // Clear all cached results in Dexie
       await db.cache.clear();
-      console.log("Dexie cache cleared.");
+      if (debug) console.log("Dexie cache cleared.");
     } catch (error) {
       console.error("Error clearing Dexie cache:", error);
     }
@@ -628,10 +672,7 @@ function unifyRawFlight(rawFlight) {
     while (attempts < MAX_RETRY_ATTEMPTS) {
       await throttleRequest();
       try {
-        await new Promise(resolve => setTimeout(resolve, delay));
-
         let dynamicUrl = await getDynamicUrl();
-
         const pageDataStr = localStorage.getItem("wizz_page_data") || "{}";
         const pageData = JSON.parse(pageDataStr);
         const data = {
@@ -642,9 +683,9 @@ function unifyRawFlight(rawFlight) {
           arrival: "",
           intervalSubtype: null
         };
-
+  
         let headers = { "Content-Type": "application/json" };
-
+  
         // Use cached headers if available and still valid.
         if (pageData.headers && Date.now() - pageData.timestamp < 60 * 60 * 1000) {
           if (debug) console.log("Using cached headers");
@@ -657,13 +698,13 @@ function unifyRawFlight(rawFlight) {
             if (debug) console.log("Failed to get headers from page, using defaults");
           }
         }
-
+  
         const fetchResponse = await fetch(dynamicUrl, {
           method: "POST",
           headers: headers,
           body: JSON.stringify(data)
         });
-
+  
         if (!fetchResponse.ok) {
           if (fetchResponse.status === 400) {
             if (debug) console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
@@ -671,7 +712,7 @@ function unifyRawFlight(rawFlight) {
           }
           if (debug) throw new Error(`HTTP error: ${fetchResponse.status}`);
         }
-
+  
         const contentType = fetchResponse.headers.get("content-type") || "";
         if (!contentType.includes("application/json")) {
           const text = await fetchResponse.text();
@@ -684,35 +725,53 @@ function unifyRawFlight(rawFlight) {
             throw new Error("Invalid response format: expected JSON but received HTML");
           }
         }
-
+  
         const responseData = await fetchResponse.json();
         if (debug) console.log(`Response for segment ${origin} → ${destination}:`, responseData);
         return responseData.flightsOutbound || [];
-        
+  
       } catch (error) {
-        if (error.message.includes("426")) {
-          const waitTime = 60000;
-          if (debug) console.warn(`Rate limit encountered (426) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
-          showTimeoutCountdown(waitTime);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        } else if (error.message.includes("429")) {
-          const waitTime = 40000;
-          if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
-          showTimeoutCountdown(waitTime);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        } else if (error.message.includes("Invalid response format")) {
-          const waitTime = 2000;
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination}. – waiting for ${waitTime / 1000} seconds`);
-          break;
-        } else {
-          if (debug) throw error;
+          if (searchCancelled) {
+            if (debug) console.log("Search was cancelled. Stopping execution in checkRouteSegment.");
+            resetCountdownTimers();
+            return;
+          }
+      
+          let waitTime = 0;
+          if (error.message.includes("426")) {
+            waitTime = 60000;
+            if (debug) console.warn(`Rate limit encountered (426) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+          } else if (error.message.includes("429")) {
+            waitTime = 40000;
+            if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+          } else if (error.message.includes("Invalid response format")) {
+            waitTime = 2000;
+            if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            break;
+          } else {
+            if (debug) throw error;
+          }
+      
+          if (waitTime > 0) {
+            showTimeoutCountdown(waitTime);
+            // Before setting a new timer, clear any existing activeTimeout
+            if (activeTimeout) {
+              clearTimeout(activeTimeout);
+              activeTimeout = null;
+            }
+            await new Promise(resolve => {
+              activeTimeout = setTimeout(() => {
+                resolve();
+              }, waitTime);
+            });
+          }
+          attempts++;
         }
-        attempts++;
       }
+      if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
     }
-    if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
-  }
+    
 
   // ---------------- Graph Building and DFS Functions ----------------
   function buildGraph(routesData) {
@@ -906,7 +965,7 @@ function unifyRawFlight(rawFlight) {
             };
             localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
             if (debug) {
-              console.log("Resolved with routes from multipass:", response.routes);
+              if (debug) console.log("Resolved with routes from multipass:", response.routes);
             }
             resolve(response.routes);
           } else {
@@ -1104,7 +1163,6 @@ function unifyRawFlight(rawFlight) {
               if (flights !== null) {
                 flights = flights.map(unifyRawFlight);
               } else {
-                // await throttleRequest();
                 try {
                   flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
                   flights = flights.map(unifyRawFlight);
@@ -1213,7 +1271,7 @@ function unifyRawFlight(rawFlight) {
   // Searches for direct (non‑connecting) flights using only the server–provided arrival stations.
   // Modified searchDirectRoutes function
   async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true, reverse = false) {
-    console.log("Starting searchDirectRoutes:", { origins, destinations, selectedDate, shouldAppend, reverse });
+    if (debug) console.log("Starting searchDirectRoutes:", { origins, destinations, selectedDate, shouldAppend, reverse });
   
     // In reverse mode, we assume that outbound flights have been previously found.
     // globalResults is assumed to hold outbound flights (each with departureStation and arrivalStation).
@@ -1224,40 +1282,40 @@ function unifyRawFlight(rawFlight) {
         // For an outbound flight from X to Y, the reverse pair is Y → X.
         allowedReversePairs.add(`${flight.arrivalStation}-${flight.departureStation}`);
       });
-      console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
+      if (debug) console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
     }
   
     // In reverse mode, swap origins and destinations if not already done by the caller.
     if (reverse) {
-      console.log("Reverse mode enabled: swapping origins and destinations.");
+      if (debug) console.log("Reverse mode enabled: swapping origins and destinations.");
       [origins, destinations] = [destinations, origins];
-      console.log("After swap, origins:", origins, "destinations:", destinations);
+      if (debug) console.log("After swap, origins:", origins, "destinations:", destinations);
     }
   
     // Get routes data – we always use the cached routes from localStorage.
     let routesData = await fetchDestinations();
-    console.log(`Fetched ${routesData.length} routes from fetchDestinations.`);
+    if (debug) console.log(`Fetched ${routesData.length} routes from fetchDestinations.`);
   
     // If origins is "ANY" but destinations are specific, filter origins to those with at least one matching arrival.
     if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
-      console.log("Origin is 'ANY', filtering origins based on provided destinations:", destinations);
+      if (debug) console.log("Origin is 'ANY', filtering origins based on provided destinations:", destinations);
       const destSet = new Set(destinations);
       const filteredOrigins = routesData.filter(route =>
         route.arrivalStations &&
         route.arrivalStations.some(arr => destSet.has(typeof arr === "object" ? arr.id : arr))
       ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
       origins = [...new Set(filteredOrigins)];
-      console.log("Filtered origins:", origins);
+      if (debug) console.log("Filtered origins:", origins);
     }
   
     let validDirectFlights = [];
     // Process each origin.
     for (const origin of origins) {
       if (searchCancelled) {
-        console.log("Search cancelled. Exiting loop.");
+        if (debug) console.log("Search cancelled. Exiting loop.");
         break;
       }
-      console.log(`Processing origin: ${origin}`);
+      if (debug) console.log(`Processing origin: ${origin}`);
   
       // Find route data for this origin.
       let routeData = routesData.find(route => {
@@ -1266,10 +1324,10 @@ function unifyRawFlight(rawFlight) {
           : route.departureStation.id === origin;
       });
       if (!routeData || !routeData.arrivalStations) {
-        console.log(`No route data found for origin ${origin}. Skipping.`);
+        if (debug) console.log(`No route data found for origin ${origin}. Skipping.`);
         continue;
       }
-      console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}.`);
+      if (debug) console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}.`);
   
       // Filter arrival stations based on provided destinations.
       const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
@@ -1279,10 +1337,10 @@ function unifyRawFlight(rawFlight) {
             return destinations.includes(arrCode);
           });
       if (matchingArrivals.length === 0) {
-        console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations}. Skipping.`);
+        if (debug) console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations}. Skipping.`);
         continue;
       }
-      console.log(`Matching arrivals for ${origin}:`, matchingArrivals);
+      if (debug) console.log(`Matching arrivals for ${origin}:`, matchingArrivals);
   
       const totalArrivals = matchingArrivals.length;
       let processed = 0;
@@ -1290,29 +1348,29 @@ function unifyRawFlight(rawFlight) {
   
       for (const arrival of matchingArrivals) {
         if (searchCancelled) {
-          console.log("Search cancelled during processing. Exiting inner loop.");
+          if (debug) console.log("Search cancelled during processing. Exiting inner loop.");
           break;
         }
         let arrivalCode = arrival.id || arrival;
-        console.log(`Checking route ${origin} → ${arrivalCode}`);
+        if (debug) console.log(`Checking route ${origin} → ${arrivalCode}`);
   
         // In reverse mode, first check if this reverse pair is allowed (from outbound flights).
         if (reverse && allowedReversePairs) {
           const reversePairKey = `${origin}-${arrivalCode}`;
           if (!allowedReversePairs.has(reversePairKey)) {
-            console.log(`No outbound flight found for reverse route ${origin} → ${arrivalCode}. Skipping.`);
+            if (debug) console.log(`No outbound flight found for reverse route ${origin} → ${arrivalCode}. Skipping.`);
             continue;
           } else {
-            console.log(`Reverse route ${origin} → ${arrivalCode} is allowed based on outbound flights.`);
+            if (debug) console.log(`Reverse route ${origin} → ${arrivalCode} is allowed based on outbound flights.`);
           }
         }
   
         // Build the cache key for the search parameters.
         const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-        console.log(`Checking cache for ${cacheKey}`);
+        if (debug) console.log(`Checking cache for ${cacheKey}`);
         let cachedDirect = await getCachedResults(cacheKey);
         if (cachedDirect) {
-          console.log(`Cache hit for ${cacheKey}. Using cached flights.`);
+          if (debug) console.log(`Cache hit for ${cacheKey}. Using cached flights.`);
           cachedDirect = cachedDirect.map(unifyRawFlight);
           if (shouldAppend) cachedDirect.forEach(flight => appendRouteToDisplay(flight));
           validDirectFlights = validDirectFlights.concat(cachedDirect);
@@ -1321,18 +1379,17 @@ function unifyRawFlight(rawFlight) {
           continue;
         }
   
-        console.log(`No cached flight for ${cacheKey}; fetching from server.`);
+        if (debug) console.log(`No cached flight for ${cacheKey}; fetching from server.`);
         try {
-          // await throttleRequest();
           let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
           if (flights.length > 0) {
-            console.log(`Found ${flights.length} flights for ${origin} → ${arrivalCode}.`);
+            if (debug) console.log(`Found ${flights.length} flights for ${origin} → ${arrivalCode}.`);
             flights = flights.map(unifyRawFlight);
             if (shouldAppend) flights.forEach(flight => appendRouteToDisplay(flight));
             await setCachedResults(cacheKey, flights);
             validDirectFlights = validDirectFlights.concat(flights);
           } else {
-            console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
+            if (debug) console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
             await setCachedResults(cacheKey, []);
           }
         } catch (error) {
@@ -1342,7 +1399,7 @@ function unifyRawFlight(rawFlight) {
         updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
       }
     }
-    console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
+    if (debug) console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
     return validDirectFlights;
   }
   
@@ -1359,27 +1416,20 @@ async function handleSearch() {
   // If a search is already active, treat the click as a cancel request.
   if (searchActive) {
     searchCancelled = true;
+    resetCountdownTimers();
     if (throttleResetTimer) {
       clearTimeout(throttleResetTimer);
       throttleResetTimer = null;
     }
-    if (timeoutInterval) {
-      clearInterval(timeoutInterval);
-      timeoutInterval = null;
-    }
-    const timeoutEl = document.getElementById("timeout-status");
-    timeoutEl.textContent = "";
-    timeoutEl.style.display = "none";
     progressContainer.style.display = "none";
-    // Do not clear globalResults so that already fetched results remain visible.
     searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-      viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-        <path stroke-linecap="round" stroke-linejoin="round" 
-          d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-      </svg> SEARCH`;
+        viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+          <path stroke-linecap="round" stroke-linejoin="round" 
+            d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+        </svg> SEARCH`;
     searchActive = false;
     return;
-  }
+  }  
 
   // Starting a new search: clear previous results and mark search as active.
   globalResults = [];
@@ -1454,7 +1504,7 @@ async function handleSearch() {
   try {
     if (tripType === "oneway") {
       for (const dateStr of departureDates) {
-        if (searchCancelled) break;
+        if (searchCancelled) return;
         if (maxTransfers > 0) {
           await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
         } else {
@@ -1726,8 +1776,6 @@ async function handleSearch() {
       const plusBtn = row.querySelector(".plus-btn");
       const inputField = row.querySelector("input");
   
-      // Показываем кнопку "+" только на последней строке,
-      // если общее количество строк меньше 3 и поле заполнено.
       if (rows.length < 3 && index === rows.length - 1 && inputField && inputField.value.trim().length > 0) {
         if (plusBtn) plusBtn.style.display = "inline-block";
       } else {
