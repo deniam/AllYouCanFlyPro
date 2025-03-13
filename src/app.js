@@ -573,10 +573,10 @@ function unifyRawFlight(rawFlight) {
       const expiredEntries = await db.cache.where("timestamp").below(now - CACHE_LIFETIME).toArray();
       for (const entry of expiredEntries) {
         await db.cache.delete(entry.key);
-        if (debug) console.log(`Удалена устаревшая запись кэша: ${entry.key}`);
+        if (debug) console.log(`Expired cache key found and deleted: ${entry.key}`);
       }
     } catch (e) {
-      console.error("Ошибка при очистке кэша:", e);
+      console.error("Error while cleaning cache:", e);
     }
   }
 
@@ -1847,16 +1847,16 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
   const isOutbound = label && label.toLowerCase().includes("outbound flight");
   const isDirectFlight = !unifiedFlight.segments || unifiedFlight.segments.length === 1; 
   const header = isOutbound && isDirectFlight || isDirectFlight ? "" :  `
-    <div class="flex flex-col gap-2">
-      <div class="flex justify-between items-center mb-1">
+    <div class="flex flex-col">
+      <div class="flex justify-between items-center mb-0.5 space-x-2">
         <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
           ${unifiedFlight.formattedFlightDate}
         </div>
         <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
-          Total duration: ${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
+          Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
         </div>
       </div>
-      <hr class="${ isOutbound ? "border-[#C90076] my-2" : "border-[#20006D] my-2"}">
+      <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1" : "border-[#20006D] border-2 mt-1 my-2"}">
     </div>
   `;
   
