@@ -61,7 +61,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === "getHeaders") {
         const headers = {};
         performance.getEntriesByType("resource").forEach(entry => {
-        if (entry.name.includes("multipass.wizzair.com")) {
+        if (entry.name.includes("multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets")) {
             entry.serverTiming.forEach(timing => {
             if (timing.name.startsWith("request_header_")) {
                 const headerName = timing.name.replace("request_header_", "");
