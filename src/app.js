@@ -2,7 +2,7 @@ import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, airportFlags } from './air
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -943,7 +943,7 @@ import Dexie from '../src/libs/dexie.mjs';
   
     // If no valid cache, query the multipass tab.
     return new Promise((resolve, reject) => {
-      chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, async (tabs) => {
+      chrome.tabs.query({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/*" }, async (tabs) => {
         let multipassTab;
         if (tabs && tabs.length > 0) {
           multipassTab = tabs[0];
@@ -1111,7 +1111,7 @@ import Dexie from '../src/libs/dexie.mjs';
     });
   }
   
-  
+
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
     // --- Updated searchConnectingRoutes ---
   // Searches for connecting (multi‑leg) routes.
@@ -1932,7 +1932,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
           ${unifiedFlight.formattedFlightDate}
         </div>
-        <div class="text-xs font-semibold bg-gray-800 text-white text-right px-2 py-1 mb-1 rounded">
+        <div class="text-xs font-semibold text-gray-800 text-right px-2 py-1 mb-1 rounded">
           Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
         </div>
       </div>
@@ -1950,6 +1950,16 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
   if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
     unifiedFlight.segments.forEach((segment, idx) => {
       bodyHtml += createSegmentRow(segment);
+      bodyHtml += `
+      <div class="flex justify-between items-center mt-2">
+        <div class="text-left text-sm font-semibold text-gray-800">
+          ${segment.currency} ${segment.displayPrice}
+        </div>
+        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
+          Continue to Payment
+        </button>
+      </div>
+    `;
       if (idx < unifiedFlight.segments.length - 1) {
         const nextSegment = unifiedFlight.segments[idx + 1];
         const connectionMs = nextSegment.calculatedDuration.departureDate - segment.calculatedDuration.arrivalDate;
@@ -1969,6 +1979,16 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
     });
   } else {
     bodyHtml = createSegmentRow(unifiedFlight);
+    bodyHtml += `
+      <div class="flex justify-between items-center mt-2">
+        <div class="text-left text-sm font-semibold text-gray-800">
+          ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
+        </div>
+        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+          Continue to Payment
+        </button>
+      </div>
+    `;
   }
   
   // Always include the header regardless of return flight type.
@@ -2390,7 +2410,55 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+  // ------------- Redirect to payment --------------
+  function getSubscriptionIdFromDynamicUrl(url) {
+    const matches = url.match(/subscriptions\/([^/]+)\/availability\/([^/]+)/);
+    if (matches && matches[2]) {
+      return matches[2];
+    }
+    return null;
+  }
 
+  window.continueToPayment = async function(outboundKey) {
+    try {
+        const dynamicUrl = await getDynamicUrl(); // Fetch the dynamic URL
+        console.log("dynamicUrl for payment:", dynamicUrl);
+        
+        const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
+        if (!subscriptionId) {
+            console.error("Failed to extract subscription ID from:", dynamicUrl);
+            return;
+        }
+
+        const url = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
+        console.log("Using subscription ID:", subscriptionId);
+        console.log("Final Payment URL (without sending request):", url);
+
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = url;
+        form.target = "_blank";
+
+        // Send outboundKey as POST data
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = "outboundKey";
+        input.value = outboundKey;
+        form.appendChild(input);
+
+        console.log("Form data:", { outboundKey: input.value });
+        console.log("Generated form:", form);
+        console.log("Form Action (Final URL):", form.action);
+        console.log("Form Data:", { outboundKey: input.value });
+        document.body.appendChild(form);
+        form.submit();
+        document.body.removeChild(form);
+    } catch (error) {
+        console.error("Error in continueToPayment:", error);
+    }
+};
+ 
+  
   // ---------------- Initialize on DOMContentLoaded ----------------
   
   document.addEventListener("DOMContentLoaded", () => {
@@ -2662,5 +2730,14 @@ document.addEventListener("DOMContentLoaded", () => {
     scaleSlider.addEventListener("input", function() {
       document.body.style.zoom = this.value / 100;
     });
+
+    // ========= 12. Go to payment page =========
+    document.querySelector(".route-list").addEventListener("click", (event) => {
+      const btn = event.target.closest(".continue-payment-button");
+      if (btn) {
+        const outboundKey = btn.getAttribute("data-outbound-key");
+        continueToPayment(outboundKey);
+      }
+    });    
   });
   
