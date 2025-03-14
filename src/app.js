@@ -932,7 +932,7 @@ import Dexie from '../src/libs/dexie.mjs';
     if (cachedDataStr) {
       try {
         const cachedData = JSON.parse(cachedDataStr);
-        if (Date.now() - cachedData.timestamp < 60 * 60 * 1000 && cachedData.routes) {
+        if (Date.now() - cachedData.timestamp < 15 * 60 * 1000 && cachedData.routes) {
           if (debug) console.log("Using cached destinations from localStorage");
           return cachedData.routes;
         }

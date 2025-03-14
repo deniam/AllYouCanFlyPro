@@ -1,6 +1,6 @@
 chrome.action.onClicked.addListener(async (tab) => {
     const hasSidePanel = 'sidePanel' in chrome;
-    const multipassUrlSubstring = "multipass.wizzair.com";
+    const multipassUrlSubstring = "multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
 
     const openAsPopup = () => {
         chrome.windows.create({
