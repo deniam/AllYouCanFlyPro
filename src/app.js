@@ -1932,7 +1932,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
           ${unifiedFlight.formattedFlightDate}
         </div>
-        <div class="text-xs font-semibold bg-gray-800 text-white text-right px-2 py-1 mb-1 rounded">
+        <div class="text-xs font-semibold text-gray-800 text-right px-2 py-1 mb-1 rounded">
           Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
         </div>
       </div>
