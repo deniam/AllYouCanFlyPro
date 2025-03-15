@@ -752,9 +752,11 @@ import Dexie from '../src/libs/dexie.mjs';
             if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
             localStorage.removeItem("wizz_page_data");
             await refreshMultipassTab();
-            dynamicUrl = await getDynamicUrl();
-            // Throw a specific error that we can catch below
-            throw new Error("Invalid response format: expected JSON but received HTML");
+            showNotification("Authorization required: please log in to search for routes.");
+            throw new Error("Authorization required: expected JSON but received HTML");
+            // dynamicUrl = await getDynamicUrl();
+            // // Throw a specific error that we can catch below
+            // throw new Error("Invalid response format: expected JSON but received HTML");
           }
         }
   
