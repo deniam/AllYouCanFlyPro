@@ -1,4 +1,4 @@
-import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, airportFlags } from './airports.js';
+import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, ADDITIONAL_ROUTES, airportFlags } from './airports.js';
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
@@ -30,6 +30,11 @@ import Dexie from '../src/libs/dexie.mjs';
   db.version(1).stores({
     cache: 'key, timestamp'  // 'key' is our primary key; we also index the timestamp
   });
+
+  export const dbRoutes = new Dexie("RoutesCacheDB");
+    dbRoutes.version(1).stores({
+      routes: "++id, departureStation.id"
+    });
   // ---------------- Helper: Airport Flag ----------------
   function getCountryFlag(airportCode) {
     return airportFlags[airportCode] || "";

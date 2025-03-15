@@ -19,6 +19,65 @@ export function isExcludedRoute(origin, destination) {
     return EXCLUDED_ROUTES.some(route => route.origin === origin && route.destination === destination);
 }
 
+export const ADDITIONAL_ROUTES = [
+    {
+    departureStation: { id: "VIE", name: "Vienna" },
+    arrivalStations: [{ id: "DXB", name: "Dubai" }]
+    },
+    {
+    departureStation: { id: "BBU", name: "Bucharest Baneasa" },
+    arrivalStations: [{ id: "NAP", name: "Naples" }]
+    },
+    {
+    departureStation: { id: "BBU", name: "Bucharest Baneasa" },
+    arrivalStations: [{ id: "KRK", name: "Kraków" }]
+    },
+    {
+    departureStation: { id: "TSR", name: "Timișoara" },
+    arrivalStations: [{ id: "FCO", name: "Rome Fiumicino" }]
+    },
+    {
+    departureStation: { id: "BCM", name: "Bacău" },
+    arrivalStations: [{ id: "MXP", name: "Milan Malpensa" }]
+    },
+    {
+    departureStation: { id: "RMO", name: "Chisnau" },
+    arrivalStations: [{ id: "DTM", name: "Dortmund" }]
+    },
+    {
+    departureStation: { id: "RMO", name: "Chisnau" },
+    arrivalStations: [{ id: "CRL", name: "Brussels Charleroi" }]
+    },
+    {
+    departureStation: { id: "RMO", name: "Chisnau" },
+    arrivalStations: [{ id: "BVA", name: "Paris Beauvais" }]
+    },
+    {
+    departureStation: { id: "RMO", name: "Chisnau" },
+    arrivalStations: [{ id: "BER", name: "Berlin Brandenburg" }]
+    },
+    {
+    departureStation: { id: "SKP", name: "Skopje" },
+    arrivalStations: [{ id: "FCO", name: "Rome Fiumicino" }]
+    },
+    {
+    departureStation: { id: "VIE", name: "Vienna" },
+    arrivalStations: [{ id: "DXB", name: "Dubai" }]
+    },
+    {
+    departureStation: { id: "SKP", name: "Skopje" },
+    arrivalStations: [{ id: "VCE", name: "Venice Marco Polo" }]
+    },
+    {
+    departureStation: { id: "SCV", name: "Suceava" },
+    arrivalStations: [{ id: "MXP", name: "Milan Malpensa" }]
+    },
+    {
+    departureStation: { id: "SCV", name: "Suceava" },
+    arrivalStations: [{ id: "FCO", name: "Rome Fiumicino" }]
+    }
+];  
+
 export const AIRPORTS = [
     { "code": "ABZ", "name": "Aberdeen (ABZ)" },
     { "code": "AUH", "name": "Abu Dhabi (AUH)" },
