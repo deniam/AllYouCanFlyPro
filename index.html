@@ -273,16 +273,18 @@
         <button id="download-csv-button" class="px-2 py-1 bg-[#20006D] text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden">
           ⬇️ CSV
         </button>
-        <div class="flex items-center gap-2">
-          <label for="sort-select" class="text-sm font-medium text-gray-700">Sort by</label>
-          <select id="sort-select" class="block w-32 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
-            <option value="default" selected>Default</option>
-            <option value="airport">Departure Airport</option>
-            <option value="departure">Departure Time</option>
-            <option value="arrival">Arrival Time</option>
-            <option value="duration">Trip Length</option>
-          </select>
-        </div>
+          <div class="relative w-32">
+            <select id="sort-select" class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 pr-10 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer appearance-none">
+                <option value="default" selected>Default</option>
+                <option value="airport">Departure Airport</option>
+                <option value="departure">Departure Time</option>
+                <option value="arrival">Arrival Time</option>
+                <option value="duration">Trip Length</option>
+            </select>
+            <svg xmlns="http://www.w3.org/2000/svg" class="absolute right-2 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-600 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+            </svg>
+        </div>      
       </div>
 
       <!-- Progress Display -->

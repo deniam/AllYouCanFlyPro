@@ -18,6 +18,7 @@ import Dexie from '../src/libs/dexie.mjs';
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
+  let globalDefaultResults = [];
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -63,11 +64,22 @@ importRoutes();
 
   sortSelect.addEventListener("change", () => {
     currentSortOption = sortSelect.value;
-    // Re-render the results immediately using the updated sort.
-    if (window.currentTripType === "return") {
-      displayRoundTripResultsAll(globalResults);
+    if (currentSortOption === "default") {
+      // Render using the preserved unsorted order.
+      if (window.currentTripType === "return") {
+        displayRoundTripResultsAll(globalDefaultResults);
+      } else {
+        displayGlobalResults(globalDefaultResults);
+      }
     } else {
-      displayGlobalResults(globalResults);
+      // Work on a shallow copy of the default order so the original remains intact.
+      let sortedResults = [...globalDefaultResults];
+      sortResultsArray(sortedResults, currentSortOption);
+      if (window.currentTripType === "return") {
+        displayRoundTripResultsAll(sortedResults);
+      } else {
+        displayGlobalResults(sortedResults);
+      }
     }
   });
 
@@ -897,6 +909,7 @@ importRoutes();
    */
   function appendRouteToDisplay(routeObj) {
     globalResults.push(routeObj);
+    globalDefaultResults.push(routeObj);
     if (!suppressDisplay) {
       if (window.currentTripType === "return") {
         displayRoundTripResultsAll(globalResults);
@@ -1547,6 +1560,7 @@ async function handleSearch() {
 
   // Starting a new search: clear previous results and mark search as active.
   globalResults = [];
+  globalDefaultResults = [];
   totalResultsEl.textContent = "Total results: 0";
   searchActive = true;
   searchCancelled = false;
@@ -1960,14 +1974,13 @@ async function handleSearch() {
   // Updated sorting function for the global (outbound) results
   function sortResultsArray(results, sortOption) {
     if (!Array.isArray(results) || results.length === 0) return;
-
-    // For "default" leave the insertion order unchanged.
     if (sortOption === "default") {
+      // No sorting needed for default.
       return;
     } else if (sortOption === "departure") {
       results.sort((a, b) => {
         return new Date(a.calculatedDuration.departureDate).getTime() -
-              new Date(b.calculatedDuration.departureDate).getTime();
+               new Date(b.calculatedDuration.departureDate).getTime();
       });
     } else if (sortOption === "airport") {
       results.sort((a, b) => {
@@ -1977,8 +1990,6 @@ async function handleSearch() {
       });
     } else if (sortOption === "arrival") {
       results.sort((a, b) => {
-        // For round-trip, use the final arrival time if returnFlights exist;
-        // otherwise, use the one-way arrival time.
         const getFinalArrival = (flight) => {
           if (flight.returnFlights && flight.returnFlights.length > 0) {
             return new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
@@ -1991,7 +2002,6 @@ async function handleSearch() {
       results.sort((a, b) => {
         const getTripDuration = (flight) => {
           if (flight.returnFlights && flight.returnFlights.length > 0) {
-            // Overall duration: outbound departure to final inbound arrival.
             const outboundDeparture = new Date(flight.calculatedDuration.departureDate).getTime();
             const inboundArrival = new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
             return (inboundArrival - outboundDeparture) / 60000;
@@ -2001,6 +2011,7 @@ async function handleSearch() {
         return getTripDuration(a) - getTripDuration(b);
       });
     }
+    // Add any additional sort options as needed.
   }
 
 //-------------------Rendeting results-----------------------------
@@ -2018,7 +2029,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
           Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
         </div>
       </div>
-      <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1" : "border-[#20006D] border-2 mt-1 my-2"}">
+      <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1 my-2" : "border-[#20006D] border-2 mt-1 my-2"}">
     </div>
   `;
   
