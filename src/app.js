@@ -1,4 +1,5 @@
-import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, airportFlags } from './airports.js';
+import { AIRPORTS, COUNTRY_AIRPORTS, airportFlags } from './data/airports.js';
+import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
@@ -17,6 +18,7 @@ import Dexie from '../src/libs/dexie.mjs';
   let requestsThisWindow = 0;
   let searchCancelled = false;
   let globalResults = [];
+  let globalDefaultResults = [];
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   const airportNames = {};
@@ -30,10 +32,27 @@ import Dexie from '../src/libs/dexie.mjs';
   db.version(1).stores({
     cache: 'key, timestamp'  // 'key' is our primary key; we also index the timestamp
   });
+  db.version(2).stores({
+    cache: 'key, timestamp',
+    routes: '++id, departureStation'
+  });
+
+  async function importRoutes() {
+    try {
+      await db.routes.clear();
+      await db.routes.bulkAdd(routesData);
+      console.log("Routes imported successfully!");
+    } catch (error) {
+      console.error("Error importing routes:", error);
+    }
+  }
+
+importRoutes();
   // ---------------- Helper: Airport Flag ----------------
   function getCountryFlag(airportCode) {
     return airportFlags[airportCode] || "";
   }
+  
   // ----------------------- DOM Elements -----------------------
   const progressContainer = document.getElementById('progress-container');
   const progressText = document.getElementById('progress-text');
@@ -45,11 +64,22 @@ import Dexie from '../src/libs/dexie.mjs';
 
   sortSelect.addEventListener("change", () => {
     currentSortOption = sortSelect.value;
-    // Re-render the results immediately using the updated sort.
-    if (window.currentTripType === "return") {
-      displayRoundTripResultsAll(globalResults);
+    if (currentSortOption === "default") {
+      // Render using the preserved unsorted order.
+      if (window.currentTripType === "return") {
+        displayRoundTripResultsAll(globalDefaultResults);
+      } else {
+        displayGlobalResults(globalDefaultResults);
+      }
     } else {
-      displayGlobalResults(globalResults);
+      // Work on a shallow copy of the default order so the original remains intact.
+      let sortedResults = [...globalDefaultResults];
+      sortResultsArray(sortedResults, currentSortOption);
+      if (window.currentTripType === "return") {
+        displayRoundTripResultsAll(sortedResults);
+      } else {
+        displayGlobalResults(sortedResults);
+      }
     }
   });
 
@@ -699,6 +729,27 @@ import Dexie from '../src/libs/dexie.mjs';
     });
   }
 
+  function isDateAvailableForSegment(origin, destination, dateStr, routesData) {
+    // Find the route that starts at the given origin.
+    const route = routesData.find(r => {
+      const dep = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
+      return dep === origin;
+    });
+    if (!route) return false;
+    // Find the arrival station object with the given destination.
+    const arrivalStationObj = route.arrivalStations.find(st => {
+      const id = typeof st === "object" ? st.id : st;
+      return id === destination;
+    });
+    if (!arrivalStationObj) return false;
+    // If flightDates is defined, check that dateStr is included.
+    if (arrivalStationObj.flightDates) {
+      return arrivalStationObj.flightDates.includes(dateStr);
+    }
+    // If no flightDates provided, assume available.
+    return true;
+  }
+
   async function checkRouteSegment(origin, destination, date) {
     let attempts = 0;
     while (attempts < MAX_RETRY_ATTEMPTS) {
@@ -858,6 +909,7 @@ import Dexie from '../src/libs/dexie.mjs';
    */
   function appendRouteToDisplay(routeObj) {
     globalResults.push(routeObj);
+    globalDefaultResults.push(routeObj);
     if (!suppressDisplay) {
       if (window.currentTripType === "return") {
         displayRoundTripResultsAll(globalResults);
@@ -926,88 +978,85 @@ import Dexie from '../src/libs/dexie.mjs';
       }
     });
   }
-  
+
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
-    // Check if we have a cached routes object (wizz_page_data) that is still valid (e.g. within 1 hour)
-    const cachedDataStr = localStorage.getItem("wizz_page_data");
-    if (cachedDataStr) {
-      try {
-        const cachedData = JSON.parse(cachedDataStr);
-        if (Date.now() - cachedData.timestamp < 15 * 60 * 1000 && cachedData.routes) {
-          if (debug) console.log("Using cached destinations from localStorage");
-          return cachedData.routes;
-        }
-      } catch (e) {
-        console.error("Error parsing cached destinations:", e);
-      }
-    }
+    try {
+      // Retrieve all routes from the Dexie database
+      const routes = await db.routes.toArray();
+      console.log("Routes from Dexie:", routes);
+      return routes;
+    } catch (error) {
+      console.error("Error fetching destinations:", error);
+      return [];
+  }
+  
   
     // If no valid cache, query the multipass tab.
-    return new Promise((resolve, reject) => {
-      chrome.tabs.query({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/*" }, async (tabs) => {
-        let multipassTab;
-        if (tabs && tabs.length > 0) {
-          multipassTab = tabs[0];
-          if (debug) console.log("Found multipass tab:", multipassTab.id, multipassTab.url);
-        } else {
-          if (debug) console.log("No multipass tab found, opening one...");
-          chrome.tabs.create({
-            url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets"
-          }, async (newTab) => {
-            multipassTab = newTab;
-            if (debug) console.log("Opened new multipass tab:", newTab.id, newTab.url);
-            await waitForTabToComplete(newTab.id);
-            chrome.tabs.sendMessage(newTab.id, { action: "getDestinations" }, (response) => {
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-              }
-              if (response && response.routes) {
-                const pageData = {
-                  routes: response.routes,
-                  timestamp: Date.now(),
-                  dynamicUrl: response.dynamicUrl || null,
-                  headers: response.headers || null
-                };
-                localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-                resolve(response.routes);
-              } else if (response && response.error) {
-                reject(new Error(response.error));
-              } else {
-                reject(new Error("Failed to fetch destinations"));
-              }
-            });
-          });
-          return;
-        }
-        // Ensure the tab is fully loaded.
-        if (multipassTab.status !== "complete") {
-          await waitForTabToComplete(multipassTab.id);
-        }
-        if (debug) console.log("Sending getDestinations message to tab", multipassTab.id);
-        chrome.tabs.sendMessage(multipassTab.id, { action: "getDestinations" }, (response) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (response && response.success) {
-            // Save the routes in localStorage for future calls.
-            const pageData = {
-              routes: response.routes,
-              timestamp: Date.now(),
-              dynamicUrl: response.dynamicUrl || null,
-              headers: response.headers || null
-            };
-            localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-            if (debug) {
-              if (debug) console.log("Resolved with routes from multipass:", response.routes);
-            }
-            resolve(response.routes);
-          } else {
-            reject(new Error(response && response.error ? response.error : "Unknown error fetching routes."));
-          }
-        });
-      });
-    });
+    // return new Promise((resolve, reject) => {
+    //   chrome.tabs.query({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/*" }, async (tabs) => {
+    //     let multipassTab;
+    //     if (tabs && tabs.length > 0) {
+    //       multipassTab = tabs[0];
+    //       if (debug) console.log("Found multipass tab:", multipassTab.id, multipassTab.url);
+    //     } else {
+    //       if (debug) console.log("No multipass tab found, opening one...");
+    //       chrome.tabs.create({
+    //         url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets"
+    //       }, async (newTab) => {
+    //         multipassTab = newTab;
+    //         if (debug) console.log("Opened new multipass tab:", newTab.id, newTab.url);
+    //         await waitForTabToComplete(newTab.id);
+    //         chrome.tabs.sendMessage(newTab.id, { action: "getDestinations" }, (response) => {
+    //           if (chrome.runtime.lastError) {
+    //             reject(new Error(chrome.runtime.lastError.message));
+    //             return;
+    //           }
+    //           if (response && response.routes) {
+    //             const pageData = {
+    //               routes: response.routes,
+    //               timestamp: Date.now(),
+    //               dynamicUrl: response.dynamicUrl || null,
+    //               headers: response.headers || null
+    //             };
+    //             localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+    //             resolve(response.routes);
+    //           } else if (response && response.error) {
+    //             reject(new Error(response.error));
+    //           } else {
+    //             reject(new Error("Failed to fetch destinations"));
+    //           }
+    //         });
+    //       });
+    //       return;
+    //     }
+    //     // Ensure the tab is fully loaded.
+    //     if (multipassTab.status !== "complete") {
+    //       await waitForTabToComplete(multipassTab.id);
+    //     }
+    //     if (debug) console.log("Sending getDestinations message to tab", multipassTab.id);
+    //     chrome.tabs.sendMessage(multipassTab.id, { action: "getDestinations" }, (response) => {
+    //       if (chrome.runtime.lastError) {
+    //         reject(new Error(chrome.runtime.lastError.message));
+    //       } else if (response && response.success) {
+    //         // Save the routes in localStorage for future calls.
+    //         const pageData = {
+    //           routes: response.routes,
+    //           timestamp: Date.now(),
+    //           dynamicUrl: response.dynamicUrl || null,
+    //           headers: response.headers || null
+    //         };
+    //         localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+    //         if (debug) {
+    //           if (debug) console.log("Resolved with routes from multipass:", response.routes);
+    //         }
+    //         resolve(response.routes);
+    //       } else {
+    //         reject(new Error(response && response.error ? response.error : "Unknown error fetching routes."));
+    //       }
+    //     });
+    //   });
+    // });
   }
   
   async function getDynamicUrl() {
@@ -1115,7 +1164,6 @@ import Dexie from '../src/libs/dexie.mjs';
   
 
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
-    // --- Updated searchConnectingRoutes ---
   // Searches for connecting (multi‑leg) routes.
   // Uses the "overnight-checkbox" value to decide if connecting flights must depart on the same day as selected.
   function addDays(date, days) {
@@ -1191,8 +1239,29 @@ import Dexie from '../src/libs/dexie.mjs';
               }
               if (dateToSearch > bookingHorizon) break;
               const dateStr = dateToSearch.toISOString().slice(0, 10);
-              const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
+              const routeForSegment = routesData.find(r => {
+                const dep = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
+                return dep === segOrigin;
+              });
+              if (routeForSegment) {
+                const arrivalObj = routeForSegment.arrivalStations.find(st => {
+                  return (typeof st === "object" ? st.id : st) === segDestination;
+                });
+                if (arrivalObj && arrivalObj.flightDates) {
+                  if (!arrivalObj.flightDates.includes(dateStr)) {
+                    if (debug) console.log(`No available flight on ${dateStr} for segment ${segOrigin} → ${segDestination} (flightDates filter)`);
+                    continue;
+                  }
+                }
+              }
 
+              // NEW: Check if the selected date is available for this segment.
+              if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr, routesData)) {
+                if (debug) console.log(`No available flight on ${dateStr} for segment ${segOrigin} → ${segDestination}`);
+                continue;
+              }
+              
+              const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
               let flights = await getCachedResults(cacheKey);
               if (flights !== null) {
                 flights = flights.map(unifyRawFlight);
@@ -1329,7 +1398,17 @@ import Dexie from '../src/libs/dexie.mjs';
     // Get routes data – we always use the cached routes from localStorage.
     let routesData = await fetchDestinations();
     if (debug) console.log(`Fetched ${routesData.length} routes from fetchDestinations.`);
-  
+    routesData = routesData.map(route => {
+      if (Array.isArray(route.arrivalStations)) {
+        route.arrivalStations = route.arrivalStations.filter(arrival => {
+          if (typeof arrival === "object" && arrival.operationStartDate) {
+            return new Date(selectedDate) >= new Date(arrival.operationStartDate);
+          }
+          return true;
+        });
+      }
+      return route;
+    }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
     // If origins is "ANY" but destinations are specific, filter origins to those with at least one matching arrival.
     if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
       if (debug) console.log("Origin is 'ANY', filtering origins based on provided destinations:", destinations);
@@ -1385,7 +1464,21 @@ import Dexie from '../src/libs/dexie.mjs';
           if (debug) console.log("Search cancelled during processing. Exiting inner loop.");
           break;
         }
-        let arrivalCode = arrival.id || arrival;
+        let arrivalCode = typeof arrival === "object" ? arrival.id : arrival;
+        // NEW: If arrival object has flightDates, check that the selectedDate is available.
+        if (typeof arrival === "object" && arrival.operationStartDate) {
+          if (new Date(selectedDate) < new Date(arrival.operationStartDate)) {
+            if (debug) console.log(`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
+            continue;
+          }
+        }
+        if (typeof arrival === "object" && arrival.flightDates) {
+          if (!arrival.flightDates.includes(selectedDate)) {
+            if (debug) console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
+            continue;
+          }
+        }
+
         if (debug) console.log(`Checking route ${origin} → ${arrivalCode}`);
   
         // In reverse mode, first check if this reverse pair is allowed (from outbound flights).
@@ -1467,6 +1560,7 @@ async function handleSearch() {
 
   // Starting a new search: clear previous results and mark search as active.
   globalResults = [];
+  globalDefaultResults = [];
   totalResultsEl.textContent = "Total results: 0";
   searchActive = true;
   searchCancelled = false;
@@ -1805,12 +1899,13 @@ async function handleSearch() {
     const rows = container.querySelectorAll(".airport-row");
     rows.forEach((row, index) => {
       const deleteBtn = row.querySelector(".delete-btn");
-      if (deleteBtn) deleteBtn.style.display = "inline-block";
-  
+      if (deleteBtn) {
+        deleteBtn.style.display = "inline-block";
+      }
       const plusBtn = row.querySelector(".plus-btn");
-      const inputField = row.querySelector("input");
   
-      if (rows.length < 3 && index === rows.length - 1 && inputField && inputField.value.trim().length > 0) {
+      // Always show the plus button on the last row if total rows is less than 3.
+      if (rows.length < 3 && index === rows.length - 1) {
         if (plusBtn) plusBtn.style.display = "inline-block";
       } else {
         if (plusBtn) plusBtn.style.display = "none";
@@ -1880,14 +1975,13 @@ async function handleSearch() {
   // Updated sorting function for the global (outbound) results
   function sortResultsArray(results, sortOption) {
     if (!Array.isArray(results) || results.length === 0) return;
-
-    // For "default" leave the insertion order unchanged.
     if (sortOption === "default") {
+      // No sorting needed for default.
       return;
     } else if (sortOption === "departure") {
       results.sort((a, b) => {
         return new Date(a.calculatedDuration.departureDate).getTime() -
-              new Date(b.calculatedDuration.departureDate).getTime();
+               new Date(b.calculatedDuration.departureDate).getTime();
       });
     } else if (sortOption === "airport") {
       results.sort((a, b) => {
@@ -1897,8 +1991,6 @@ async function handleSearch() {
       });
     } else if (sortOption === "arrival") {
       results.sort((a, b) => {
-        // For round-trip, use the final arrival time if returnFlights exist;
-        // otherwise, use the one-way arrival time.
         const getFinalArrival = (flight) => {
           if (flight.returnFlights && flight.returnFlights.length > 0) {
             return new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
@@ -1911,7 +2003,6 @@ async function handleSearch() {
       results.sort((a, b) => {
         const getTripDuration = (flight) => {
           if (flight.returnFlights && flight.returnFlights.length > 0) {
-            // Overall duration: outbound departure to final inbound arrival.
             const outboundDeparture = new Date(flight.calculatedDuration.departureDate).getTime();
             const inboundArrival = new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
             return (inboundArrival - outboundDeparture) / 60000;
@@ -1921,6 +2012,7 @@ async function handleSearch() {
         return getTripDuration(a) - getTripDuration(b);
       });
     }
+    // Add any additional sort options as needed.
   }
 
 //-------------------Rendeting results-----------------------------
@@ -1938,7 +2030,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
           Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
         </div>
       </div>
-      <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1" : "border-[#20006D] border-2 mt-1 my-2"}">
+      <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1 my-2" : "border-[#20006D] border-2 mt-1 my-2"}">
     </div>
   `;
   

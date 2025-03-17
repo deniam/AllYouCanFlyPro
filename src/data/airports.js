@@ -1,24 +1,3 @@
-export const EXCLUDED_ROUTES = [
-    { origin: "AUH", destination: "ERB" },
-    { origin: "ERB", destination: "AUH" },
-    { origin: "LTN", destination: "LIS" },
-    { origin: "LIS", destination: "LTN" },
-    { origin: "LGW", destination: "VCE" },
-    { origin: "VCE", destination: "LGW" },
-    { origin: "LGW", destination: "TLV" },
-    { origin: "TLV", destination: "LGW" },
-    { origin: "LGW", destination: "AGA" },
-    { origin: "AGA", destination: "LGW" },
-    { origin: "LGW", destination: "RAK" },
-    { origin: "RAK", destination: "LGW" },
-    { origin: "FCO", destination: "AUH" },
-    { origin: "AUH", destination: "FCO" }
-];
-
-export function isExcludedRoute(origin, destination) {
-    return EXCLUDED_ROUTES.some(route => route.origin === origin && route.destination === destination);
-}
-
 export const AIRPORTS = [
     { "code": "ABZ", "name": "Aberdeen (ABZ)" },
     { "code": "AUH", "name": "Abu Dhabi (AUH)" },
