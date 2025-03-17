@@ -3,10 +3,20 @@
 
 # All You Can Fly Pro ✈️ 😎
 
-**All You Can Fly Pro** is a free Chrome extension designed specifically for Wizz Air All You Can Fly (AYCF) subscribers, enhancing your Wizzair AYCF experience by automating flight searches. Easily find direct flights and optimal connecting routes with this user-friendly Chrome extension, optimized specifically for Wizz Air AYCF subscribers.
+**All You Can Fly Pro** is a free Chrome extension designed specifically for Wizz Air All You Can Fly (AYCF) subscribers, enhancing your Wizzair AYCF experience by automating flight searches. Easily find direct flights and optimal connecting routes with this user-friendly Chrome extension, optimised specifically for Wizz Air AYCF subscribers.
 
 
 <img src="assets/screenshot.png" alt="All You Can Fly Pro" width="1200">
+
+## 🔥 What's New?
+
+- **📍 Updated & Comprehensive Route List:** Now includes all new destinations available in the Multipass PDF, even those missing from the official website dropdown​routes.
+- **⚡ Optimized & Faster Search Algorithm:**
+Searches only for flights available on selected dates.
+Excludes unavailable routes from search results, ensuring accurate availability​app.
+- **💳 Direct Booking Integration:**
+Instantly proceed to payment for selected flights directly from the search results.
+No more manual searching on the airline’s website—book your flights with a single click​
 
 ## ✨ Features
 
