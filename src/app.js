@@ -51,6 +51,7 @@ importRoutes();
   function getCountryFlag(airportCode) {
     return airportFlags[airportCode] || "";
   }
+  
   // ----------------------- DOM Elements -----------------------
   const progressContainer = document.getElementById('progress-container');
   const progressText = document.getElementById('progress-text');
@@ -1225,6 +1226,22 @@ importRoutes();
               }
               if (dateToSearch > bookingHorizon) break;
               const dateStr = dateToSearch.toISOString().slice(0, 10);
+              const routeForSegment = routesData.find(r => {
+                const dep = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
+                return dep === segOrigin;
+              });
+              if (routeForSegment) {
+                const arrivalObj = routeForSegment.arrivalStations.find(st => {
+                  return (typeof st === "object" ? st.id : st) === segDestination;
+                });
+                if (arrivalObj && arrivalObj.flightDates) {
+                  if (!arrivalObj.flightDates.includes(dateStr)) {
+                    if (debug) console.log(`No available flight on ${dateStr} for segment ${segOrigin} → ${segDestination} (flightDates filter)`);
+                    continue;
+                  }
+                }
+              }
+
               // NEW: Check if the selected date is available for this segment.
               if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr, routesData)) {
                 if (debug) console.log(`No available flight on ${dateStr} for segment ${segOrigin} → ${segDestination}`);
@@ -1368,7 +1385,17 @@ importRoutes();
     // Get routes data – we always use the cached routes from localStorage.
     let routesData = await fetchDestinations();
     if (debug) console.log(`Fetched ${routesData.length} routes from fetchDestinations.`);
-  
+    routesData = routesData.map(route => {
+      if (Array.isArray(route.arrivalStations)) {
+        route.arrivalStations = route.arrivalStations.filter(arrival => {
+          if (typeof arrival === "object" && arrival.operationStartDate) {
+            return new Date(selectedDate) >= new Date(arrival.operationStartDate);
+          }
+          return true;
+        });
+      }
+      return route;
+    }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
     // If origins is "ANY" but destinations are specific, filter origins to those with at least one matching arrival.
     if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
       if (debug) console.log("Origin is 'ANY', filtering origins based on provided destinations:", destinations);
@@ -1426,12 +1453,19 @@ importRoutes();
         }
         let arrivalCode = typeof arrival === "object" ? arrival.id : arrival;
         // NEW: If arrival object has flightDates, check that the selectedDate is available.
+        if (typeof arrival === "object" && arrival.operationStartDate) {
+          if (new Date(selectedDate) < new Date(arrival.operationStartDate)) {
+            if (debug) console.log(`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
+            continue;
+          }
+        }
         if (typeof arrival === "object" && arrival.flightDates) {
           if (!arrival.flightDates.includes(selectedDate)) {
             if (debug) console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
             continue;
           }
         }
+
         if (debug) console.log(`Checking route ${origin} → ${arrivalCode}`);
   
         // In reverse mode, first check if this reverse pair is allowed (from outbound flights).
