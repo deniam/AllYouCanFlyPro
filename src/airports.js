@@ -78,6 +78,10 @@ export const ADDITIONAL_ROUTES = [
     }
 ];  
 
+export function isAdditionalRoute(origin, destination) {
+    return ADDITIONAL_ROUTES.some(route => route.origin === origin && route.destination === destination);
+}
+
 export const AIRPORTS = [
     { "code": "ABZ", "name": "Aberdeen (ABZ)" },
     { "code": "AUH", "name": "Abu Dhabi (AUH)" },

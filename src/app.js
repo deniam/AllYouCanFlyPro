@@ -1,4 +1,5 @@
-import { AIRPORTS, COUNTRY_AIRPORTS, isExcludedRoute, ADDITIONAL_ROUTES, airportFlags } from './airports.js';
+import { AIRPORTS, COUNTRY_AIRPORTS, airportFlags } from './airports.js';
+import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
@@ -30,11 +31,22 @@ import Dexie from '../src/libs/dexie.mjs';
   db.version(1).stores({
     cache: 'key, timestamp'  // 'key' is our primary key; we also index the timestamp
   });
+  db.version(2).stores({
+    cache: 'key, timestamp',
+    routes: '++id, departureStation'
+  });
 
-  export const dbRoutes = new Dexie("RoutesCacheDB");
-    dbRoutes.version(1).stores({
-      routes: "++id, departureStation.id"
-    });
+  async function importRoutes() {
+    try {
+      await db.routes.clear();
+      await db.routes.bulkAdd(routesData);
+      console.log("Routes imported successfully!");
+    } catch (error) {
+      console.error("Error importing routes:", error);
+    }
+  }
+
+importRoutes();
   // ---------------- Helper: Airport Flag ----------------
   function getCountryFlag(airportCode) {
     return airportFlags[airportCode] || "";
@@ -704,6 +716,27 @@ import Dexie from '../src/libs/dexie.mjs';
     });
   }
 
+  function isDateAvailableForSegment(origin, destination, dateStr, routesData) {
+    // Find the route that starts at the given origin.
+    const route = routesData.find(r => {
+      const dep = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
+      return dep === origin;
+    });
+    if (!route) return false;
+    // Find the arrival station object with the given destination.
+    const arrivalStationObj = route.arrivalStations.find(st => {
+      const id = typeof st === "object" ? st.id : st;
+      return id === destination;
+    });
+    if (!arrivalStationObj) return false;
+    // If flightDates is defined, check that dateStr is included.
+    if (arrivalStationObj.flightDates) {
+      return arrivalStationObj.flightDates.includes(dateStr);
+    }
+    // If no flightDates provided, assume available.
+    return true;
+  }
+
   async function checkRouteSegment(origin, destination, date) {
     let attempts = 0;
     while (attempts < MAX_RETRY_ATTEMPTS) {
@@ -931,88 +964,85 @@ import Dexie from '../src/libs/dexie.mjs';
       }
     });
   }
-  
+
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
-    // Check if we have a cached routes object (wizz_page_data) that is still valid (e.g. within 1 hour)
-    const cachedDataStr = localStorage.getItem("wizz_page_data");
-    if (cachedDataStr) {
-      try {
-        const cachedData = JSON.parse(cachedDataStr);
-        if (Date.now() - cachedData.timestamp < 15 * 60 * 1000 && cachedData.routes) {
-          if (debug) console.log("Using cached destinations from localStorage");
-          return cachedData.routes;
-        }
-      } catch (e) {
-        console.error("Error parsing cached destinations:", e);
-      }
-    }
+    try {
+      // Retrieve all routes from the Dexie database
+      const routes = await db.routes.toArray();
+      console.log("Routes from Dexie:", routes);
+      return routes;
+    } catch (error) {
+      console.error("Error fetching destinations:", error);
+      return [];
+  }
+  
   
     // If no valid cache, query the multipass tab.
-    return new Promise((resolve, reject) => {
-      chrome.tabs.query({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/*" }, async (tabs) => {
-        let multipassTab;
-        if (tabs && tabs.length > 0) {
-          multipassTab = tabs[0];
-          if (debug) console.log("Found multipass tab:", multipassTab.id, multipassTab.url);
-        } else {
-          if (debug) console.log("No multipass tab found, opening one...");
-          chrome.tabs.create({
-            url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets"
-          }, async (newTab) => {
-            multipassTab = newTab;
-            if (debug) console.log("Opened new multipass tab:", newTab.id, newTab.url);
-            await waitForTabToComplete(newTab.id);
-            chrome.tabs.sendMessage(newTab.id, { action: "getDestinations" }, (response) => {
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-              }
-              if (response && response.routes) {
-                const pageData = {
-                  routes: response.routes,
-                  timestamp: Date.now(),
-                  dynamicUrl: response.dynamicUrl || null,
-                  headers: response.headers || null
-                };
-                localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-                resolve(response.routes);
-              } else if (response && response.error) {
-                reject(new Error(response.error));
-              } else {
-                reject(new Error("Failed to fetch destinations"));
-              }
-            });
-          });
-          return;
-        }
-        // Ensure the tab is fully loaded.
-        if (multipassTab.status !== "complete") {
-          await waitForTabToComplete(multipassTab.id);
-        }
-        if (debug) console.log("Sending getDestinations message to tab", multipassTab.id);
-        chrome.tabs.sendMessage(multipassTab.id, { action: "getDestinations" }, (response) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (response && response.success) {
-            // Save the routes in localStorage for future calls.
-            const pageData = {
-              routes: response.routes,
-              timestamp: Date.now(),
-              dynamicUrl: response.dynamicUrl || null,
-              headers: response.headers || null
-            };
-            localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-            if (debug) {
-              if (debug) console.log("Resolved with routes from multipass:", response.routes);
-            }
-            resolve(response.routes);
-          } else {
-            reject(new Error(response && response.error ? response.error : "Unknown error fetching routes."));
-          }
-        });
-      });
-    });
+    // return new Promise((resolve, reject) => {
+    //   chrome.tabs.query({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/*" }, async (tabs) => {
+    //     let multipassTab;
+    //     if (tabs && tabs.length > 0) {
+    //       multipassTab = tabs[0];
+    //       if (debug) console.log("Found multipass tab:", multipassTab.id, multipassTab.url);
+    //     } else {
+    //       if (debug) console.log("No multipass tab found, opening one...");
+    //       chrome.tabs.create({
+    //         url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets"
+    //       }, async (newTab) => {
+    //         multipassTab = newTab;
+    //         if (debug) console.log("Opened new multipass tab:", newTab.id, newTab.url);
+    //         await waitForTabToComplete(newTab.id);
+    //         chrome.tabs.sendMessage(newTab.id, { action: "getDestinations" }, (response) => {
+    //           if (chrome.runtime.lastError) {
+    //             reject(new Error(chrome.runtime.lastError.message));
+    //             return;
+    //           }
+    //           if (response && response.routes) {
+    //             const pageData = {
+    //               routes: response.routes,
+    //               timestamp: Date.now(),
+    //               dynamicUrl: response.dynamicUrl || null,
+    //               headers: response.headers || null
+    //             };
+    //             localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+    //             resolve(response.routes);
+    //           } else if (response && response.error) {
+    //             reject(new Error(response.error));
+    //           } else {
+    //             reject(new Error("Failed to fetch destinations"));
+    //           }
+    //         });
+    //       });
+    //       return;
+    //     }
+    //     // Ensure the tab is fully loaded.
+    //     if (multipassTab.status !== "complete") {
+    //       await waitForTabToComplete(multipassTab.id);
+    //     }
+    //     if (debug) console.log("Sending getDestinations message to tab", multipassTab.id);
+    //     chrome.tabs.sendMessage(multipassTab.id, { action: "getDestinations" }, (response) => {
+    //       if (chrome.runtime.lastError) {
+    //         reject(new Error(chrome.runtime.lastError.message));
+    //       } else if (response && response.success) {
+    //         // Save the routes in localStorage for future calls.
+    //         const pageData = {
+    //           routes: response.routes,
+    //           timestamp: Date.now(),
+    //           dynamicUrl: response.dynamicUrl || null,
+    //           headers: response.headers || null
+    //         };
+    //         localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+    //         if (debug) {
+    //           if (debug) console.log("Resolved with routes from multipass:", response.routes);
+    //         }
+    //         resolve(response.routes);
+    //       } else {
+    //         reject(new Error(response && response.error ? response.error : "Unknown error fetching routes."));
+    //       }
+    //     });
+    //   });
+    // });
   }
   
   async function getDynamicUrl() {
@@ -1120,7 +1150,6 @@ import Dexie from '../src/libs/dexie.mjs';
   
 
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
-    // --- Updated searchConnectingRoutes ---
   // Searches for connecting (multi‑leg) routes.
   // Uses the "overnight-checkbox" value to decide if connecting flights must depart on the same day as selected.
   function addDays(date, days) {
@@ -1196,8 +1225,13 @@ import Dexie from '../src/libs/dexie.mjs';
               }
               if (dateToSearch > bookingHorizon) break;
               const dateStr = dateToSearch.toISOString().slice(0, 10);
+              // NEW: Check if the selected date is available for this segment.
+              if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr, routesData)) {
+                if (debug) console.log(`No available flight on ${dateStr} for segment ${segOrigin} → ${segDestination}`);
+                continue;
+              }
+              
               const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
-
               let flights = await getCachedResults(cacheKey);
               if (flights !== null) {
                 flights = flights.map(unifyRawFlight);
@@ -1390,7 +1424,14 @@ import Dexie from '../src/libs/dexie.mjs';
           if (debug) console.log("Search cancelled during processing. Exiting inner loop.");
           break;
         }
-        let arrivalCode = arrival.id || arrival;
+        let arrivalCode = typeof arrival === "object" ? arrival.id : arrival;
+        // NEW: If arrival object has flightDates, check that the selectedDate is available.
+        if (typeof arrival === "object" && arrival.flightDates) {
+          if (!arrival.flightDates.includes(selectedDate)) {
+            if (debug) console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
+            continue;
+          }
+        }
         if (debug) console.log(`Checking route ${origin} → ${arrivalCode}`);
   
         // In reverse mode, first check if this reverse pair is allowed (from outbound flights).
