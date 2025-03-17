@@ -1,4 +1,4 @@
-import { AIRPORTS, COUNTRY_AIRPORTS, airportFlags } from './airports.js';
+import { AIRPORTS, COUNTRY_AIRPORTS, airportFlags } from './data/airports.js';
 import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
