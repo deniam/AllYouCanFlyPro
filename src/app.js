@@ -1899,12 +1899,13 @@ async function handleSearch() {
     const rows = container.querySelectorAll(".airport-row");
     rows.forEach((row, index) => {
       const deleteBtn = row.querySelector(".delete-btn");
-      if (deleteBtn) deleteBtn.style.display = "inline-block";
-  
+      if (deleteBtn) {
+        deleteBtn.style.display = "inline-block";
+      }
       const plusBtn = row.querySelector(".plus-btn");
-      const inputField = row.querySelector("input");
   
-      if (rows.length < 3 && index === rows.length - 1 && inputField && inputField.value.trim().length > 0) {
+      // Always show the plus button on the last row if total rows is less than 3.
+      if (rows.length < 3 && index === rows.length - 1) {
         if (plusBtn) plusBtn.style.display = "inline-block";
       } else {
         if (plusBtn) plusBtn.style.display = "none";
