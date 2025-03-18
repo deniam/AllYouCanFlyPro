@@ -3,7 +3,7 @@ import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -550,37 +550,48 @@ importRoutes();
   * - route: an array containing the departure and arrival airport names.
   */
   function unifyRawFlight(rawFlight) {
-    const depDateStr = rawFlight.departureDateIso
-      ? rawFlight.departureDateIso
-      : new Date(rawFlight.departureDate).toISOString().slice(0, 10);
-    const arrDateStr = rawFlight.arrivalDateIso
-      ? rawFlight.arrivalDateIso
-      : new Date(rawFlight.arrivalDate).toISOString().slice(0, 10);
+    const depDateStr = rawFlight.departureDateIso 
+      ? rawFlight.departureDateIso 
+      : new Date(parseServerDate(rawFlight.departureDate)).toISOString().slice(0, 10);
+    const arrDateStr = rawFlight.arrivalDateIso 
+      ? rawFlight.arrivalDateIso 
+      : new Date(parseServerDate(rawFlight.arrivalDate)).toISOString().slice(0, 10);
+      
     const depTimeObj = parse12HourTime(rawFlight.departure);
     const arrTimeObj = parse12HourTime(rawFlight.arrival);
     if (!depTimeObj || !arrTimeObj) {
       console.error("Time parsing failed for flight:", rawFlight);
       return rawFlight;
     }
+    
     let localDeparture = combineDateAndTime(depDateStr, depTimeObj);
     let localArrival = combineDateAndTime(arrDateStr, arrTimeObj);
+    
     const normDepOffset = normalizeOffset(rawFlight.departureOffsetText);
     const normArrOffset = normalizeOffset(rawFlight.arrivalOffsetText);
     const depOffsetHours = parseInt(normDepOffset.slice(0, 3), 10);
     const arrOffsetHours = parseInt(normArrOffset.slice(0, 3), 10);
+    
+    // Вычисляем время в UTC на основе локальных значений и смещений.
     const utcDeparture = new Date(localDeparture.getTime() - depOffsetHours * 3600000);
     const utcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
+    
+    // Если время прибытия меньше или равно времени отправления, добавляем 24 часа к локальному времени прибытия.
     if (utcArrival <= utcDeparture) {
       localArrival = new Date(localArrival.getTime() + 24 * 3600000);
     }
+    
+    // Пересчитываем общее время в минутах.
     const adjustedUtcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
     const totalMinutes = Math.round((adjustedUtcArrival - utcDeparture) / 60000);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
+    
     const displayDep = convertTo24Hour(rawFlight.departure);
     const displayArr = convertTo24Hour(rawFlight.arrival);
     const formattedFlightDate = formatFlightDateCombined(localDeparture, localArrival);
     const route = [rawFlight.departureStationText, rawFlight.arrivalStationText];
+    
     return {
       key: rawFlight.key,
       fareSellKey: rawFlight.fareSellKey,
@@ -640,19 +651,20 @@ importRoutes();
 
   function parseServerDate(dateStr) {
     if (!dateStr) return null;
-    // If it's already a Date, just return it.
     if (dateStr instanceof Date) return dateStr;
-    // If the string is in "YYYY-MM-DD" format, use it directly.
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return new Date(dateStr);
+      return new Date(dateStr + "T00:00:00Z");
     }
     const parts = dateStr.trim().split(" ");
     if (parts.length === 3) {
-      const day = parts[0];
-      const monthName = parts[1];
-      const year = parts[2];
-      const month = new Date(`${monthName} 1, ${year}`).getMonth() + 1;
-      return new Date(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+      const day = parseInt(parts[0], 10);
+      const monthNames = ["January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December"];
+      const monthIndex = monthNames.indexOf(parts[1]);
+      const year = parseInt(parts[2], 10);
+      if (monthIndex >= 0 && !isNaN(day) && !isNaN(year)) {
+        return new Date(Date.UTC(year, monthIndex, day));
+      }
     }
     return new Date(dateStr);
   }
@@ -984,7 +996,7 @@ importRoutes();
     try {
       // Retrieve all routes from the Dexie database
       const routes = await db.routes.toArray();
-      console.log("Routes from Dexie:", routes);
+      if (debug) console.log("Routes from Dexie:", routes);
       return routes;
     } catch (error) {
       console.error("Error fetching destinations:", error);
