@@ -90,7 +90,7 @@ Contribute or support this project on **[GitHub](https://github.com/deniam/AllYo
 ### Alternative Installation
 1. Download and unzip the archive:
    
-[(https://github.com/deniam/AllYouCanFlyPro/releases/download/ver1_5_1/AllYouCanFlyPro_1_5_1.zip)]
+[[(https://github.com/deniam/AllYouCanFlyPro/releases/download/ver1_5_1/AllYouCanFlyPro_1_5_1.zip)]](https://github.com/deniam/AllYouCanFlyPro/releases/download/ver1_5_1/AllYouCanFlyPro_v1_5_1.zip)
 
 3. Open Google Chrome and navigate to chrome://extensions/.
 4. Enable "Developer mode" in the top right corner.
