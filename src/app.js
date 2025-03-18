@@ -1287,8 +1287,9 @@ importRoutes();
                 }
               }
               flights = flights.filter(f =>
-                getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === dateStr
-              );
+                f.calculatedDuration.departureDate.toISOString().slice(0, 10) === dateStr
+            );
+            
               if (previousFlight) {
                 flights = flights.filter(f => {
                   const connectionTime = (f.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime()) / 60000;
