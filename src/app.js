@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -39,9 +39,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES } from './data/airports.js';
         }
         airportLookup[airport.code] = airport;
       });
-      
-      console.log("Airports data loaded:", AIRPORTS);
-      
+            
       // Now initialize UI components that rely on the airport data.
       setupAutocomplete("origin-multi", "origin-suggestions");
       setupAutocomplete("destination-multi", "destination-suggestions");
@@ -69,11 +67,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES } from './data/airports.js';
     try {
       await db.routes.clear();
       await db.routes.bulkAdd(routesData);
-      console.log("Routes imported successfully!");
       // Load routes from Dexie and assign them to a global variable
       const routes = await db.routes.toArray();
       window.ROUTES = routes;  // now ROUTES is defined globally
-      console.log("Global ROUTES loaded:", routes);
     } catch (error) {
       console.error("Error importing routes:", error);
     }
@@ -306,29 +302,23 @@ function setupAutocomplete(inputId, suggestionsId) {
   function getDirectSuggestionsForDestination() {
     const origins = getMultiAirportValues("origin-multi")
       .filter(v => (v || "").toLowerCase() !== "anywhere" && (v || "").trim() !== "");
-    console.log("[getDirectSuggestionsForDestination] Selected origin values:", origins);
     
     let suggestionsMap = new Map();
     origins.forEach(origin => {
       const resolvedCodes = resolveAirport(origin);
-      console.log(`[getDirectSuggestionsForDestination] Resolved "${origin}" to codes:`, resolvedCodes);
       let originCodes = resolvedCodes;
       // Always use uppercase for the lookup.
       if (originCodes.length === 1 && MULTI_AIRPORT_CITIES[originCodes[0].toUpperCase()]) {
         originCodes = MULTI_AIRPORT_CITIES[originCodes[0].toUpperCase()];
-        console.log(`[getDirectSuggestionsForDestination] Expanded multi-airport code to:`, originCodes);
       }
       originCodes.forEach(code => {
-        console.log(`[getDirectSuggestionsForDestination] Processing code: ${code}`);
         const matchingRoutes = ROUTES.filter(r => {
           const depCode = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
           return depCode === code;
         });
-        console.log(`[getDirectSuggestionsForDestination] Matching routes for code ${code}:`, matchingRoutes);
         if (matchingRoutes.length > 0) {
           matchingRoutes.forEach(route => {
             route.arrivalStations.forEach(arr => {
-              console.log(`[getDirectSuggestionsForDestination] Found arrival:`, arr);
               if (!suggestionsMap.has(arr.id)) {
                 suggestionsMap.set(arr.id, arr.name);
               }
@@ -338,7 +328,6 @@ function setupAutocomplete(inputId, suggestionsId) {
           // Fallback: use static airport data.
           const airport = AIRPORTS.find(a => a.code.toUpperCase() === code.toUpperCase());
           if (airport) {
-            console.log(`[getDirectSuggestionsForDestination] No routes found; using static airport data for ${code}:`, airport);
             suggestionsMap.set(airport.code, airport.name);
           }
         }
@@ -349,41 +338,33 @@ function setupAutocomplete(inputId, suggestionsId) {
     suggestionsMap.forEach((name, id) => {
       suggestions.push({ isCountry: false, code: id, name: name });
     });
-    console.log("[getDirectSuggestionsForDestination] Final suggestions:", suggestions);
     suggestions.sort((a, b) => a.name.localeCompare(b.name));
     return suggestions;
   }
-  
   
   // --- In getDirectSuggestionsForOrigin ---
   function getDirectSuggestionsForOrigin() {
     const destinations = getMultiAirportValues("destination-multi")
       .filter(v => (v || "").toLowerCase() !== "anywhere" && (v || "").trim() !== "");
-    console.log("[getDirectSuggestionsForOrigin] Selected destination values:", destinations);
     
     let suggestionsMap = new Map();
     destinations.forEach(destination => {
       const resolvedCodes = resolveAirport(destination);
-      console.log(`[getDirectSuggestionsForOrigin] Resolved "${destination}" to codes:`, resolvedCodes);
       let destCodes = resolvedCodes;
       if (destCodes.length === 1 && MULTI_AIRPORT_CITIES[destCodes[0].toUpperCase()]) {
         destCodes = MULTI_AIRPORT_CITIES[destCodes[0].toUpperCase()];
-        console.log(`[getDirectSuggestionsForOrigin] Expanded multi-airport code to:`, destCodes);
       }
       destCodes.forEach(code => {
-        console.log(`[getDirectSuggestionsForOrigin] Processing code: ${code}`);
         const matchingRoutes = ROUTES.filter(r => {
           return r.arrivalStations.some(arr => {
             const arrId = typeof arr === "object" ? arr.id : arr;
             return arrId === code;
           });
         });
-        console.log(`[getDirectSuggestionsForOrigin] Matching routes for code ${code}:`, matchingRoutes);
         matchingRoutes.forEach(route => {
           const dep = typeof route.departureStation === "object"
             ? route.departureStation
             : { id: route.departureStation, name: route.departureStation };
-          console.log("[getDirectSuggestionsForOrigin] Found departure suggestion:", dep);
           if (!suggestionsMap.has(dep.id)) {
             suggestionsMap.set(dep.id, dep.name);
           }
@@ -395,29 +376,120 @@ function setupAutocomplete(inputId, suggestionsId) {
     suggestionsMap.forEach((name, id) => {
       suggestions.push({ isCountry: false, code: id, name: name });
     });
-    console.log("[getDirectSuggestionsForOrigin] Final suggestions:", suggestions);
     suggestions.sort((a, b) => a.name.localeCompare(b.name));
     return suggestions;
   }
-  
   function showSuggestions(query = "") {
+    // Guard: if suggestionsEl or inputEl are not defined, do nothing.
+    if (!inputEl || !suggestionsEl) return;
+    
     suggestionsEl.innerHTML = "";
     const usedEntries = getAllUsedEntries();
     
-    // Always try to get direct suggestions if no query is present.
-    let directSuggestions = [];
+    // When a query is entered: filter the full catalog
+    if (query) {
+      const usedCountryAirports = new Set();
+      Object.keys(COUNTRY_AIRPORTS).forEach(country => {
+        if (usedEntries.has(country.toLowerCase())) {
+          COUNTRY_AIRPORTS[country].forEach(code => usedCountryAirports.add(code.toLowerCase()));
+        }
+      });
+      
+      const countryMatches = Object.keys(COUNTRY_AIRPORTS)
+        .filter(country => country.toLowerCase().includes(query) && !usedEntries.has(country.toLowerCase()))
+        .map(country => ({ isCountry: true, code: country, name: country }));
+      
+      const airportMatches = AIRPORTS.filter(a => {
+        const codeLower = a.code.toLowerCase();
+        const nameLower = a.name.toLowerCase();
+        if (usedEntries.has(codeLower) || usedEntries.has(nameLower)) return false;
+        if (usedCountryAirports.has(codeLower)) return false;
+        return codeLower.includes(query) || nameLower.includes(query);
+      }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
+      
+      let matches = [...countryMatches, ...airportMatches];
+      matches.sort((a, b) => a.name.localeCompare(b.name));
+      // Limit to six suggestions from filtering
+      matches = matches.slice(0, 6);
+      // For fields other than preferred-airport, always add "Anywhere" first.
+      if (inputId !== "preferred-airport") {
+        matches.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
+      }
+      
+      if (matches.length === 0) {
+        suggestionsEl.classList.add("hidden");
+        return;
+      }
+      
+      matches.forEach(match => {
+        const div = document.createElement("div");
+        div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
+        div.textContent = match.name;
+        div.addEventListener("click", () => {
+          inputEl.value = match.name;
+          addRecentEntry(match.name);
+          suggestionsEl.classList.add("hidden");
+        });
+        // If the suggestion is in recent entries (and not "Anywhere"), add a delete button.
+        if (getRecentEntries().includes(match.name) && match.name.toLowerCase() !== "anywhere") {
+          const deleteBtn = document.createElement("button");
+          deleteBtn.textContent = "✕";
+          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
+          deleteBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            removeRecentEntry(match.name);
+          });
+          div.appendChild(deleteBtn);
+        }
+        suggestionsEl.appendChild(div);
+      });
+      suggestionsEl.style.maxHeight = "250px";
+      suggestionsEl.style.overflowY = "auto";
+      suggestionsEl.classList.remove("hidden");
+      return;
+    }
+    
+    // When no query is entered.
     if (!query) {
+      // For the preferred-airport field, do not include "Anywhere"
+      if (inputId === "preferred-airport") {
+        const recents = getRecentEntries().filter(e => e.toLowerCase() !== "anywhere");
+        recents.forEach(entry => {
+          const div = document.createElement("div");
+          div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
+          div.textContent = entry;
+          div.addEventListener("click", () => {
+            inputEl.value = entry;
+            addRecentEntry(entry);
+            suggestionsEl.classList.add("hidden");
+          });
+          const deleteBtn = document.createElement("button");
+          deleteBtn.textContent = "✕";
+          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
+          deleteBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            removeRecentEntry(entry);
+          });
+          div.appendChild(deleteBtn);
+          suggestionsEl.appendChild(div);
+        });
+        // Show full list without fixed height
+        suggestionsEl.style.maxHeight = "";
+        suggestionsEl.style.overflowY = "";
+        suggestionsEl.classList.remove("hidden");
+        return;
+      }
+      
+      // For origin/destination fields when nothing is entered:
+      let directSuggestions = [];
       if (lowerInputId.includes("destination")) {
         directSuggestions = getDirectSuggestionsForDestination();
       } else if (lowerInputId.includes("origin")) {
         directSuggestions = getDirectSuggestionsForOrigin();
       }
-    }
-    
-    if (directSuggestions.length > 0 && !query) {
-      // Prepend "Anywhere" as the first option.
-      const anywhereObj = { isCountry: false, code: "ANY", name: "Anywhere" };
-      directSuggestions.unshift(anywhereObj);
+      // Always add "Anywhere" first.
+      directSuggestions.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
+      
       directSuggestions.forEach(suggestion => {
         const div = document.createElement("div");
         div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
@@ -435,100 +507,36 @@ function setupAutocomplete(inputId, suggestionsId) {
       return;
     }
     
-    // Fallback to recent entries if query is empty.
-    if (!query) {
-      const recents = getRecentEntries();
-      if (recents.length === 0) {
-        suggestionsEl.classList.add("hidden");
-        return;
-      }
-      const sortedRecents = ["Anywhere", ...recents.filter(e => e.toLowerCase() !== "anywhere").sort((a, b) => a.localeCompare(b))];
-      sortedRecents.forEach(entry => {
-        const div = document.createElement("div");
-        div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
-        div.textContent = entry;
-        div.addEventListener("click", () => {
-          inputEl.value = entry;
-          addRecentEntry(entry);
-          suggestionsEl.classList.add("hidden");
-        });
-        if (entry.toLowerCase() !== "anywhere") {
-          const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "✕";
-          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-          deleteBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            removeRecentEntry(entry);
-          });
-          div.appendChild(deleteBtn);
-        }
-        suggestionsEl.appendChild(div);
-      });
-      suggestionsEl.style.maxHeight = "";
-      suggestionsEl.style.overflowY = "";
-      suggestionsEl.classList.remove("hidden");
-      return;
-    }
-    
-    // If there is a query, fall back to your original search logic...
-    const usedCountryAirports = new Set();
-    Object.keys(COUNTRY_AIRPORTS).forEach(country => {
-      if (usedEntries.has(country.toLowerCase())) {
-        COUNTRY_AIRPORTS[country].forEach(code => usedCountryAirports.add(code.toLowerCase()));
-      }
-    });
-    
-    const countryMatches = Object.keys(COUNTRY_AIRPORTS)
-      .filter(country => country.toLowerCase().includes(query) && !usedEntries.has(country.toLowerCase()))
-      .map(country => ({ isCountry: true, code: country, name: country }));
-    
-    const airportMatches = AIRPORTS.filter(a => {
-      const codeLower = a.code.toLowerCase();
-      const nameLower = a.name.toLowerCase();
-      if (usedEntries.has(codeLower) || usedEntries.has(nameLower)) return false;
-      if (usedCountryAirports.has(codeLower)) return false;
-      return codeLower.includes(query) || nameLower.includes(query);
-    }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
-    
-    let matches = [...countryMatches, ...airportMatches];
-    matches.sort((a, b) => a.name.localeCompare(b.name));
-    matches = matches.slice(0, 5);
-    
-    if (inputId === "preferred-airport") {
-      matches = matches.filter(match => match.name.toLowerCase() !== "anywhere");
-      matches = matches.slice(0, 5);
-    }
-    
-    if (matches.length === 0) {
+    // Fallback: if none of the above conditions met, show the full recents list.
+    const recents = getRecentEntries();
+    if (recents.length === 0) {
       suggestionsEl.classList.add("hidden");
       return;
     }
-    
-    matches.forEach(match => {
+    recents.forEach(entry => {
       const div = document.createElement("div");
       div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
-      div.textContent = match.name;
+      div.textContent = entry;
       div.addEventListener("click", () => {
-        inputEl.value = match.name;
-        addRecentEntry(match.name);
+        inputEl.value = entry;
+        addRecentEntry(entry);
         suggestionsEl.classList.add("hidden");
       });
-      if (getRecentEntries().includes(match.name) && match.name.toLowerCase() !== "anywhere") {
-        const deleteBtn = document.createElement("button");
-        deleteBtn.textContent = "✕";
-        deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-        deleteBtn.addEventListener("click", (event) => {
-          event.stopPropagation();
-          removeRecentEntry(match.name);
-        });
-        div.appendChild(deleteBtn);
-      }
+      const deleteBtn = document.createElement("button");
+      deleteBtn.textContent = "✕";
+      deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
+      deleteBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        removeRecentEntry(entry);
+      });
+      div.appendChild(deleteBtn);
       suggestionsEl.appendChild(div);
     });
+    suggestionsEl.style.maxHeight = "";
+    suggestionsEl.style.overflowY = "";
     suggestionsEl.classList.remove("hidden");
   }
-  
-  // Show suggestions when the input is focused and empty.
+            // Show suggestions when the input is focused and empty.
   inputEl.addEventListener("focus", () => {
     if (!inputEl.value.trim()) {
       showSuggestions();
@@ -565,16 +573,13 @@ function setupAutocomplete(inputId, suggestionsId) {
   function expandMultiAirport(codes) {
     if (codes.length === 1 && MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[codes[0].toUpperCase()]) {
       const expanded = MULTI_AIRPORT_CITIES[codes[0].toUpperCase()];
-      if (debug) {
-        console.log(`Expanding ${codes[0]} to ${expanded.join(", ")}`);
-      }
+      if (debug) {      }
       return expanded;
     }
     return codes;
   }
 
   function resolveAirport(input) {
-    console.log("[resolveAirport] Input:", input);
     if (!input) return [];
     
     // Detect pattern like "CityName (Any)" ignoring case.
@@ -585,10 +590,6 @@ function setupAutocomplete(inputId, suggestionsId) {
       // Derive a multi‑airport key by taking the first 3 letters (uppercased)
       const cityCode = cityName.substring(0, 3).toUpperCase();
       if (MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[cityCode]) {
-        console.log(
-          `[resolveAirport] Detected multi‑airport city from input "${input}". Returning MULTI_AIRPORT_CITIES for ${cityCode}:`,
-          MULTI_AIRPORT_CITIES[cityCode]
-        );
         return MULTI_AIRPORT_CITIES[cityCode];
       }
     }
@@ -596,16 +597,13 @@ function setupAutocomplete(inputId, suggestionsId) {
     // If input contains a code in parentheses (e.g., "London (LTN)"), extract it.
     const codeMatch = input.match(/\(([A-Z]{3})\)/i);
     if (codeMatch) {
-      console.log("[resolveAirport] Extracted code from parentheses:", codeMatch[1]);
       input = codeMatch[1];
     }
     
     const trimmed = input.trim();
-    console.log("[resolveAirport] Trimmed input:", trimmed);
     
     // Treat "any" or "anywhere" as wildcard.
     if (trimmed.toLowerCase() === "any" || trimmed.toLowerCase() === "anywhere") {
-      console.log('[resolveAirport] Input is wildcard, returning ["ANY"]');
       return ["ANY"];
     }
     
@@ -615,7 +613,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     if (trimmed.length === 3) {
       const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
       if (byCode) {
-        console.log("[resolveAirport] Found by code:", byCode);
         return expandMultiAirport([byCode.code]);
       }
     }
@@ -623,7 +620,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     // Check if input exactly matches a country name.
     for (const country in COUNTRY_AIRPORTS) {
       if (country.toLowerCase() === lower) {
-        console.log(`[resolveAirport] Input matches country: ${country} with airports:`, COUNTRY_AIRPORTS[country]);
         return COUNTRY_AIRPORTS[country];
       }
     }
@@ -631,7 +627,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     // Fallback: try to match by code.
     const fallbackByCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
     if (fallbackByCode) {
-      console.log("[resolveAirport] Fallback found by code:", fallbackByCode);
       return expandMultiAirport([fallbackByCode.code]);
     }
     
@@ -639,11 +634,9 @@ function setupAutocomplete(inputId, suggestionsId) {
     const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
     if (matches.length > 0) {
       const codes = matches.map(a => a.code);
-      console.log("[resolveAirport] Matched by airport name, codes:", codes);
       return expandMultiAirport(codes);
     }
     
-    console.log("[resolveAirport] No match found, returning uppercase input:", input.toUpperCase());
     return [input.toUpperCase()];
   }
 
@@ -746,18 +739,6 @@ function setupAutocomplete(inputId, suggestionsId) {
   /**
    * Unifies a raw flight object from the server by recalculating the departure and arrival Date objects,
    * the display times, the flight duration (accounting for time zone differences), and a formatted date range.
-   *
-  * The incorrect "departureDateTimeIso" and "arrivalDateTimeIso" values are ignored.
-  *
-  * New keys added:
-  * - departureOffset: normalized offset string (e.g., "+01:00")
-  * - arrivalOffset: normalized offset string (e.g., "+00:00")
-  * - displayDeparture: departure time in 24‑hour format (e.g., "23:20")
-  * - displayArrival: arrival time in 24‑hour format (e.g., "01:35")
-  * - calculatedDuration: { hours, minutes, totalMinutes, departureDate, arrivalDate }
-  *   where departureDate and arrivalDate are the combined “pure” local times.
-  * - formattedFlightDate: a string such as "Sat, 8 Mar, 2025 - Sun, 9 Mar, 2025"
-  * - route: an array containing the departure and arrival airport names.
   */
   function unifyRawFlight(rawFlight) {
     const depDateStr = rawFlight.departureDateIso 
@@ -1443,7 +1424,6 @@ function setupAutocomplete(inputId, suggestionsId) {
         return depCode === dep;
       });
       if (!route) {
-        console.log(`Preliminary check: No route found for departure ${dep}`);
         return false;
       }
       const arrivalObj = route.arrivalStations.find(s => {
@@ -1451,7 +1431,6 @@ function setupAutocomplete(inputId, suggestionsId) {
         return code === arr;
       });
       if (!arrivalObj || !arrivalObj.flightDates) {
-        console.log(`Preliminary check: No arrival or flightDates found for segment ${dep} -> ${arr}`);
         return false;
       }
       // Compute allowed dates based on allowedOffsets
@@ -1465,7 +1444,7 @@ function setupAutocomplete(inputId, suggestionsId) {
       // Check if at least one allowed date is present in flightDates
       const hasValid = allowedDates.some(date => arrivalObj.flightDates.includes(date));
       if (!hasValid) {
-        console.log(`Preliminary check: Segment ${dep} -> ${arr} does not have any allowed flightDates among ${allowedDates.join(", ")}`);
+        if (debug) console.log(`Preliminary check: Segment ${dep} -> ${arr} does not have any allowed flightDates among ${allowedDates.join(", ")}`);
         return false;
       }
     }
@@ -1486,17 +1465,17 @@ function setupAutocomplete(inputId, suggestionsId) {
     const segDestination = candidate[index + 1];
     let validChains = [];
     
-    console.log(`--> Processing segment: ${segOrigin} -> ${segDestination}`);
+    if (debug) console.log(`--> Processing segment: ${segOrigin} -> ${segDestination}`);
     
     for (let offset = 0; offset <= baseMaxDays; offset++) {
       const dateToSearch = addDaysUTC(currentDate, offset);
       const dateStr = dateToSearch.toISOString().slice(0, 10);
       if (index === 0 && dateStr !== selectedDate) {
-        console.log(`   Skipping date ${dateStr} for first segment (selected date is ${selectedDate})`);
+        if (debug) console.log(`   Skipping date ${dateStr} for first segment (selected date is ${selectedDate})`);
         continue;
       }
       if (dateToSearch > bookingHorizon) {
-        console.log(`   Date ${dateStr} exceeds booking horizon; breaking offset loop`);
+        if (debug) console.log(`   Date ${dateStr} exceeds booking horizon; breaking offset loop`);
         break;
       }
       
@@ -1511,27 +1490,27 @@ function setupAutocomplete(inputId, suggestionsId) {
         });
         if (arrivalObj && arrivalObj.flightDates) {
           if (!arrivalObj.flightDates.includes(dateStr)) {
-            console.log(`   No available flight on ${dateStr} for segment ${segOrigin} -> ${segDestination} (flightDates filter)`);
+            if (debug) console.log(`   No available flight on ${dateStr} for segment ${segOrigin} -> ${segDestination} (flightDates filter)`);
             continue;
           }
         }
       }
       if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr, routesData)) {
-        console.log(`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
+        if (debug) console.log(`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
         continue;
       }
       
       const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
-      console.log(`   Checking cache for segment ${segOrigin} -> ${segDestination} on ${dateStr} (cache key: ${cacheKey})`);
+      if (debug) console.log(`   Checking cache for segment ${segOrigin} -> ${segDestination} on ${dateStr} (cache key: ${cacheKey})`);
       let flights = await getCachedResults(cacheKey);
       if (flights !== null) {
         flights = flights.map(unifyRawFlight);
-        console.log(`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+        if (debug) console.log(`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       } else {
         try {
           flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
           flights = flights.map(unifyRawFlight);
-          console.log(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+          if (debug) console.log(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
           await setCachedResults(cacheKey, flights);
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
@@ -1552,23 +1531,23 @@ function setupAutocomplete(inputId, suggestionsId) {
       flights = flights.filter(f =>
         getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === dateStr
       );
-      console.log(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+      if (debug) console.log(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       
       if (previousFlight) {
         flights = flights.filter(f => {
           const connectionTime = (f.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime()) / 60000;
           const valid = connectionTime >= minConnection && connectionTime <= maxConnection;
           if (!valid) {
-            console.log(`      Flight ${f.flightCode} rejected: connection time ${connectionTime} minutes not in [${minConnection}, ${maxConnection}]`);
+            if (debug) console.log(`      Flight ${f.flightCode} rejected: connection time ${connectionTime} minutes not in [${minConnection}, ${maxConnection}]`);
           }
           return valid;
         });
-        console.log(`   After connection time filtering: ${flights.length} flights available`);
+        if (debug) console.log(`   After connection time filtering: ${flights.length} flights available`);
       }
       
       // Iterate over all found flights for this offset.
       for (let flight of flights) {
-        console.log(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
+        if (debug) console.log(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
         // Recursively process the next segment, passing the date adjusted by the current offset.
         const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData);
         // For each found option, add the current flight at the beginning.
@@ -1579,31 +1558,31 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
     
     if (validChains.length === 0) {
-      console.log(`   No suitable flight found for segment ${segOrigin} -> ${segDestination} at any offset`);
+      if (debug) console.log(`   No suitable flight found for segment ${segOrigin} -> ${segDestination} at any offset`);
     }
     return validChains;
   }
 
   async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true) {
-    console.log("Starting searchConnectingRoutes");
+    if (debug) console.log("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
     const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
     const stopoverText = document.getElementById("selected-stopover").textContent;
     // For stopover options, assume "One stop (overnight)" is a special flag; otherwise, multi-stop searches use full window.
     const allowOvernight = stopoverText === "One stop (overnight)";
-    console.log(`Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "not overnight, one stop or fewer"})`);
+    if (debug) console.log(`Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "not overnight, one stop or fewer"})`);
 
     // Interpret the selected date as UTC (e.g. "2025-03-20" becomes 2025-03-20T00:00:00Z)
     const baseDateUTC = new Date(selectedDate + "T00:00:00Z");
     const bookingHorizon = addDaysUTC(baseDateUTC, 3);
-    console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
+    if (debug) console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
 
     if (origins.length === 1 && origins[0] === "ANY") {
       origins = [...new Set(routesData.map(route =>
         typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
       ))];
-      console.log(`Expanded origin ANY to: ${origins.join(", ")}`);
+      if (debug) console.log(`Expanded origin ANY to: ${origins.join(", ")}`);
     }
     let destinationList = [];
     if (destinations.length === 1 && destinations[0] === "ANY") {
@@ -1616,7 +1595,7 @@ function setupAutocomplete(inputId, suggestionsId) {
         }
       });
       destinationList = Array.from(destSet);
-      console.log(`Expanded destination ANY to: ${destinationList.join(", ")}`);
+      if (debug) console.log(`Expanded destination ANY to: ${destinationList.join(", ")}`);
     } else {
       destinationList = destinations;
     }
@@ -1629,7 +1608,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     const totalCandidates = candidateRoutes.length;
     let processedCandidates = 0;
     updateProgress(processedCandidates, totalCandidates, "Processing routes");
-    console.log(`Total candidate routes found: ${totalCandidates}`);
+    if (debug) console.log(`Total candidate routes found: ${totalCandidates}`);
 
     // Determine allowed offsets based on maxConnection, stopover option, and maxTransfers.
     // For multi-stop searches (maxTransfers > 1) we want to check all available days (up to booking horizon),
@@ -1655,22 +1634,22 @@ function setupAutocomplete(inputId, suggestionsId) {
         allowedOffsets = [0];
       }
     }
-    console.log(`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
+    if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
 
     // Preliminary check: filter candidate routes based on flightDates availability across the full allowed window.
     candidateRoutes = candidateRoutes.filter(candidate => {
       const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
       if (!valid) {
-        console.log(`Candidate route ${candidate.join(" -> ")} rejected by preliminary flightDates check.`);
+        if (debug) console.log(`Candidate route ${candidate.join(" -> ")} rejected by preliminary flightDates check.`);
       }
       return valid;
     });
-    console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
+    if (debug) console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
 
     const aggregatedResults = [];
     for (const candidate of candidateRoutes) {
       if (searchCancelled) break;
-      console.log(`\nProcessing candidate route: ${candidate.join(" -> ")}`);
+      if (debug) console.log(`\nProcessing candidate route: ${candidate.join(" -> ")}`);
       // Pass the maximum allowed offset (i.e. the last element in allowedOffsets) to processSegment.
       const candidateChains = await processSegment(candidate, 0, baseDateUTC, null, bookingHorizon, minConnection, maxConnection, allowedOffsets[allowedOffsets.length - 1], selectedDate, routesData);
       processedCandidates++;
@@ -1691,7 +1670,7 @@ function setupAutocomplete(inputId, suggestionsId) {
           for (let j = 0; j < chain.length - 1; j++) {
             const connectionTime = Math.round((chain[j + 1].calculatedDuration.departureDate.getTime() - chain[j].calculatedDuration.arrivalDate.getTime()) / 60000);
             totalConnectionTime += connectionTime;
-            console.log(`   Connection between flight ${chain[j].flightCode} and ${chain[j+1].flightCode}: ${connectionTime} minutes`);
+            if (debug) console.log(`   Connection between flight ${chain[j].flightCode} and ${chain[j+1].flightCode}: ${connectionTime} minutes`);
           }
           const aggregatedRoute = {
             key: chain.map(f => f.key).join(" | "),
@@ -1740,7 +1719,7 @@ function setupAutocomplete(inputId, suggestionsId) {
             totalConnectionTime: totalConnectionTime,
             segments: chain
           };
-          console.log(`Aggregated route: ${aggregatedRoute.route.join(" -> ")}; Total duration: ${totalDurationMinutes} minutes; Total connection time: ${totalConnectionTime} minutes`);
+          if (debug) console.log(`Aggregated route: ${aggregatedRoute.route.join(" -> ")}; Total duration: ${totalDurationMinutes} minutes; Total connection time: ${totalConnectionTime} minutes`);
           if (shouldAppend) {
             appendRouteToDisplay(aggregatedRoute);
           }
@@ -1752,7 +1731,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   }
 
   async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true, reverse = false, maxTransfers = 0) {
-    console.log("Starting searchDirectRoutes");
+    if (debug) console.log("Starting searchDirectRoutes");
     
     let allowedReversePairs = null;
     if (reverse && globalResults && globalResults.length > 0) {
@@ -1760,17 +1739,17 @@ function setupAutocomplete(inputId, suggestionsId) {
       globalResults.forEach(flight => {
         allowedReversePairs.add(`${flight.arrivalStation}-${flight.departureStation}`);
       });
-      console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
+      if (debug) console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
     }
     
     if (reverse) {
-      console.log("Reverse mode enabled: swapping origins and destinations.");
+      if (debug) console.log("Reverse mode enabled: swapping origins and destinations.");
       [origins, destinations] = [destinations, origins];
-      console.log("After swap, origins:", origins, "destinations:", destinations);
+      if (debug) console.log("After swap, origins:", origins, "destinations:", destinations);
     }
     
     let routesData = await fetchDestinations();
-    console.log(`Fetched ${routesData.length} routes from fetchDestinations`);
+    if (debug) console.log(`Fetched ${routesData.length} routes from fetchDestinations`);
     routesData = routesData.map(route => {
       if (Array.isArray(route.arrivalStations)) {
         route.arrivalStations = route.arrivalStations.filter(arrival => {
@@ -1786,20 +1765,20 @@ function setupAutocomplete(inputId, suggestionsId) {
     let validDirectFlights = [];
     for (const origin of origins) {
       if (searchCancelled) {
-        console.log("Search cancelled. Exiting loop.");
+        if (debug) console.log("Search cancelled. Exiting loop.");
         break;
       }
-      console.log(`Processing origin: ${origin}`);
+      if (debug) console.log(`Processing origin: ${origin}`);
       let routeData = routesData.find(route => {
         return typeof route.departureStation === "string"
           ? route.departureStation === origin
           : route.departureStation.id === origin;
       });
       if (!routeData || !routeData.arrivalStations) {
-        console.log(`No route data found for origin ${origin}. Skipping.`);
+        if (debug) console.log(`No route data found for origin ${origin}. Skipping.`);
         continue;
       }
-      console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}`);
+      if (debug) console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}`);
       
       const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
         ? routeData.arrivalStations
@@ -1808,10 +1787,10 @@ function setupAutocomplete(inputId, suggestionsId) {
             return destinations.includes(arrCode);
           });
       if (matchingArrivals.length === 0) {
-        console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations.join(", ")}. Skipping.`);
+        if (debug) console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations.join(", ")}. Skipping.`);
         continue;
       }
-      console.log(`Matching arrivals for ${origin}: ${matchingArrivals.map(arr => (typeof arr === "object" ? arr.id : arr)).join(", ")}`);
+      if (debug) console.log(`Matching arrivals for ${origin}: ${matchingArrivals.map(arr => (typeof arr === "object" ? arr.id : arr)).join(", ")}`);
       
       const totalArrivals = matchingArrivals.length;
       let processed = 0;
@@ -1819,39 +1798,39 @@ function setupAutocomplete(inputId, suggestionsId) {
       
       for (const arrival of matchingArrivals) {
         if (searchCancelled) {
-          console.log("Search cancelled during processing. Exiting inner loop.");
+          if (debug) console.log("Search cancelled during processing. Exiting inner loop.");
           break;
         }
         let arrivalCode = typeof arrival === "object" ? arrival.id : arrival;
         // Check operational start date and flightDates
         if (typeof arrival === "object" && arrival.operationStartDate) {
           if (new Date(selectedDate) < new Date(arrival.operationStartDate)) {
-            console.log(`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
+            if (debug) console.log(`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
             continue;
           }
         }
         if (typeof arrival === "object" && arrival.flightDates) {
           if (!arrival.flightDates.includes(selectedDate)) {
-            console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
+            if (debug) console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
             continue;
           }
         }
-        console.log(`Checking direct route ${origin} → ${arrivalCode} on ${selectedDate}`);
+        if (debug) console.log(`Checking direct route ${origin} → ${arrivalCode} on ${selectedDate}`);
         if (reverse && allowedReversePairs) {
           const reversePairKey = `${origin}-${arrivalCode}`;
           if (!allowedReversePairs.has(reversePairKey)) {
-            console.log(`Reverse pair ${origin} → ${arrivalCode} not allowed based on outbound flights. Skipping.`);
+            if (debug) console.log(`Reverse pair ${origin} → ${arrivalCode} not allowed based on outbound flights. Skipping.`);
             continue;
           } else {
-            console.log(`Reverse route ${origin} → ${arrivalCode} is allowed.`);
+            if (debug) console.log(`Reverse route ${origin} → ${arrivalCode} is allowed.`);
           }
         }
         const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-        console.log(`Checking cache for direct flight ${origin} → ${arrivalCode} on ${selectedDate} (cache key: ${cacheKey})`);
+        if (debug) console.log(`Checking cache for direct flight ${origin} → ${arrivalCode} on ${selectedDate} (cache key: ${cacheKey})`);
         let cachedDirect = await getCachedResults(cacheKey);
         if (cachedDirect) {
           cachedDirect = cachedDirect.map(unifyRawFlight);
-          console.log(`Cache hit: found ${cachedDirect.length} direct flights for ${origin} → ${arrivalCode}`);
+          if (debug) console.log(`Cache hit: found ${cachedDirect.length} direct flights for ${origin} → ${arrivalCode}`);
           if (shouldAppend) cachedDirect.forEach(flight => appendRouteToDisplay(flight));
           validDirectFlights = validDirectFlights.concat(cachedDirect);
           processed++;
@@ -1861,14 +1840,14 @@ function setupAutocomplete(inputId, suggestionsId) {
         
         try {
           let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
-          console.log(`Fetched ${flights.length} flights for ${origin} → ${arrivalCode} on ${selectedDate}`);
+          if (debug) console.log(`Fetched ${flights.length} flights for ${origin} → ${arrivalCode} on ${selectedDate}`);
           if (flights.length > 0) {
             flights = flights.map(unifyRawFlight);
             if (shouldAppend) flights.forEach(flight => appendRouteToDisplay(flight));
             await setCachedResults(cacheKey, flights);
             validDirectFlights = validDirectFlights.concat(flights);
           } else {
-            console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
+            if (debug) console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
             await setCachedResults(cacheKey, []);
           }
         } catch (error) {
@@ -1878,18 +1857,18 @@ function setupAutocomplete(inputId, suggestionsId) {
         updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
       }
     }
-    console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
+    if (debug) console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
     return validDirectFlights;
   }
   
   let searchActive = false;
   async function handleSearch() {
-    console.log("Search initiated.");
+    if (debug) console.log("Search initiated.");
     await cleanupCache();
     const searchButton = document.getElementById("search-button");
   
     if (searchActive) {
-      console.log("Search already active. Cancelling current search.");
+      if (debug) console.log("Search already active. Cancelling current search.");
       searchCancelled = true;
       resetCountdownTimers();
       if (throttleResetTimer) {
@@ -1913,7 +1892,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     searchActive = true;
     searchCancelled = false;
     searchButton.textContent = "Stop Search";
-    console.log("New search started. Resetting counters and UI.");
+    if (debug) console.log("New search started. Resetting counters and UI.");
   
     setTimeout(() => { requestsThisWindow = 0; }, 1000);
   
@@ -1940,19 +1919,19 @@ function setupAutocomplete(inputId, suggestionsId) {
       return;
     }
     let origins = originInputs.map(s => resolveAirport(s)).flat();
-    console.log("Resolved origins:", origins);
+    if (debug) console.log("Resolved origins:", origins);
   
     let destinationInputs = getMultiAirportValues("destination-multi");
     let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
       ? ["ANY"]
       : destinationInputs.map(s => resolveAirport(s)).flat();
-    console.log("Resolved destinations:", destinations);
+    if (debug) console.log("Resolved destinations:", destinations);
   
     const tripType = window.currentTripType || "oneway";
     let departureDates = [];
     const departureInputRaw = document.getElementById("departure-date").value.trim();
     departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
-    console.log("Departure dates:", departureDates);
+    if (debug) console.log("Departure dates:", departureDates);
   
     document.querySelector(".route-list").innerHTML = "";
     updateProgress(0, 1, "Initializing search");
@@ -1966,7 +1945,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     } else {
       maxTransfers = 0;
     }
-    console.log("Max transfers set to:", maxTransfers);
+    if (debug) console.log("Max transfers set to:", maxTransfers);
   
 // --- Anywhere logic in handleSearch ---
 const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
@@ -2018,12 +1997,12 @@ if (isOriginAnywhere && isDestinationAnywhere) {
     typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
   ));
   origins = Array.from(new Set(allOrigins));
-  console.log("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
+  if (debug) console.log("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
 }
 
 // 4) If only origin is ANY and destination is specified, filter origins.
 if (isOriginAnywhere && !isDestinationAnywhere) {
-  console.log("Origin is 'ANY'; filtering origins based on provided destination(s).");
+  if (debug) console.log("Origin is 'ANY'; filtering origins based on provided destination(s).");
   let fetchedRoutes = await fetchDestinations();
   fetchedRoutes = fetchedRoutes.map(route => {
     if (Array.isArray(route.arrivalStations)) {
@@ -2044,12 +2023,12 @@ if (isOriginAnywhere && !isDestinationAnywhere) {
     })
   ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
   origins = Array.from(new Set(filteredOrigins));
-  console.log("Filtered origins:", origins);
+  if (debug) console.log("Filtered origins:", origins);
 }
 
 // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
 if (isDestinationAnywhere && !isOriginAnywhere) {
-  console.log("Destination is 'ANY'; filtering destinations based on provided origin(s).");
+  if (debug) console.log("Destination is 'ANY'; filtering destinations based on provided origin(s).");
   let fetchedRoutes = await fetchDestinations();
   fetchedRoutes = fetchedRoutes.map(route => {
     if (Array.isArray(route.arrivalStations)) {
@@ -2067,7 +2046,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
     originSet.has(typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation)
   ).flatMap(route => route.arrivalStations.map(arr => (typeof arr === "object" ? arr.id : arr)));
   destinations = Array.from(new Set(filteredDestinations));
-  console.log("Filtered destinations:", destinations);
+  if (debug) console.log("Filtered destinations:", destinations);
 }
 
 // --- End Anywhere logic ---
@@ -2078,7 +2057,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
       if (tripType === "oneway") {
         for (const dateStr of departureDates) {
           if (searchCancelled) return;
-          console.log(`Searching one-way flights for date ${dateStr}`);
+          if (debug) console.log(`Searching one-way flights for date ${dateStr}`);
           if (maxTransfers > 0) {
             await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
           } else {
@@ -2087,12 +2066,12 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
         }
       } else {
         // Round-trip search (existing logic)
-        console.log("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
+        if (debug) console.log("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
         suppressDisplay = true;
         let outboundFlights = [];
         for (const outboundDate of departureDates) {
           if (searchCancelled) break;
-          console.log(`Searching outbound flights for date ${outboundDate}`);
+          if (debug) console.log(`Searching outbound flights for date ${outboundDate}`);
           let outboundFlightsForDate = [];
           if (maxTransfers > 0) {
             outboundFlightsForDate = outboundFlightsForDate.concat(
@@ -2105,7 +2084,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
           }
           outboundFlights = outboundFlights.concat(outboundFlightsForDate);
         }
-        console.log(`Total outbound flights found: ${outboundFlights.length}`);
+        if (debug) console.log(`Total outbound flights found: ${outboundFlights.length}`);
         // Deduplicate outbound flights.
         const uniqueOutbound = [];
         const outboundKeys = new Set();
@@ -2118,12 +2097,12 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
         }
         outboundFlights = uniqueOutbound;
         globalResults = outboundFlights;
-        console.log(`Deduplicated outbound flights: ${outboundFlights.length}`);
+        if (debug) console.log(`Deduplicated outbound flights: ${outboundFlights.length}`);
         let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
         let inboundQueries = {};
         window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
         const originalOrigins = resolveAirport(window.originalOriginInput);
-        console.log("Original origins for round-trip:", originalOrigins);
+        if (debug) console.log("Original origins for round-trip:", originalOrigins);
         for (const outbound of outboundFlights) {
           let outboundDestination = outbound.arrivalStation;
           for (const rDate of returnDates) {
@@ -2162,7 +2141,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
         const inboundKeys = Object.keys(inboundQueries);
         for (const key of inboundKeys) {
           try {
-            console.log(`Searching inbound flights for key ${key}`);
+            if (debug) console.log(`Searching inbound flights for key ${key}`);
             inboundResults[key] = await inboundQueries[key]();
           } catch (error) {
             console.error(`Error searching inbound flights for ${key}: ${error.message}`);
@@ -2180,7 +2159,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
                 const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
                 const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
                 if (!validGap) {
-                  console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
+                  if (debug) console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
                 }
                 return validGap;
               });
@@ -2198,13 +2177,13 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
             }
           }
           outbound.returnFlights = dedupedInbound;
-          console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
+          if (debug) console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
         }
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
         suppressDisplay = false;
         displayRoundTripResultsAll(validRoundTripFlights);
-        console.log(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
+        if (debug) console.log(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
       }
     } catch (error) {
       document.querySelector(".route-list").innerHTML = `<p>Error: ${error.message}</p>`;
@@ -2221,7 +2200,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
             </svg> SEARCH`;
       searchActive = false;
       updateCSVButtonVisibility();
-      console.log("Search process finished.");
+      if (debug) console.log("Search process finished.");
     }
   }
   
@@ -2973,7 +2952,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.continueToPayment = async function(outboundKey) {
     try {
         const dynamicUrl = await getDynamicUrl(); // Fetch the dynamic URL
-        console.log("dynamicUrl for payment:", dynamicUrl);
+        if (debug) console.log("dynamicUrl for payment:", dynamicUrl);
         
         const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
         if (!subscriptionId) {
@@ -2982,8 +2961,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const url = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
-        console.log("Using subscription ID:", subscriptionId);
-        console.log("Final Payment URL (without sending request):", url);
+        if (debug) console.log("Using subscription ID:", subscriptionId);
+        if (debug) console.log("Final Payment URL (without sending request):", url);
 
         const form = document.createElement("form");
         form.method = "POST";
@@ -2997,10 +2976,10 @@ document.addEventListener("DOMContentLoaded", () => {
         input.value = outboundKey;
         form.appendChild(input);
 
-        console.log("Form data:", { outboundKey: input.value });
-        console.log("Generated form:", form);
-        console.log("Form Action (Final URL):", form.action);
-        console.log("Form Data:", { outboundKey: input.value });
+        if (debug) console.log("Form data:", { outboundKey: input.value });
+        if (debug) console.log("Generated form:", form);
+        if (debug) console.log("Form Action (Final URL):", form.action);
+        if (debug) console.log("Form Data:", { outboundKey: input.value });
         document.body.appendChild(form);
         form.submit();
         document.body.removeChild(form);
@@ -3017,9 +2996,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const storedPreferredAirport = localStorage.getItem("preferredAirport") || "";
     document.getElementById("preferred-airport").value = storedPreferredAirport;
     document.getElementById("min-connection-time").value = localStorage.getItem("minConnectionTime") || 90;
-    document.getElementById("max-connection-time").value = localStorage.getItem("maxConnectionTime") || 360;
+    document.getElementById("max-connection-time").value = localStorage.getItem("maxConnectionTime") || 1440;
     document.getElementById("max-requests").value = localStorage.getItem("maxRequestsInRow") || 25;
-    document.getElementById("requests-frequency").value = localStorage.getItem("requestsFrequencyMs") || 600;
+    document.getElementById("requests-frequency").value = localStorage.getItem("requestsFrequencyMs") || 1200;
     document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
     document.getElementById("cache-lifetime").value = localStorage.getItem("cacheLifetimeHours") || 4;
   
@@ -3039,10 +3018,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const updateButton = document.getElementById("update-preferred-airport");
     updateButton.addEventListener("click", () => {
       const preferredAirport = document.getElementById("preferred-airport").value.trim();
-      if (!preferredAirport) {
-        showNotification("Please enter a valid airport. ⚠️");
-        return;
-      }
       localStorage.setItem("preferredAirport", preferredAirport);
       const originContainer = document.getElementById("origin-multi");
       const firstInput = originContainer.querySelector("input");
