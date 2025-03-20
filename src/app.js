@@ -3,7 +3,7 @@ import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -41,7 +41,7 @@ import Dexie from '../src/libs/dexie.mjs';
     try {
       await db.routes.clear();
       await db.routes.bulkAdd(routesData);
-      console.log("Routes imported successfully!");
+      if (debug) console.log("Routes imported successfully!");
     } catch (error) {
       console.error("Error importing routes:", error);
     }
@@ -1236,7 +1236,7 @@ import Dexie from '../src/libs/dexie.mjs';
         return depCode === dep;
       });
       if (!route) {
-        console.log(`Preliminary check: No route found for departure ${dep}`);
+        if (debug) console.log (`Preliminary check: No route found for departure ${dep}`);
         return false;
       }
       const arrivalObj = route.arrivalStations.find(s => {
@@ -1244,7 +1244,7 @@ import Dexie from '../src/libs/dexie.mjs';
         return code === arr;
       });
       if (!arrivalObj || !arrivalObj.flightDates) {
-        console.log(`Preliminary check: No arrival or flightDates found for segment ${dep} -> ${arr}`);
+        if (debug) console.log (`Preliminary check: No arrival or flightDates found for segment ${dep} -> ${arr}`);
         return false;
       }
       // Compute allowed dates based on allowedOffsets
@@ -1258,7 +1258,7 @@ import Dexie from '../src/libs/dexie.mjs';
       // Check if at least one allowed date is present in flightDates
       const hasValid = allowedDates.some(date => arrivalObj.flightDates.includes(date));
       if (!hasValid) {
-        console.log(`Preliminary check: Segment ${dep} -> ${arr} does not have any allowed flightDates among ${allowedDates.join(", ")}`);
+        if (debug) console.log (`Preliminary check: Segment ${dep} -> ${arr} does not have any allowed flightDates among ${allowedDates.join(", ")}`);
         return false;
       }
     }
@@ -1279,17 +1279,17 @@ import Dexie from '../src/libs/dexie.mjs';
     const segDestination = candidate[index + 1];
     let validChains = [];
     
-    console.log(`--> Processing segment: ${segOrigin} -> ${segDestination}`);
+    if (debug) console.log (`--> Processing segment: ${segOrigin} -> ${segDestination}`);
     
     for (let offset = 0; offset <= baseMaxDays; offset++) {
       const dateToSearch = addDaysUTC(currentDate, offset);
       const dateStr = dateToSearch.toISOString().slice(0, 10);
       if (index === 0 && dateStr !== selectedDate) {
-        console.log(`   Skipping date ${dateStr} for first segment (selected date is ${selectedDate})`);
+        if (debug) console.log (`   Skipping date ${dateStr} for first segment (selected date is ${selectedDate})`);
         continue;
       }
       if (dateToSearch > bookingHorizon) {
-        console.log(`   Date ${dateStr} exceeds booking horizon; breaking offset loop`);
+        if (debug) console.log (`   Date ${dateStr} exceeds booking horizon; breaking offset loop`);
         break;
       }
       
@@ -1304,27 +1304,27 @@ import Dexie from '../src/libs/dexie.mjs';
         });
         if (arrivalObj && arrivalObj.flightDates) {
           if (!arrivalObj.flightDates.includes(dateStr)) {
-            console.log(`   No available flight on ${dateStr} for segment ${segOrigin} -> ${segDestination} (flightDates filter)`);
+            if (debug) console.log (`   No available flight on ${dateStr} for segment ${segOrigin} -> ${segDestination} (flightDates filter)`);
             continue;
           }
         }
       }
       if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr, routesData)) {
-        console.log(`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
+        if (debug) console.log (`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
         continue;
       }
       
       const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
-      console.log(`   Checking cache for segment ${segOrigin} -> ${segDestination} on ${dateStr} (cache key: ${cacheKey})`);
+      if (debug) console.log (`   Checking cache for segment ${segOrigin} -> ${segDestination} on ${dateStr} (cache key: ${cacheKey})`);
       let flights = await getCachedResults(cacheKey);
       if (flights !== null) {
         flights = flights.map(unifyRawFlight);
-        console.log(`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+        if (debug) console.log (`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       } else {
         try {
           flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
           flights = flights.map(unifyRawFlight);
-          console.log(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+          if (debug) console.log (`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
           await setCachedResults(cacheKey, flights);
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
@@ -1345,23 +1345,23 @@ import Dexie from '../src/libs/dexie.mjs';
       flights = flights.filter(f =>
         getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === dateStr
       );
-      console.log(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+      if (debug) console.log (`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       
       if (previousFlight) {
         flights = flights.filter(f => {
           const connectionTime = (f.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime()) / 60000;
           const valid = connectionTime >= minConnection && connectionTime <= maxConnection;
           if (!valid) {
-            console.log(`      Flight ${f.flightCode} rejected: connection time ${connectionTime} minutes not in [${minConnection}, ${maxConnection}]`);
+            if (debug) console.log (`      Flight ${f.flightCode} rejected: connection time ${connectionTime} minutes not in [${minConnection}, ${maxConnection}]`);
           }
           return valid;
         });
-        console.log(`   After connection time filtering: ${flights.length} flights available`);
+        if (debug) console.log (`   After connection time filtering: ${flights.length} flights available`);
       }
       
       // Iterate over all found flights for this offset.
       for (let flight of flights) {
-        console.log(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
+        if (debug) console.log (`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
         // Recursively process the next segment, passing the date adjusted by the current offset.
         const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData);
         // For each found option, add the current flight at the beginning.
@@ -1372,31 +1372,31 @@ import Dexie from '../src/libs/dexie.mjs';
     }
     
     if (validChains.length === 0) {
-      console.log(`   No suitable flight found for segment ${segOrigin} -> ${segDestination} at any offset`);
+      if (debug) console.log (`   No suitable flight found for segment ${segOrigin} -> ${segDestination} at any offset`);
     }
     return validChains;
   }
 
   async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true) {
-    console.log("Starting searchConnectingRoutes");
+    if (debug) console.log ("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
     const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
     const stopoverText = document.getElementById("selected-stopover").textContent;
     // For stopover options, assume "One stop (overnight)" is a special flag; otherwise, multi-stop searches use full window.
     const allowOvernight = stopoverText === "One stop (overnight)";
-    console.log(`Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "not overnight, one stop or fewer"})`);
+    if (debug) console.log (`Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "not overnight, one stop or fewer"})`);
 
     // Interpret the selected date as UTC (e.g. "2025-03-20" becomes 2025-03-20T00:00:00Z)
     const baseDateUTC = new Date(selectedDate + "T00:00:00Z");
     const bookingHorizon = addDaysUTC(baseDateUTC, 3);
-    console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
+    if (debug) console.log (`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
 
     if (origins.length === 1 && origins[0] === "ANY") {
       origins = [...new Set(routesData.map(route =>
         typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
       ))];
-      console.log(`Expanded origin ANY to: ${origins.join(", ")}`);
+      if (debug) console.log (`Expanded origin ANY to: ${origins.join(", ")}`);
     }
     let destinationList = [];
     if (destinations.length === 1 && destinations[0] === "ANY") {
@@ -1409,7 +1409,7 @@ import Dexie from '../src/libs/dexie.mjs';
         }
       });
       destinationList = Array.from(destSet);
-      console.log(`Expanded destination ANY to: ${destinationList.join(", ")}`);
+      if (debug) console.log (`Expanded destination ANY to: ${destinationList.join(", ")}`);
     } else {
       destinationList = destinations;
     }
@@ -1422,7 +1422,7 @@ import Dexie from '../src/libs/dexie.mjs';
     const totalCandidates = candidateRoutes.length;
     let processedCandidates = 0;
     updateProgress(processedCandidates, totalCandidates, "Processing routes");
-    console.log(`Total candidate routes found: ${totalCandidates}`);
+    if (debug) console.log (`Total candidate routes found: ${totalCandidates}`);
 
     // Determine allowed offsets based on maxConnection, stopover option, and maxTransfers.
     // For multi-stop searches (maxTransfers > 1) we want to check all available days (up to booking horizon),
@@ -1448,22 +1448,22 @@ import Dexie from '../src/libs/dexie.mjs';
         allowedOffsets = [0];
       }
     }
-    console.log(`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
+    if (debug) console.log (`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
 
     // Preliminary check: filter candidate routes based on flightDates availability across the full allowed window.
     candidateRoutes = candidateRoutes.filter(candidate => {
       const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
       if (!valid) {
-        console.log(`Candidate route ${candidate.join(" -> ")} rejected by preliminary flightDates check.`);
+        if (debug) console.log (`Candidate route ${candidate.join(" -> ")} rejected by preliminary flightDates check.`);
       }
       return valid;
     });
-    console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
+    if (debug) console.log (`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
 
     const aggregatedResults = [];
     for (const candidate of candidateRoutes) {
       if (searchCancelled) break;
-      console.log(`\nProcessing candidate route: ${candidate.join(" -> ")}`);
+      if (debug) console.log (`\nProcessing candidate route: ${candidate.join(" -> ")}`);
       // Pass the maximum allowed offset (i.e. the last element in allowedOffsets) to processSegment.
       const candidateChains = await processSegment(candidate, 0, baseDateUTC, null, bookingHorizon, minConnection, maxConnection, allowedOffsets[allowedOffsets.length - 1], selectedDate, routesData);
       processedCandidates++;
@@ -1484,7 +1484,7 @@ import Dexie from '../src/libs/dexie.mjs';
           for (let j = 0; j < chain.length - 1; j++) {
             const connectionTime = Math.round((chain[j + 1].calculatedDuration.departureDate.getTime() - chain[j].calculatedDuration.arrivalDate.getTime()) / 60000);
             totalConnectionTime += connectionTime;
-            console.log(`   Connection between flight ${chain[j].flightCode} and ${chain[j+1].flightCode}: ${connectionTime} minutes`);
+            if (debug) console.log (`   Connection between flight ${chain[j].flightCode} and ${chain[j+1].flightCode}: ${connectionTime} minutes`);
           }
           const aggregatedRoute = {
             key: chain.map(f => f.key).join(" | "),
@@ -1533,7 +1533,7 @@ import Dexie from '../src/libs/dexie.mjs';
             totalConnectionTime: totalConnectionTime,
             segments: chain
           };
-          console.log(`Aggregated route: ${aggregatedRoute.route.join(" -> ")}; Total duration: ${totalDurationMinutes} minutes; Total connection time: ${totalConnectionTime} minutes`);
+          if (debug) console.log (`Aggregated route: ${aggregatedRoute.route.join(" -> ")}; Total duration: ${totalDurationMinutes} minutes; Total connection time: ${totalConnectionTime} minutes`);
           if (shouldAppend) {
             appendRouteToDisplay(aggregatedRoute);
           }
@@ -1545,24 +1545,24 @@ import Dexie from '../src/libs/dexie.mjs';
   }
 
   async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true, reverse = false) {
-    console.log("Starting searchDirectRoutes");
+    if (debug) console.log ("Starting searchDirectRoutes");
     let allowedReversePairs = null;
     if (reverse && globalResults && globalResults.length > 0) {
       allowedReversePairs = new Set();
       globalResults.forEach(flight => {
         allowedReversePairs.add(`${flight.arrivalStation}-${flight.departureStation}`);
       });
-      console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
+      if (debug) console.log ("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
     }
     
     if (reverse) {
-      console.log("Reverse mode enabled: swapping origins and destinations.");
+      if (debug) console.log ("Reverse mode enabled: swapping origins and destinations.");
       [origins, destinations] = [destinations, origins];
-      console.log("After swap, origins:", origins, "destinations:", destinations);
+      if (debug) console.log ("After swap, origins:", origins, "destinations:", destinations);
     }
     
     let routesData = await fetchDestinations();
-    console.log(`Fetched ${routesData.length} routes from fetchDestinations`);
+    if (debug) console.log (`Fetched ${routesData.length} routes from fetchDestinations`);
     routesData = routesData.map(route => {
       if (Array.isArray(route.arrivalStations)) {
         route.arrivalStations = route.arrivalStations.filter(arrival => {
@@ -1576,33 +1576,33 @@ import Dexie from '../src/libs/dexie.mjs';
     }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
     
     if (origins.length === 1 && origins[0] === "ANY" && !(destinations.length === 1 && destinations[0] === "ANY")) {
-      console.log("Origin is 'ANY'; filtering origins based on provided destinations.");
+      if (debug) console.log ("Origin is 'ANY'; filtering origins based on provided destinations.");
       const destSet = new Set(destinations);
       const filteredOrigins = routesData.filter(route =>
         route.arrivalStations &&
         route.arrivalStations.some(arr => destSet.has(typeof arr === "object" ? arr.id : arr))
       ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
       origins = [...new Set(filteredOrigins)];
-      console.log("Filtered origins:", origins);
+      if (debug) console.log ("Filtered origins:", origins);
     }
     
     let validDirectFlights = [];
     for (const origin of origins) {
       if (searchCancelled) {
-        console.log("Search cancelled. Exiting loop.");
+        if (debug) console.log ("Search cancelled. Exiting loop.");
         break;
       }
-      console.log(`Processing origin: ${origin}`);
+      if (debug) console.log (`Processing origin: ${origin}`);
       let routeData = routesData.find(route => {
         return typeof route.departureStation === "string"
           ? route.departureStation === origin
           : route.departureStation.id === origin;
       });
       if (!routeData || !routeData.arrivalStations) {
-        console.log(`No route data found for origin ${origin}. Skipping.`);
+        if (debug) console.log (`No route data found for origin ${origin}. Skipping.`);
         continue;
       }
-      console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}`);
+      if (debug) console.log (`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}`);
     
       const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
         ? routeData.arrivalStations
@@ -1611,10 +1611,10 @@ import Dexie from '../src/libs/dexie.mjs';
             return destinations.includes(arrCode);
           });
       if (matchingArrivals.length === 0) {
-        console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations.join(", ")}. Skipping.`);
+        if (debug) console.log (`No matching arrivals found for origin ${origin} with destinations ${destinations.join(", ")}. Skipping.`);
         continue;
       }
-      console.log(`Matching arrivals for ${origin}: ${matchingArrivals.map(arr => (typeof arr === "object" ? arr.id : arr)).join(", ")}`);
+      if (debug) console.log (`Matching arrivals for ${origin}: ${matchingArrivals.map(arr => (typeof arr === "object" ? arr.id : arr)).join(", ")}`);
     
       const totalArrivals = matchingArrivals.length;
       let processed = 0;
@@ -1622,39 +1622,39 @@ import Dexie from '../src/libs/dexie.mjs';
     
       for (const arrival of matchingArrivals) {
         if (searchCancelled) {
-          console.log("Search cancelled during processing. Exiting inner loop.");
+          if (debug) console.log ("Search cancelled during processing. Exiting inner loop.");
           break;
         }
         let arrivalCode = typeof arrival === "object" ? arrival.id : arrival;
         // Check operational start date and flightDates
         if (typeof arrival === "object" && arrival.operationStartDate) {
           if (new Date(selectedDate) < new Date(arrival.operationStartDate)) {
-            console.log(`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
+            if (debug) console.log (`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
             continue;
           }
         }
         if (typeof arrival === "object" && arrival.flightDates) {
           if (!arrival.flightDates.includes(selectedDate)) {
-            console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
+            if (debug) console.log (`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
             continue;
           }
         }
-        console.log(`Checking direct route ${origin} → ${arrivalCode}`);
+        if (debug) console.log (`Checking direct route ${origin} → ${arrivalCode}`);
         if (reverse && allowedReversePairs) {
           const reversePairKey = `${origin}-${arrivalCode}`;
           if (!allowedReversePairs.has(reversePairKey)) {
-            console.log(`Reverse pair ${origin} → ${arrivalCode} not allowed based on outbound flights. Skipping.`);
+            if (debug) console.log (`Reverse pair ${origin} → ${arrivalCode} not allowed based on outbound flights. Skipping.`);
             continue;
           } else {
-            console.log(`Reverse route ${origin} → ${arrivalCode} is allowed.`);
+            if (debug) console.log (`Reverse route ${origin} → ${arrivalCode} is allowed.`);
           }
         }
         const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-        console.log(`Checking cache for direct flight ${origin} → ${arrivalCode} on ${selectedDate} (cache key: ${cacheKey})`);
+        if (debug) console.log (`Checking cache for direct flight ${origin} → ${arrivalCode} on ${selectedDate} (cache key: ${cacheKey})`);
         let cachedDirect = await getCachedResults(cacheKey);
         if (cachedDirect) {
           cachedDirect = cachedDirect.map(unifyRawFlight);
-          console.log(`Cache hit: found ${cachedDirect.length} direct flights for ${origin} → ${arrivalCode}`);
+          if (debug) console.log (`Cache hit: found ${cachedDirect.length} direct flights for ${origin} → ${arrivalCode}`);
           if (shouldAppend) cachedDirect.forEach(flight => appendRouteToDisplay(flight));
           validDirectFlights = validDirectFlights.concat(cachedDirect);
           processed++;
@@ -1664,14 +1664,14 @@ import Dexie from '../src/libs/dexie.mjs';
     
         try {
           let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
-          console.log(`Fetched ${flights.length} flights for ${origin} → ${arrivalCode} on ${selectedDate}`);
+          if (debug) console.log (`Fetched ${flights.length} flights for ${origin} → ${arrivalCode} on ${selectedDate}`);
           if (flights.length > 0) {
             flights = flights.map(unifyRawFlight);
             if (shouldAppend) flights.forEach(flight => appendRouteToDisplay(flight));
             await setCachedResults(cacheKey, flights);
             validDirectFlights = validDirectFlights.concat(flights);
           } else {
-            console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
+            if (debug) console.log (`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
             await setCachedResults(cacheKey, []);
           }
         } catch (error) {
@@ -1681,18 +1681,18 @@ import Dexie from '../src/libs/dexie.mjs';
         updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
       }
     }
-    console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
+    if (debug) console.log (`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
     return validDirectFlights;
   }
   
   let searchActive = false;
   async function handleSearch() {
-    console.log("Search initiated.");
+    if (debug) console.log ("Search initiated.");
     await cleanupCache();
     const searchButton = document.getElementById("search-button");
   
     if (searchActive) {
-      console.log("Search already active. Cancelling current search.");
+      if (debug) console.log ("Search already active. Cancelling current search.");
       searchCancelled = true;
       resetCountdownTimers();
       if (throttleResetTimer) {
@@ -1716,7 +1716,7 @@ import Dexie from '../src/libs/dexie.mjs';
     searchActive = true;
     searchCancelled = false;
     searchButton.textContent = "Stop Search";
-    console.log("New search started. Resetting counters and UI.");
+    if (debug) console.log ("New search started. Resetting counters and UI.");
   
     setTimeout(() => {
       requestsThisWindow = 0;
@@ -1745,13 +1745,13 @@ import Dexie from '../src/libs/dexie.mjs';
       return;
     }
     let origins = originInputs.map(s => resolveAirport(s)).flat();
-    console.log("Resolved origins:", origins);
+    if (debug) console.log ("Resolved origins:", origins);
   
     let destinationInputs = getMultiAirportValues("destination-multi");
     let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
       ? ["ANY"]
       : destinationInputs.map(s => resolveAirport(s)).flat();
-    console.log("Resolved destinations:", destinations);
+    if (debug) console.log ("Resolved destinations:", destinations);
   
     const tripType = window.currentTripType || "oneway";
     let departureDates = [];
@@ -1768,7 +1768,7 @@ import Dexie from '../src/libs/dexie.mjs';
     } else {
       departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
     }
-    console.log("Departure dates:", departureDates);
+    if (debug) console.log ("Departure dates:", departureDates);
   
     document.querySelector(".route-list").innerHTML = "";
     updateProgress(0, 1, "Initializing search");
@@ -1782,13 +1782,13 @@ import Dexie from '../src/libs/dexie.mjs';
     } else {
       maxTransfers = 0;
     }
-    console.log("Max transfers set to:", maxTransfers);
+    if (debug) console.log ("Max transfers set to:", maxTransfers);
   
     try {
       if (tripType === "oneway") {
         for (const dateStr of departureDates) {
           if (searchCancelled) return;
-          console.log(`Searching one-way flights for date ${dateStr}`);
+          if (debug) console.log (`Searching one-way flights for date ${dateStr}`);
           if (maxTransfers > 0) {
             await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
           } else {
@@ -1797,12 +1797,12 @@ import Dexie from '../src/libs/dexie.mjs';
         }
       } else {
         // Round-trip search:
-        console.log("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
+        if (debug) console.log ("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
         suppressDisplay = true;
         let outboundFlights = [];
         for (const outboundDate of departureDates) {
           if (searchCancelled) break;
-          console.log(`Searching outbound flights for date ${outboundDate}`);
+          if (debug) console.log (`Searching outbound flights for date ${outboundDate}`);
           let outboundFlightsForDate = [];
           if (maxTransfers > 0) {
             outboundFlightsForDate = outboundFlightsForDate.concat(
@@ -1815,7 +1815,7 @@ import Dexie from '../src/libs/dexie.mjs';
           }
           outboundFlights = outboundFlights.concat(outboundFlightsForDate);
         }
-        console.log(`Total outbound flights found: ${outboundFlights.length}`);
+        if (debug) console.log (`Total outbound flights found: ${outboundFlights.length}`);
         // Deduplicate outbound flights.
         const uniqueOutbound = [];
         const outboundKeys = new Set();
@@ -1828,12 +1828,12 @@ import Dexie from '../src/libs/dexie.mjs';
         }
         outboundFlights = uniqueOutbound;
         globalResults = outboundFlights;
-        console.log(`Deduplicated outbound flights: ${outboundFlights.length}`);
+        if (debug) console.log (`Deduplicated outbound flights: ${outboundFlights.length}`);
         let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
         let inboundQueries = {};
         window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
         const originalOrigins = resolveAirport(window.originalOriginInput);
-        console.log("Original origins for round-trip:", originalOrigins);
+        if (debug) console.log ("Original origins for round-trip:", originalOrigins);
         for (const outbound of outboundFlights) {
           let outboundDestination = outbound.arrivalStation;
           for (const rDate of returnDates) {
@@ -1870,7 +1870,7 @@ import Dexie from '../src/libs/dexie.mjs';
         const inboundKeys = Object.keys(inboundQueries);
         for (const key of inboundKeys) {
           try {
-            console.log(`Searching inbound flights for key ${key}`);
+            if (debug) console.log (`Searching inbound flights for key ${key}`);
             inboundResults[key] = await inboundQueries[key]();
           } catch (error) {
             console.error(`Error searching inbound flights for ${key}: ${error.message}`);
@@ -1888,7 +1888,7 @@ import Dexie from '../src/libs/dexie.mjs';
                 const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
                 const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
                 if (!validGap) {
-                  console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
+                  if (debug) console.log (`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
                 }
                 return validGap;
               });
@@ -1906,13 +1906,13 @@ import Dexie from '../src/libs/dexie.mjs';
             }
           }
           outbound.returnFlights = dedupedInbound;
-          console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
+          if (debug) console.log (`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
         }
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
         suppressDisplay = false;
         displayRoundTripResultsAll(validRoundTripFlights);
-        console.log(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
+        if (debug) console.log (`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
       }
     } catch (error) {
       document.querySelector(".route-list").innerHTML = `<p>Error: ${error.message}</p>`;
@@ -1927,7 +1927,7 @@ import Dexie from '../src/libs/dexie.mjs';
         </svg> SEARCH`;
       searchActive = false;
       updateCSVButtonVisibility();
-      console.log("Search process finished.");
+      if (debug) console.log ("Search process finished.");
     }
   }
   
@@ -2680,7 +2680,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.continueToPayment = async function(outboundKey) {
     try {
         const dynamicUrl = await getDynamicUrl(); // Fetch the dynamic URL
-        console.log("dynamicUrl for payment:", dynamicUrl);
+        if (debug) console.log ("dynamicUrl for payment:", dynamicUrl);
         
         const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
         if (!subscriptionId) {
@@ -2689,8 +2689,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const url = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
-        console.log("Using subscription ID:", subscriptionId);
-        console.log("Final Payment URL (without sending request):", url);
+        if (debug) console.log ("Using subscription ID:", subscriptionId);
+        if (debug) console.log ("Final Payment URL (without sending request):", url);
 
         const form = document.createElement("form");
         form.method = "POST";
@@ -2704,10 +2704,10 @@ document.addEventListener("DOMContentLoaded", () => {
         input.value = outboundKey;
         form.appendChild(input);
 
-        console.log("Form data:", { outboundKey: input.value });
-        console.log("Generated form:", form);
-        console.log("Form Action (Final URL):", form.action);
-        console.log("Form Data:", { outboundKey: input.value });
+        if (debug) console.log ("Form data:", { outboundKey: input.value });
+        if (debug) console.log ("Generated form:", form);
+        if (debug) console.log ("Form Action (Final URL):", form.action);
+        if (debug) console.log ("Form Data:", { outboundKey: input.value });
         document.body.appendChild(form);
         form.submit();
         document.body.removeChild(form);
