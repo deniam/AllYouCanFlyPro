@@ -47,11 +47,24 @@ import Dexie from '../src/libs/dexie.mjs';
     }
   }
 
-importRoutes();
+  importRoutes();
   // ---------------- Helper: Airport Flag ----------------
-  function getCountryFlag(airportCode) {
-    return airportFlags[airportCode] || "";
+  const airportLookup = {};
+  AIRPORTS.forEach(a => {
+    airportLookup[a.code] = a;
+  });
+
+  function getCountryFlag(airport) {
+    if (airport && typeof airport === "object" && airport.country) {
+      return airportFlags[airport.country] || "";
+    }
+    if (typeof airport === "string") {
+      const found = airportLookup[airport];
+      return found ? (airportFlags[found.country] || "") : "";
+    }
+    return "";
   }
+
   
   // ----------------------- DOM Elements -----------------------
   const progressContainer = document.getElementById('progress-container');
