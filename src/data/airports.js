@@ -1,307 +1,178 @@
-export const AIRPORTS = [
-    { "code": "ABZ", "name": "Aberdeen (ABZ)" },
-    { "code": "AUH", "name": "Abu Dhabi (AUH)" },
-    { "code": "AGA", "name": "Agadir (AGA)" },
-    { "code": "AES", "name": "Alesund (AES)" },
-    { "code": "HBE", "name": "Alexandria (Borg El Arab) (HBE)" },
-    { "code": "AHO", "name": "Alghero (Sardinia) (AHO)" },
-    { "code": "ALC", "name": "Alicante (ALC)" },
-    { "code": "ALA", "name": "Almaty (ALA)" },
-    { "code": "AMM", "name": "Amman (AMM)" },
-    { "code": "AOI", "name": "Ancona (AOI)" },
-    { "code": "AYT", "name": "Antalya (AYT)" },
-    { "code": "AQJ", "name": "Aqaba (AQJ)" },
-    { "code": "NQZ", "name": "Astana (NQZ)" },
-    { "code": "ATH", "name": "Athens (ATH)" },
-    { "code": "BCM", "name": "Bacau (BCM)" },
-    { "code": "GYD", "name": "Baku (GYD)" },
-    { "code": "BNX", "name": "Banja Luka (BNX)" },
-    { "code": "BCN", "name": "Barcelona El Prat (BCN)" },
-    { "code": "BRI", "name": "Bari (BRI)" },
-    { "code": "BSL", "name": "Basel-Mulhouse-Freiburg (BSL)" },
-    { "code": "MLH", "name": "Basel-Mulhouse-Freiburg (MLH)" },
-    { "code": "BEG", "name": "Belgrade (BEG)" },
-    { "code": "BGO", "name": "Bergen (BGO)" },
-    { "code": "BER", "name": "Berlin Brandenburg (BER)" },
-    { "code": "BIO", "name": "Bilbao (BIO)" },
-    { "code": "BLL", "name": "Billund (BLL)" },
-    { "code": "BHX", "name": "Birmingham (BHX)" },
-    { "code": "FRU", "name": "Bishkek (FRU)" },
-    { "code": "BLQ", "name": "Bologna (BLQ)" },
-    { "code": "BOJ", "name": "Bourgas (Black Sea) (BOJ)" },
-    { "code": "GHV", "name": "Brasov (GHV)" },
-    { "code": "BTS", "name": "Bratislava (BTS)" },
-    { "code": "BRE", "name": "Bremen (BRE)" },
-    { "code": "BDS", "name": "Brindisi (BDS)" },
-    { "code": "BRU", "name": "Brussels (BRU)" },
-    { "code": "CRL", "name": "Brussels Charleroi (CRL)" },
-    { "code": "OTP", "name": "Bucharest (OTP)" },
-    { "code": "BBU", "name": "Bucharest Baneasa (BBU)" },
-    { "code": "BUD", "name": "Budapest (BUD)" },
-    { "code": "SPX", "name": "Cairo (Sphinx) (SPX)" },
-    { "code": "CDT", "name": "Castellon (Valencia) (CDT)" },
-    { "code": "CTA", "name": "Catania (Sicily) (CTA)" },
-    { "code": "CHQ", "name": "Chania (Crete) (CHQ)" },
-    { "code": "RMO", "name": "Chisinau (RMO)" },
-    { "code": "CLJ", "name": "Cluj-Napoca (CLJ)" },
-    { "code": "CGN", "name": "Cologne (CGN)" },
-    { "code": "CIY", "name": "Comiso (CIY)" },
-    { "code": "CND", "name": "Constanta (CND)" },
-    { "code": "CPH", "name": "Copenhagen (CPH)" },
-    { "code": "CFU", "name": "Corfu (CFU)" },
-    { "code": "CRA", "name": "Craiova (CRA)" },
-    { "code": "DLM", "name": "Dalaman (DLM)" },
-    { "code": "DMM", "name": "Dammam (DMM)" },
-    { "code": "DEB", "name": "Debrecen (DEB)" },
-    { "code": "DTM", "name": "Dortmund (DTM)" },
-    { "code": "DXB", "name": "Dubai (DXB)" },
-    { "code": "DBV", "name": "Dubrovnik (DBV)" },
-    { "code": "EIN", "name": "Eindhoven (EIN)" },
-    { "code": "EBL", "name": "Erbil (EBL)" },
-    { "code": "FAO", "name": "Faro (FAO)" },
-    { "code": "HHN", "name": "Frankfurt Hahn (HHN)" },
-    { "code": "FDH", "name": "Friedrichshafen (FDH)" },
-    { "code": "FUE", "name": "Fuerteventura (Canary Islands) (FUE)" },
-    { "code": "FNC", "name": "Funchal (Madeira) (FNC)" },
-    { "code": "GDN", "name": "Gdansk (GDN)" },
-    { "code": "GVA", "name": "Geneva (GVA)" },
-    { "code": "GOA", "name": "Genoa (GOA)" },
-    { "code": "GRO", "name": "Girona (GRO)" },
-    { "code": "GLA", "name": "Glasgow (GLA)" },
-    { "code": "GOT", "name": "Gothenburg Landvetter (GOT)" },
-    { "code": "LPA", "name": "Gran Canaria (Canary Islands) (LPA)" },
-    { "code": "GNB", "name": "Grenoble (GNB)" },
-    { "code": "HAM", "name": "Hamburg (HAM)" },
-    { "code": "HAU", "name": "Haugesund (HAU)" },
-    { "code": "HER", "name": "Heraklion (Crete) (HER)" },
-    { "code": "HRG", "name": "Hurghada (HRG)" },
-    { "code": "IAS", "name": "Iasi (IAS)" },
-    { "code": "IBZ", "name": "Ibiza (IBZ)" },
-    { "code": "IST", "name": "Istanbul (IST)" },
-    { "code": "ADB", "name": "Izmir (ADB)" },
-    { "code": "JED", "name": "Jeddah (JED)" },
-    { "code": "FKB", "name": "Karlsruhe/Baden-Baden (FKB)" },
-    { "code": "KTW", "name": "Katowice (KTW)" },
-    { "code": "KUN", "name": "Kaunas (KUN)" },
-    { "code": "EFL", "name": "Kefalonia (EFL)" },
-    { "code": "KGS", "name": "Kos (KGS)" },
-    { "code": "KSC", "name": "Kosice (KSC)" },
-    { "code": "KRK", "name": "Kraków (KRK)" },
-    { "code": "KUT", "name": "Kutaisi (KUT)" },
-    { "code": "LCA", "name": "Larnaca (LCA)" },
-    { "code": "LBA", "name": "Leeds (LBA)" },
-    { "code": "LEJ", "name": "Leipzig (LEJ)" },
-    { "code": "LIS", "name": "Lisbon (LIS)" },
-    { "code": "LPL", "name": "Liverpool (LPL)" },
-    { "code": "LJU", "name": "Ljubljana (LJU)" },
-    { "code": "LGW", "name": "London Gatwick (LGW)" },
-    { "code": "LTN", "name": "London Luton (LTN)" },
-    { "code": "LUZ", "name": "Lublin (LUZ)" },
-    { "code": "LYS", "name": "Lyon (LYS)" },
-    { "code": "MED", "name": "Madinah (MED)" },
-    { "code": "MAD", "name": "Madrid (MAD)" },
-    { "code": "AGP", "name": "Malaga (AGP)" },
-    { "code": "MLE", "name": "Malé (Maldives) (MLE)" },
-    { "code": "MMX", "name": "Malmo (MMX)" },
-    { "code": "MLA", "name": "Malta (MLA)" },
-    { "code": "RAK", "name": "Marrakesh (RAK)" },
-    { "code": "RMF", "name": "Marsa Alam (RMF)" },
-    { "code": "FMM", "name": "Memmingen/Munich West (FMM)" },
-    { "code": "BGY", "name": "Milan Bergamo (BGY)" },
-    { "code": "MXP", "name": "Milan Malpensa (MXP)" },
-    { "code": "MCT", "name": "Muscat (MCT)" },
-    { "code": "JMK", "name": "Mykonos (JMK)" },
-    { "code": "NAP", "name": "Naples (NAP)" },
-    { "code": "NCE", "name": "Nice (NCE)" },
-    { "code": "INI", "name": "Niš (INI)" },
-    { "code": "NUE", "name": "Nuremberg (NUE)" },
-    { "code": "OHD", "name": "Ohrid (OHD)" },
-    { "code": "OLB", "name": "Olbia (OLB)"},
-    { "code": "OSL", "name": "Oslo Gardermoen (OSL)" },
-    { "code": "TRF", "name": "Oslo Sandefjord (TRF)" },
-    { "code": "PMI", "name": "Palma de Mallorca (PMI)" },
-    { "code": "BVA", "name": "Paris Beauvais (BVA)" },
-    { "code": "ORY", "name": "Paris Orly (ORY)" },
-    { "code": "PEG", "name": "Perugia (PEG)" },
-    { "code": "PSR", "name": "Pescara (PSR)" },
-    { "code": "PSA", "name": "Pisa (PSA)" },
-    { "code": "PDV", "name": "Plovdiv (PDV)" },
-    { "code": "TGD", "name": "Podgorica (TGD)" },
-    { "code": "TAT", "name": "Poprad-Tatry (TAT)" },
-    { "code": "OPO", "name": "Porto (OPO)" },
-    { "code": "POZ", "name": "Poznan (POZ)" },
-    { "code": "PRG", "name": "Prague (PRG)" },
-    { "code": "PRN", "name": "Prishtina (PRN)" },
-    { "code": "RDO", "name": "Radom (RDO)" },
-    { "code": "KEF", "name": "Reykjavik (KEF)" },
-    { "code": "RHO", "name": "Rhodes (RHO)" },
-    { "code": "RIX", "name": "Riga (RIX)" },
-    { "code": "RMI", "name": "Rimini (RMI)" },
-    { "code": "RUH", "name": "Riyadh (RUH)" },
-    { "code": "CIA", "name": "Rome Ciampino (CIA)" },
-    { "code": "FCO", "name": "Rome Fiumicino (FCO)" },
-    { "code": "RZE", "name": "Rzeszów (RZE)" },
-    { "code": "SLL", "name": "Salalah (SLL)" },
-    { "code": "QSR", "name": "Salerno Costa d'Amalfi (QSR)" },
-    { "code": "SZG", "name": "Salzburg (SZG)" },
-    { "code": "SKD", "name": "Samarkand (SKD)" },
-    { "code": "SDR", "name": "Santander (SDR)" },
-    { "code": "JTR", "name": "Santorini (JTR)" },
-    { "code": "SJJ", "name": "Sarajevo (SJJ)" },
-    { "code": "SUJ", "name": "Satu Mare (SUJ)" },
-    { "code": "SVQ", "name": "Seville (SVQ)" },
-    { "code": "SSH", "name": "Sharm El Sheikh (SSH)" },
-    { "code": "SBZ", "name": "Sibiu (SBZ)" },
-    { "code": "JSI", "name": "Skiathos (JSI)" },
-    { "code": "SKP", "name": "Skopje (SKP)" },
-    { "code": "SOF", "name": "Sofia (SOF)" },
-    { "code": "HMB", "name": "Sohag (HMB)" },
-    { "code": "SPU", "name": "Split (SPU)" },
-    { "code": "SVG", "name": "Stavanger (SVG)" },
-    { "code": "ARN", "name": "Stockholm Arlanda (ARN)" },
-    { "code": "NYO", "name": "Stockholm Skavsta (NYO)" },
-    { "code": "STR", "name": "Stuttgart (STR)" },
-    { "code": "SCV", "name": "Suceava (SCV)" },
-    { "code": "SZZ", "name": "Szczecin (SZZ)" },
-    { "code": "TLL", "name": "Tallinn (TLL)" },
-    { "code": "TAS", "name": "Tashkent (TAS)" },
-    { "code": "TLV", "name": "Tel-Aviv (TLV)" },
-    { "code": "TFS", "name": "Tenerife (TFS)" },
-    { "code": "SKG", "name": "Thessaloniki (SKG)" },
-    { "code": "TSR", "name": "Timisoara (TSR)" },
-    { "code": "TIA", "name": "Tirana (TIA)" },
-    { "code": "TGM", "name": "Tirgu Mures (TGM)" },
-    { "code": "TRS", "name": "Trieste (TRS)" },
-    { "code": "TOS", "name": "Tromso (TOS)" },
-    { "code": "TRD", "name": "Trondheim (TRD)" },
-    { "code": "TRN", "name": "Turin (TRN)" },
-    { "code": "HSA", "name": "Turkistan (HSA)" },
-    { "code": "TKU", "name": "Turku (TKU)" },
-    { "code": "TZL", "name": "Tuzla (TZL)" },
-    { "code": "VLC", "name": "Valencia (VLC)" },
-    { "code": "VAR", "name": "Varna (VAR)" },
-    { "code": "VCE", "name": "Venice Marco Polo (VCE)" },
-    { "code": "TSF", "name": "Venice Treviso (TSF)" },
-    { "code": "VRN", "name": "Verona (VRN)" },
-    { "code": "VIE", "name": "Vienna (VIE)" },
-    { "code": "VNO", "name": "Vilnius (VNO)" },
-    { "code": "WAW", "name": "Warsaw Chopin (WAW)" },
-    { "code": "WRO", "name": "Wroclaw (WRO)" },
-    { "code": "EVN", "name": "Yerevan (EVN)" },
-    { "code": "ZTH", "name": "Zakynthos (ZTH)" },
-    { "code": "ZAZ", "name": "Zaragoza (ZAZ)" }
-];
+import Dexie from '../libs/dexie.mjs';
 
-export const COUNTRY_AIRPORTS = {
-    "Venice": ["TSF", "VCE"],
-    "Warsaw": ["RDO", "WAW"],
-    "Brussels": ["BRU", "CRL"],
-    "Bucharest": ["BBU", "OTP"],
-    "Oslo": ["TRF", "OSL"],
-    "Rome": ["CIA", "FCO"],
-    "Milan": ["BGY", "MXP"],
-    "Paris": ["BVA", "ORY"],
-    "Stockholm": ["ARN", "NYO"],
-    "London": ["LTN", "LGW"],
-    "London": ["LTN", "LGW"],
-    "Albania": ["TIA"],
-    "Armenia": ["EVN"],
-    "Austria": ["SZG", "VIE"],
-    "Azerbaijan": ["GYD"],
-    "Belgium": ["BRU", "CRL"],
-    "Bosnia and Herzegovina": ["BNX", "SJJ", "TZL"],
-    "Bulgaria": ["BOJ", "PDV", "SOF", "VAR"],
-    "Croatia": ["DBV", "SPU"],
-    "Cyprus": ["LCA"],
-    "Czech Republic": ["PRG"],
-    "Denmark": ["BLL", "CPH"],
-    "Egypt": ["HBE", "HRG", "RMF", "SSH", "HMB", "SPX"],
-    "Estonia": ["TLL"],
-    "Finland": ["TKU"],
-    "France": ["BVA", "GNB", "MLH", "NCE", "LYS", "ORY"],
-    "Georgia": ["KUT"],
-    "Germany": ["BER", "BRE", "CGN", "DTM", "FDH", "FMM", "FKB", "HAM", "HHN", "LEJ", "NUE", "STR"],
-    "Greece": ["ATH", "CHQ", "CFU", "EFL", "HER", "JMK", "JTR", "JSI", "RHO", "SKG", "ZTH"],
-    "Hungary": ["BUD", "DEB"],
-    "Iceland": ["KEF"],
-    "Iraq": ["EBL"],
-    "Island": ["KEF"],
-    "Israel": ["TLV"],
-    "Italy": ["AHO", "AOI", "BLQ", "BDS", "CTA", "CIY", "BGY", "MXP", "NAP", "OLB", "PEG", "PSR", "PSA", "QSR", "RMI", "CIA", "FCO", "TRS", "TRN", "VCE", "TSF", "VRN"],
-    "Jordan": ["AMM", "AQJ"],
-    "Kazakhstan": ["ALA", "NQZ", "HSA"],
-    "Kyrgyzstan": ["FRU"],
-    "Kosovo": ["PRN"],
-    "Latvia": ["RIX"],
-    "Lithuania": ["KUN", "VNO"],
-    "Malta": ["MLA"],
-    "Maldives": ["MLE"],
-    "Moldova": ["RMO"],
-    "Morocco": ["AGA", "RAK"],
-    "Netherlands": ["EIN"],
-    "North Macedonia": ["OHD", "SKP"],
-    "Oman": ["MCT", "SLL"],
-    "Poland": ["GDN", "KTW", "KRK", "LUZ", "POZ", "RDO", "RZE", "SZZ", "WAW", "WRO"],
-    "Portugal": ["FAO", "FNC", "LIS", "OPO"],
-    "Romania": ["BCM", "CLJ", "CND", "CRA", "IAS", "OTP", "SCV", "SUJ", "TSR", "TGM", "GHV", "SBZ", "BBU"],
-    "Saudi Arabia": ["DMM", "JED", "MED", "RUH"],
-    "Slovakia": ["BTS", "KSC", "TAT"],
-    "Slovenia": ["LJU"],
-    "Spain": ["ALC", "BCN", "CDT", "FUE", "GRO", "IBZ", "MAD", "AGP", "LPA", "PMI", "SDR", "SVQ", "TFS", "VLC", "ZAZ"],
-    "Sweden": ["ARN", "GOT", "MMX", "NYO"],
-    "Switzerland": ["BSL", "GVA"],
-    "Turkey": ["AYT", "IST", "ADB", "DLM", "KGS"],
-    "United Arab Emirates": ["AUH", "DXB"],
-    "United Kingdom": ["LTN", "LGW", "EDI", "BHX", "GLA", "LPL", "LBA"],
-    "Uzbekistan": ["SKD", "TAS"]
+// Initialize Dexie database (ensure the version and store definitions match your app)
+const db = new Dexie("FlightSearchCache");
+db.version(1).stores({
+  cache: 'key, timestamp'
+});
+db.version(2).stores({
+  cache: 'key, timestamp',
+  routes: '++id, departureStation'
+});
+
+// Mapping for multi-airport cities:
+// Keys are the city code used in autocomplete, values are arrays of actual airport codes.
+export const MULTI_AIRPORT_CITIES = {
+  "LON": ["LTN", "LGW"],
+  "PAR": ["ORY", "BVA"],
+  "MIL": ["MXP", "BGY"],
+  "ROM": ["FCO", "CIA"],
+  "VEN": ["VCE", "TSF"],
+  "CAM": ["NAP", "QSR"],
+  "OOS": ["OSL", "TRF"],
+  "STO": ["ARN", "NYO"],
+  "EAP": ["BSL", "MLH"],
+  "BUH": ["OTP", "BBU"]
 };
 
-export const airportFlags = {"ABZ": "🇬🇧", "AUH": "🇦🇪", "AGA": "🇲🇦", "AES": "🇳🇴", 
-    "HBE": "🇪🇬", "AHO": "🇮🇹", "ALC": "🇪🇸", "ALA": "🇰🇿", 
-    "AMM": "🇯🇴", "AOI": "🇮🇹", "AYT": "🇹🇷", "AQJ": "🇯🇴", 
-    "NQZ": "🇰🇿", "ATH": "🇬🇷", "BCM": "🇷🇴", "GYD": "🇦🇿", 
-    "BNX": "🇧🇦", "BCN": "🇪🇸", "BRI": "🇮🇹", "BSL": "🇨🇭", 
-    "MLH": "🇫🇷", "BEG": "🇷🇸", "BGO": "🇳🇴", "BER": "🇩🇪", 
-    "BIO": "🇪🇸", "BLL": "🇩🇰", "BHX": "🇬🇧", "FRU": "🇰🇬", 
-    "BLQ": "🇮🇹", "BOJ": "🇧🇬", "GHV": "🇷🇴", "BTS": "🇸🇰", 
-    "BRE": "🇩🇪", "BDS": "🇮🇹", "BRU": "🇧🇪", "CRL": "🇧🇪", 
-    "OTP": "🇷🇴", "BUD": "🇭🇺", "SPX": "🇪🇬", "CDT": "🇪🇸", 
-    "CTA": "🇮🇹", "CHQ": "🇬🇷", "RMO": "🇲🇩", "CLJ": "🇷🇴", 
-    "CGN": "🇩🇪", "CIY": "🇮🇹", "CND": "🇷🇴", "CPH": "🇩🇰", 
-    "CFU": "🇬🇷", "CRA": "🇷🇴", "DLM": "🇹🇷", "DMM": "🇸🇦", 
-    "DEB": "🇭🇺", "DTM": "🇩🇪", "DXB": "🇦🇪", "DBV": "🇭🇷", 
-    "EIN": "🇳🇱", "EBL": "🇮🇶", "FAO": "🇵🇹", "HHN": "🇩🇪", 
-    "FDH": "🇩🇪", "FUE": "🇪🇸", "FNC": "🇵🇹", "GDN": "🇵🇱", 
-    "GVA": "🇨🇭", "GOA": "🇮🇹", "GRO": "🇪🇸", "GLA": "🇬🇧", 
-    "GOT": "🇸🇪", "LPA": "🇪🇸", "GNB": "🇫🇷", "HAM": "🇩🇪", 
-    "HAU": "🇳🇴", "HER": "🇬🇷", "HRG": "🇪🇬", "IAS": "🇷🇴", 
-    "IBZ": "🇪🇸", "IST": "🇹🇷", "ADB": "🇹🇷", "JED": "🇸🇦", 
-    "FKB": "🇩🇪", "KTW": "🇵🇱", "KUN": "🇱🇹", "EFL": "🇬🇷", 
-    "KGS": "🇹🇷", "KSC": "🇸🇰", "KRK": "🇵🇱", "KUT": "🇬🇪", 
-    "LCA": "🇨🇾", "LBA": "🇬🇧", "LEJ": "🇩🇪", "LIS": "🇵🇹", 
-    "LPL": "🇬🇧", "LJU": "🇸🇮", "LGW": "🇬🇧", "LTN": "🇬🇧", 
-    "LUZ": "🇵🇱", "LYS": "🇫🇷", "MED": "🇸🇦", "MAD": "🇪🇸", 
-    "AGP": "🇪🇸", "MLE": "🇲🇻", "MMX": "🇸🇪", "MLA": "🇲🇹", 
-    "RAK": "🇲🇦", "RMF": "🇪🇬", "FMM": "🇩🇪", "BGY": "🇮🇹", 
-    "MXP": "🇮🇹", "MCT": "🇴🇲", "JMK": "🇬🇷", "NAP": "🇮🇹", 
-    "NCE": "🇫🇷", "INI": "🇷🇸", "NUE": "🇩🇪", "OHD": "🇲🇰", 
-    "OLB": "🇮🇹", "OSL": "🇳🇴", "TRF": "🇳🇴", "PMI": "🇪🇸", 
-    "BVA": "🇫🇷", "ORY": "🇫🇷", "PEG": "🇮🇹", "PSR": "🇮🇹", 
-    "PSA": "🇮🇹", "PDV": "🇧🇬", "TGD": "🇲🇪", "TAT": "🇸🇰", 
-    "OPO": "🇵🇹", "POZ": "🇵🇱", "PRG": "🇨🇿", "PRN": "🇽🇰", 
-    "RDO": "🇵🇱", "KEF": "🇮🇸", "RHO": "🇬🇷", "RIX": "🇱🇻", 
-    "RMI": "🇮🇹", "RUH": "🇸🇦", "CIA": "🇮🇹", "FCO": "🇮🇹", 
-    "RZE": "🇵🇱", "SLL": "🇴🇲", "QSR": "🇮🇹", "SZG": "🇦🇹", 
-    "SKD": "🇺🇿", "SDR": "🇪🇸", "JTR": "🇬🇷", "SJJ": "🇧🇦", 
-    "SUJ": "🇷🇴", "SVQ": "🇪🇸", "SSH": "🇪🇬", "SBZ": "🇷🇴", 
-    "JSI": "🇬🇷", "SKP": "🇲🇰", "SOF": "🇧🇬", "HMB": "🇪🇬", 
-    "SPU": "🇭🇷", "SVG": "🇳🇴", "ARN": "🇸🇪", "NYO": "🇸🇪", 
-    "STR": "🇩🇪", "SCV": "🇷🇴", "SZZ": "🇵🇱", "TLL": "🇪🇪", 
-    "TAS": "🇺🇿", "TLV": "🇮🇱", "TFS": "🇪🇸", "SKG": "🇬🇷", 
-    "TSR": "🇷🇴", "TIA": "🇦🇱", "TGM": "🇷🇴", "TRS": "🇮🇹", 
-    "TOS": "🇳🇴", "TRD": "🇳🇴", "TRN": "🇮🇹", "HSA": "🇰🇿", 
-    "TKU": "🇫🇮", "TZL": "🇧🇦", "VLC": "🇪🇸", "VAR": "🇧🇬", 
-    "VCE": "🇮🇹", "TSF": "🇮🇹", "VRN": "🇮🇹", "VIE": "🇦🇹", 
-    "VNO": "🇱🇹", "WAW": "🇵🇱", "WRO": "🇵🇱", "EVN": "🇦🇲", 
-    "ZTH": "🇬🇷", "ZAZ": "🇪🇸", "BBU": "🇷🇴"
+// Country flag mapping.
+const flagMapping = {
+  "Albania": "🇦🇱",
+  "Armenia": "🇦🇲",
+  "Austria": "🇦🇹",
+  "Azerbaijan": "🇦🇿",
+  "Belgium": "🇧🇪",
+  "Bosnia and Herzegovina": "🇧🇦",
+  "Bulgaria": "🇧🇬",
+  "Croatia": "🇭🇷",
+  "Cyprus": "🇨🇾",
+  "Czech Republic": "🇨🇿",
+  "Denmark": "🇩🇰",
+  "Egypt": "🇪🇬",
+  "Estonia": "🇪🇪",
+  "Finland": "🇫🇮",
+  "France": "🇫🇷",
+  "Georgia": "🇬🇪",
+  "Germany": "🇩🇪",
+  "Greece": "🇬🇷",
+  "Hungary": "🇭🇺",
+  "Iceland": "🇮🇸",
+  "Israel": "🇮🇱",
+  "Italy": "🇮🇹",
+  "Jordan": "🇯🇴",
+  "Kazakhstan": "🇰🇿",
+  "Kosovo": "🇽🇰",
+  "Kyrgyzstan": "🇰🇬",
+  "Latvia": "🇱🇻",
+  "Lebanon": "🇱🇧",
+  "Lithuania": "🇱🇹",
+  "Maldives": "🇲🇻",
+  "Malta": "🇲🇹",
+  "Moldova": "🇲🇩",
+  "Montenegro": "🇲🇪",
+  "Morocco": "🇲🇦",
+  "Netherlands": "🇳🇱",
+  "North Macedonia": "🇲🇰",
+  "Norway": "🇳🇴",
+  "Oman": "🇴🇲",
+  "Poland": "🇵🇱",
+  "Portugal": "🇵🇹",
+  "Romania": "🇷🇴",
+  "Saudi Arabia": "🇸🇦",
+  "Serbia": "🇷🇸",
+  "Slovakia": "🇸🇰",
+  "Slovenia": "🇸🇮",
+  "Spain": "🇪🇸",
+  "Sweden": "🇸🇪",
+  "Switzerland": "🇨🇭",
+  "Turkey": "🇹🇷",
+  "United Arab Emirates": "🇦🇪",
+  "United Kingdom": "🇬🇧",
+  "Uzbekistan": "🇺🇿"
 };
+
+// Helper to return the flag for a given country.
+function getCountryFlag(country) {
+  return flagMapping[country] || "";
+}
+
+// Helper to look up a display name for multi-airport cities.
+function cityNameLookup(cityCode) {
+  const mapping = {
+    "LON": "London (Any)",
+    "PAR": "Paris (Any)",
+    "MIL": "Milan (Any)",
+    "ROM": "Rome (Any)",
+    "VEN": "Venice (Any)",
+    "CAM": "Naples (Any)",
+    "OOS": "Oslo (Any)",
+    "STO": "Stockholm (Any)",
+    "EAP": "Basel (Any)",
+    "BUH": "Bucharest (Any)"
+  };
+  return mapping[cityCode] || cityCode;
+}
+
+/**
+ * Loads route data from the IndexedDB and builds the airports and country mappings.
+ * It reads departure station data from all routes and then augments the collection
+ * with additional multi-airport city entries defined in MULTI_AIRPORT_CITIES.
+ *
+ * @returns {Promise<{AIRPORTS: Array, COUNTRY_AIRPORTS: Object}>}
+ */
+export async function loadAirportsData() {
+  // Retrieve all routes from IndexedDB.
+  const routes = await db.routes.toArray();
+  const airportsMap = new Map();
+
+  // Process both departure and arrival stations.
+  routes.forEach(route => {
+    // Process departureStation.
+    const dep = route.departureStation;
+    if (dep && dep.id) {
+      airportsMap.set(dep.id, {
+        code: dep.id,
+        name: `${dep.name} (${dep.id})`,
+        country: dep.country,
+        flag: getCountryFlag(dep.country)
+      });
+    }
+    // Process each arrivalStation.
+    if (route.arrivalStations && Array.isArray(route.arrivalStations)) {
+      route.arrivalStations.forEach(arr => {
+        if (arr && arr.id && !airportsMap.has(arr.id)) {
+          airportsMap.set(arr.id, {
+            code: arr.id,
+            name: `${arr.name} (${arr.id})`,
+            country: arr.country,
+            flag: getCountryFlag(arr.country)
+          });
+        }
+      });
+    }
+  });
+
+  // Add multi-airport city entries.
+  Object.keys(MULTI_AIRPORT_CITIES).forEach(cityCode => {
+    const airportCodes = MULTI_AIRPORT_CITIES[cityCode];
+    let country = "";
+    for (let code of airportCodes) {
+      if (airportsMap.has(code)) {
+        country = airportsMap.get(code).country;
+        break;
+      }
+    }
+    airportsMap.set(cityCode, {
+      code: cityCode,
+      name: cityNameLookup(cityCode),
+      country: country,
+      flag: getCountryFlag(country)
+    });
+  });
+
+  // Convert map to a sorted array.
+  const AIRPORTS = Array.from(airportsMap.values()).sort((a, b) =>
+    a.code.localeCompare(b.code)
+  );
+
+  // Build a mapping of countries to their airport codes.
+  const COUNTRY_AIRPORTS = AIRPORTS.reduce((acc, airport) => {
+    if (!acc[airport.country]) {
+      acc[airport.country] = [];
+    }
+    acc[airport.country].push(airport.code);
+    return acc;
+  }, {});
+
+  return { AIRPORTS, COUNTRY_AIRPORTS };
+}

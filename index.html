@@ -39,6 +39,7 @@
            class="inline-flex items-center text-white bg-[#C90076] px-4 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition">
           ☕ Support this project
         </a>
+        <div>Ver. 1.6.0</div>
         <a href="https://github.com/deniam/AllYouCanFlyPro" target="_blank" rel="noopener noreferrer"
            class="inline-flex items-center text-white bg-[#20006D] px-4 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] transition">
           ⭐ GitHub
@@ -188,6 +189,7 @@
               <label class="block text-gray-700 font-medium mb-1">PREFERRED AIRPORT</label>
               <input type="text" id="preferred-airport" placeholder="Enter preferred airport"
                 class="w-full bg-gray-100 border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]">
+                <div id="airport-suggestions-preferred" class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
             </div>
 
             <!-- Connection Time (Centered Title & Smaller Inputs) -->
@@ -260,7 +262,7 @@
           </div>
           
             <div>
-              <button id="update-preferred-airport" class="w-full bg-[#20006D] text-white rounded px-4 py-2 hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076]">
+              <button id="update-preferred-airport" class="w-full bg-[#20006D] text-white rounded px-4 py-2 hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
                 UPDATE
               </button>
             </div>
@@ -304,9 +306,9 @@
     </div>
 
     <!-- Notification Message (Hidden by Default) -->
-    <div id="notification-banner" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-gray-200 text-black px-6 py-3 rounded-lg shadow-md transition-opacity duration-300 opacity-0 hidden">
+    <div id="notification-banner" class="hidden opacity-0 fixed bottom-5 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg transition-opacity duration-500">
       <span id="notification-text"></span>
-    </div>
+    </div>    
   </section>
 
   <!-- Main App Logic -->
