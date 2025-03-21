@@ -75,7 +75,7 @@ const flagMapping = {
   "Spain": "🇪🇸",
   "Sweden": "🇸🇪",
   "Switzerland": "🇨🇭",
-  "Turkey": "🇹🇷",
+  "Türkiye": "🇹🇷",
   "United Arab Emirates": "🇦🇪",
   "United Kingdom": "🇬🇧",
   "Uzbekistan": "🇺🇿"
