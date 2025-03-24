@@ -728,13 +728,18 @@ function setupAutocomplete(inputId, suggestionsId) {
    * otherwise, returns "Date1 - Date2".
    */
   function formatFlightDateCombined(depDate, arrDate) {
-    if (!(depDate instanceof Date) || !(arrDate instanceof Date)) return "";
-    if (depDate.toDateString() === arrDate.toDateString()) {
-      return formatFlightDateSingle(depDate);
+    const dep = typeof depDate === "string" ? parseServerDate(depDate) : depDate;
+    const arr = typeof arrDate === "string" ? parseServerDate(arrDate) : arrDate;
+  
+    if (!(dep instanceof Date) || !(arr instanceof Date)) return "";
+  
+    if (dep.toDateString() === arr.toDateString()) {
+      return formatFlightDateSingle(dep);
     } else {
-      return `${formatFlightDateSingle(depDate)} - ${formatFlightDateSingle(arrDate)}`;
+      return `${formatFlightDateSingle(dep)} - ${formatFlightDateSingle(arr)}`;
     }
   }
+  
 
   /**
    * Unifies a raw flight object from the server by recalculating the departure and arrival Date objects,
@@ -777,7 +782,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     
     const displayDep = convertTo24Hour(rawFlight.departure);
     const displayArr = convertTo24Hour(rawFlight.arrival);
-    const formattedFlightDate = formatFlightDateCombined(localDeparture, localArrival);
+    const formattedFlightDate = formatFlightDateCombined(rawFlight.departureDate, rawFlight.arrivalDate);
     const route = [rawFlight.departureStationText, rawFlight.arrivalStationText];
     
     return {
@@ -2533,7 +2538,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
 }
 
 function createSegmentRow(segment) {
-  const segmentDate = formatFlightDateCombined(segment.calculatedDuration.departureDate, segment.calculatedDuration.arrivalDate);
+  const segmentDate = segment.formattedFlightDate;
   const flightCode = formatFlightCode(segment.flightCode);
   const segmentHeader = `
     <div class="flex justify-between items-center mb-1">
