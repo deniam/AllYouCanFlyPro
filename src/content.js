@@ -1,13 +1,6 @@
-// src/content.js
-
-// Debug flag
-const debug = true;
-
-// Log as soon as the content script loads
-console.log("[Content.js] Content script loaded on URL:", window.location.href);
+const debug = false;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("[Content.js] Received message:", request, "from:", sender);
 
   try {
     if (request.action === "getDestinations") {
@@ -25,7 +18,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ error: err.message });
   }
 
-  return true; // Keep sendResponse alive for async
+  return true; 
 });
 
 function handleGetDestinations(sendResponse) {
@@ -43,10 +36,8 @@ function handleGetDestinations(sendResponse) {
 
       if (headMatch && headMatch[0]) {
         routesJson = `{"routes":${headMatch[0].split('"routes":')[1].split(',"isOneWayFlightsOnly"')[0]}}`;
-        debug && console.log("[Content.js] Extracted routes JSON from <head>");
       } else if (bodyMatch && bodyMatch[1]) {
         routesJson = `{"routes":${bodyMatch[1]}}`;
-        debug && console.log("[Content.js] Extracted routes JSON from window.CVO");
       }
 
       if (!routesJson) {
@@ -55,7 +46,6 @@ function handleGetDestinations(sendResponse) {
       }
 
       const parsed = JSON.parse(routesJson);
-      debug && console.log("[Content.js] Parsed routes:", parsed.routes);
       sendResponse({ success: true, routes: parsed.routes });
     } catch (e) {
       console.error("[Content.js] Error parsing routes:", e);
@@ -76,10 +66,8 @@ function handleGetDynamicUrl(sendResponse) {
       let dynamicUrl;
       if (headMatch && headMatch[1]) {
         dynamicUrl = `https://multipass.wizzair.com/w6/subscriptions/json/availability/${headMatch[1]}`;
-        debug && console.log("[Content.js] Extracted dynamicUrl from head:", dynamicUrl);
       } else if (bodyMatch && bodyMatch[1]) {
         dynamicUrl = bodyMatch[1];
-        debug && console.log("[Content.js] Extracted dynamicUrl from body:", dynamicUrl);
       }
 
       if (!dynamicUrl) {
@@ -107,7 +95,6 @@ function handleGetHeaders(sendResponse) {
         });
       }
     });
-    debug && console.log("[Content.js] Returning headers:", headers);
     sendResponse({ headers });
   } catch (e) {
     console.error("[Content.js] Error getting headers:", e);

@@ -1,6 +1,3 @@
-// src/background.js
-
-// Ждём, пока вкладка полностью загрузится
 function waitForTabToComplete(tabId) {
   return new Promise(resolve => {
     const listener = (updatedTabId, changeInfo) => {
@@ -13,7 +10,6 @@ function waitForTabToComplete(tabId) {
   });
 }
 
-// Принудительная инъекция контент‑скрипта
 async function ensureContentScriptInjected(tabId) {
   try {
     await chrome.scripting.executeScript({
@@ -26,7 +22,6 @@ async function ensureContentScriptInjected(tabId) {
   }
 }
 
-// Сохраняем контекст и открываем UI расширения
 function openExtensionTab(contextTab) {
   const extensionUrl = chrome.runtime.getURL("index.html");
   const context = { url: contextTab.url || "", title: contextTab.title || "", id: contextTab.id };
@@ -40,21 +35,17 @@ function openExtensionTab(contextTab) {
 chrome.action.onClicked.addListener(async (tab) => {
   const multipassUrl = "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
 
-  // Ищем вкладку multipass (любую, даже неактивную)
   const tabs = await chrome.tabs.query({ url: "https://multipass.wizzair.com/*" });
   let targetTab = tabs[0];
 
   if (!targetTab) {
-    // Если нет — создаём её неактивной
     targetTab = await new Promise(resolve =>
       chrome.tabs.create({ url: multipassUrl, active: false }, resolve)
     );
     await waitForTabToComplete(targetTab.id);
   }
 
-  // Убедимся, что контент‑скрипт готов
   await ensureContentScriptInjected(targetTab.id);
 
-  // Открываем UI расширения
   openExtensionTab(targetTab);
 });
