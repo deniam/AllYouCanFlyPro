@@ -1,47 +1,60 @@
-chrome.action.onClicked.addListener((tab) => {
-  const hasSidePanel = 'sidePanel' in chrome;
+// src/background.js
+
+// Ждём, пока вкладка полностью загрузится
+function waitForTabToComplete(tabId) {
+  return new Promise(resolve => {
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+// Принудительная инъекция контент‑скрипта
+async function ensureContentScriptInjected(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["src/content.js"]
+    });
+    await new Promise(r => setTimeout(r, 300));
+  } catch (err) {
+    console.error("Error injecting content script:", err);
+  }
+}
+
+// Сохраняем контекст и открываем UI расширения
+function openExtensionTab(contextTab) {
+  const extensionUrl = chrome.runtime.getURL("index.html");
+  const context = { url: contextTab.url || "", title: contextTab.title || "", id: contextTab.id };
+  chrome.storage.local.set({ currentTabContext: context }, () =>
+    chrome.tabs.create({ url: extensionUrl, active: true }, newTab =>
+      console.log("Extension UI opened:", newTab)
+    )
+  );
+}
+
+chrome.action.onClicked.addListener(async (tab) => {
   const multipassUrl = "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
 
-  // Immediately open the side panel in response to the user click.
-  // This call is synchronous and preserves the user gesture.
-  if (hasSidePanel) {
-    chrome.sidePanel.open({ windowId: tab.windowId }).catch((err) => {
-      console.error("Side panel error:", err);
-    });
-    chrome.sidePanel.setOptions({
-      enabled: true,
-      path: chrome.runtime.getURL('index.html')
-    }).catch((err) => {
-      console.error("Side panel error:", err);
-    });
+  // Ищем вкладку multipass (любую, даже неактивную)
+  const tabs = await chrome.tabs.query({ url: "https://multipass.wizzair.com/*" });
+  let targetTab = tabs[0];
+
+  if (!targetTab) {
+    // Если нет — создаём её неактивной
+    targetTab = await new Promise(resolve =>
+      chrome.tabs.create({ url: multipassUrl, active: false }, resolve)
+    );
+    await waitForTabToComplete(targetTab.id);
   }
 
-  // Now, if the current tab is not already multipass, asynchronously create one.
-  if (!(tab.url && tab.url.includes(multipassUrl))) {
-    // Check if the current window is normal.
-    chrome.windows.get(tab.windowId, (currentWindow) => {
-      if (currentWindow && currentWindow.type === "normal") {
-        // Create the multipass tab in the current (normal) window.
-        chrome.tabs.create({
-          url: multipassUrl,
-          windowId: currentWindow.id,
-          active: true
-        }, (newTab) => {
-          console.log("New multipass tab created in current normal window:", newTab);
-        });
-      } else {
-        // If not normal, find a normal window and create the tab there.
-        chrome.windows.getAll({ windowTypes: ["normal"] }, (windows) => {
-          const targetWindowId = (windows && windows.length > 0) ? windows[0].id : tab.windowId;
-          chrome.tabs.create({
-            url: multipassUrl,
-            windowId: targetWindowId,
-            active: true
-          }, (newTab) => {
-            console.log("New multipass tab created in normal window:", newTab);
-          });
-        });
-      }
-    });
-  }
+  // Убедимся, что контент‑скрипт готов
+  await ensureContentScriptInjected(targetTab.id);
+
+  // Открываем UI расширения
+  openExtensionTab(targetTab);
 });
