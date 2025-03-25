@@ -87,7 +87,7 @@ function getCountryFlag(country) {
 }
 
 // Helper to look up a display name for multi-airport cities.
-function cityNameLookup(cityCode) {
+export function cityNameLookup(cityCode) {
   const mapping = {
     "LON": "London (Any)",
     "PAR": "Paris (Any)",

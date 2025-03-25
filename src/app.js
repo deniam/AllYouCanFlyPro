@@ -1,9 +1,9 @@
 import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
-import { loadAirportsData, MULTI_AIRPORT_CITIES } from './data/airports.js';
+import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -608,34 +608,32 @@ function setupAutocomplete(inputId, suggestionsId) {
   function resolveAirport(input) {
     if (!input) return [];
     
-    // Detect pattern like "CityName (Any)" ignoring case.
     const anyPattern = /(.+)\(any\)/i;
     if (anyPattern.test(input)) {
+      for (const key in MULTI_AIRPORT_CITIES) {
+        if (cityNameLookup(key).toLowerCase() === input.toLowerCase()) {
+          return MULTI_AIRPORT_CITIES[key];
+        }
+      }
       const match = input.match(anyPattern);
-      const cityName = match[1].trim(); // e.g., "London"
-      // Derive a multi‑airport key by taking the first 3 letters (uppercased)
-      const cityCode = cityName.substring(0, 3).toUpperCase();
-      if (MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[cityCode]) {
-        return MULTI_AIRPORT_CITIES[cityCode];
+      if (match && match[1]) {
+        const cityPart = match[1].trim();
+        const derivedKey = cityPart.substring(0, 3).toUpperCase();
+        if (MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[derivedKey]) {
+          return MULTI_AIRPORT_CITIES[derivedKey];
+        }
       }
     }
-    
-    // If input contains a code in parentheses (e.g., "London (LTN)"), extract it.
     const codeMatch = input.match(/\(([A-Z]{3})\)/i);
     if (codeMatch) {
       input = codeMatch[1];
     }
-    
     const trimmed = input.trim();
-    
-    // Treat "any" or "anywhere" as wildcard.
     if (trimmed.toLowerCase() === "any" || trimmed.toLowerCase() === "anywhere") {
       return ["ANY"];
     }
-    
     const lower = trimmed.toLowerCase();
     
-    // If input is exactly 3 characters, try to resolve by code.
     if (trimmed.length === 3) {
       const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
       if (byCode) {
@@ -643,20 +641,17 @@ function setupAutocomplete(inputId, suggestionsId) {
       }
     }
     
-    // Check if input exactly matches a country name.
     for (const country in COUNTRY_AIRPORTS) {
       if (country.toLowerCase() === lower) {
         return COUNTRY_AIRPORTS[country];
       }
     }
     
-    // Fallback: try to match by code.
     const fallbackByCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
     if (fallbackByCode) {
       return expandMultiAirport([fallbackByCode.code]);
     }
     
-    // Otherwise, search by matching airport names.
     const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
     if (matches.length > 0) {
       const codes = matches.map(a => a.code);
@@ -665,6 +660,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     
     return [input.toUpperCase()];
   }
+  
 
       /**
  * Parses a 12‑hour time string (e.g., "11:20 pm") and returns an object {hour, minute} in 24‑hour format.
@@ -2491,7 +2487,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
+        <button class="continue-payment-button external-link px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
           Continue to Payment
         </button>
       </div>
@@ -2520,7 +2516,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+        <button class="continue-payment-button external-link px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
           Continue to Payment
         </button>
       </div>
@@ -2957,43 +2953,56 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.continueToPayment = async function(outboundKey) {
     try {
-        const dynamicUrl = await getDynamicUrl(); // Fetch the dynamic URL
-        if (debug) console.log("dynamicUrl for payment:", dynamicUrl);
-        
-        const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
-        if (!subscriptionId) {
-            console.error("Failed to extract subscription ID from:", dynamicUrl);
-            return;
+      const dynamicUrl = await refreshDynamicUrl();
+      const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
+      const confirmationUrl = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
+      chrome.tabs.create({ url: confirmationUrl, active: true }, (newTab) => {
+        if (chrome.runtime.lastError) {
+          console.error("Error creating tab:", chrome.runtime.lastError.message);
+          return;
         }
-
-        const url = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
-        if (debug) console.log("Using subscription ID:", subscriptionId);
-        if (debug) console.log("Final Payment URL (without sending request):", url);
-
-        const form = document.createElement("form");
-        form.method = "POST";
-        form.action = url;
-        form.target = "_blank";
-
-        // Send outboundKey as POST data
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = "outboundKey";
-        input.value = outboundKey;
-        form.appendChild(input);
-
-        if (debug) console.log("Form data:", { outboundKey: input.value });
-        if (debug) console.log("Generated form:", form);
-        if (debug) console.log("Form Action (Final URL):", form.action);
-        if (debug) console.log("Form Data:", { outboundKey: input.value });
-        document.body.appendChild(form);
-        form.submit();
-        document.body.removeChild(form);
-    } catch (error) {
-        console.error("Error in continueToPayment:", error);
+        const listener = (tabId, changeInfo, tab) => {
+          if (tabId === newTab.id && changeInfo.status === "complete") {
+            setTimeout(() => {
+              chrome.scripting.executeScript({
+                target: { tabId: newTab.id },
+                func: (outboundKey, url) => {
+                  const form = document.createElement('form');
+                  form.method = 'POST';
+                  form.action = url;
+                  const input = document.createElement('input');
+                  input.type = 'hidden';
+                  input.name = 'outboundKey';
+                  input.value = outboundKey;
+                  form.appendChild(input);
+                  document.body.appendChild(form);
+                  form.submit();
+                },
+                args: [ outboundKey, confirmationUrl ]
+              }, () => {
+                if (chrome.runtime.lastError) {
+                  console.error("Error executing script:", chrome.runtime.lastError.message);
+                } else {
+                  console.log("Payment form submitted via executeScript");
+                }
+              });
+            }, 2000);
+            chrome.tabs.onUpdated.removeListener(listener);
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+      });
+    } catch (err) {
+      console.error('continueToPayment error:', err);
     }
-};
- 
+  };
+  
+  async function refreshDynamicUrl() {
+    localStorage.removeItem("wizz_page_data");
+    await refreshMultipassTab();
+    return await getDynamicUrl();
+  }
+
   
   // ---------------- Initialize on DOMContentLoaded ----------------
   
@@ -3270,6 +3279,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const outboundKey = btn.getAttribute("data-outbound-key");
         continueToPayment(outboundKey);
       }
-    });    
+    }); 
+    document.querySelectorAll('.external-link').forEach(link => {
+      link.addEventListener('click', e => {
+        e.preventDefault();
+        window.open(link.href, '_blank');
+      });
+    });   
   });
   

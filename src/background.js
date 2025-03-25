@@ -26,8 +26,7 @@ function openExtensionTab(contextTab) {
   const extensionUrl = chrome.runtime.getURL("index.html");
   const context = { url: contextTab.url || "", title: contextTab.title || "", id: contextTab.id };
   chrome.storage.local.set({ currentTabContext: context }, () =>
-    chrome.tabs.create({ url: extensionUrl, active: true }, newTab =>
-      console.log("Extension UI opened:", newTab)
+    chrome.tabs.create({ url: extensionUrl, active: true }
     )
   );
 }

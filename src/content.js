@@ -1,5 +1,25 @@
 const debug = false;
 
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "aycf_submitPaymentForm") {
+      console.log("AYCF content script received message:", message);
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = message.url;
+  
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'outboundKey';
+      input.value = message.outboundKey;
+      form.appendChild(input);
+  
+      document.body.appendChild(form);
+      form.submit();
+      sendResponse({ status: "submitted" });
+      return true;
+    }
+  });
+  
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   try {
