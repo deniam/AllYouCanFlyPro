@@ -10,13 +10,15 @@
 
 ## 🔥 What's New?
 
-- **📍 Updated & Comprehensive Route List:** Now includes all new destinations available in the Multipass PDF, even those missing from the official website dropdown​routes.
-- **⚡ Optimized & Faster Search Algorithm:**
-Searches only for flights available on selected dates.
-Excludes unavailable routes from search results, ensuring accurate availability​app.
-- **💳 Direct Booking Integration:**
-Instantly proceed to payment for selected flights directly from the search results.
-No more manual searching on the airline’s website—book your flights with a single click​
+Major update to version 2.0.0:
+1) Implemented support of mobile browsers (tested on iOS 18.3.2, Orion Browser by Kagi 1.3.19).
+2) Switched layout from sidePanel to newTab.
+3) Added built-in emoji-pack (Twemoji.js); now emojis render on all platforms.
+4) New UI for desktop / adjusted UI mobile screens.
+5) Redisgned the logic of "Continue to payment" button to make it work in Orion / mobile browsers
+6) Changed restriction for searching routes with "Anywhere" to allow searches up to 1 stops.
+7) Fixed bug for some cities (Bucharest (Any), Oslo (Any), Venice (Any) now recognise correctly)
+6) Fixed bugs and errors handling
 
 ## ✨ Features
 
