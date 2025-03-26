@@ -3,9 +3,19 @@
 <head>
   <meta charset="utf-8">
   <title>All You Can Fly Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Tailwind CSS -->
   <script src="./assets/css/tailwind_cdn_409.js"></script>
+  <script src="assets/emojis/twemoji.min.js"></script>
+  <script src="assets/twemoji-init.js"></script>
   <style>
+      @keyframes subtlePink {
+      0%, 100% { background-color: #C90076; }
+      50% { background-color: #a30268; }
+    }
+    .support-animation {
+      animation: subtlePink 6s infinite alternate ease-in-out;
+    }
     /* Custom style for the UI scale slider thumb */
     #ui-scale::-webkit-slider-thumb {
       -webkit-appearance: none;
@@ -28,21 +38,27 @@
       padding: 1rem;
       margin-top: 0.25rem;
     }
+    img.emoji {
+    width: 1em;
+    height: 1em;
+    vertical-align: text-bottom;
+    }
   </style>
 </head>
 <body class="bg-gray-50">
   <section class="pt-0">
-    <div class="max-w-3xl mx-auto px-4">
+    <div class="container mx-auto px-4 lg:flex lg:space-x-6">
+      <div class="lg:w-1/2 space-y-4">
       <!-- Donation & GitHub Links -->
       <div class="flex justify-between items-center p-4 bg-gray-100 rounded-md shadow-md mb-4">
-        <a href="https://ko-fi.com/denya24" target="_blank" rel="noopener noreferrer"
-           class="inline-flex items-center text-white bg-[#C90076] px-4 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition">
+        <a href="https://revolut.me/denya24" target="_blank" rel="noopener noreferrer"
+          class="external-link support-animation inline-flex items-center gap-1 justify-center flex-shrink-0 whitespace-nowrap text-white bg-[#C90076] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition mr-2">
           ☕ Support this project
         </a>
-        <div>Ver. 1.6.0</div>
+        <div>Ver. 1.7.0</div>
         <a href="https://github.com/deniam/AllYouCanFlyPro" target="_blank" rel="noopener noreferrer"
-           class="inline-flex items-center text-white bg-[#20006D] px-4 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] transition">
-          ⭐ GitHub
+           class="external-link inline-flex items-center gap-1 justify-center flex-shrink-0 whitespace-nowrap text-white bg-[#20006D] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] transition">
+          ⭐  GitHub
         </a>
       </div>
 
@@ -83,7 +99,6 @@
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
             <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
           </svg>
-          
         </button>
 
         <!-- Destination Input -->
@@ -99,21 +114,17 @@
       <div class="mb-2 flex gap-1 items-center">
         <!-- Departure Date Container -->
         <div class="flex-1 relative">
-          <!-- <label for="departure-date" class="block text-sm font-medium text-gray-700 mb-1">Departure Date</label> -->
           <input type="text" id="departure-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Departure Date">
           <div id="departure-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
         </div>
         <!-- Return Date / Add Return Date Button Container -->
         <div class="flex-1 relative" id="return-date-wrapper">
-          <!-- Initially show the Add Return Date button -->
           <div id="add-return-date-button-container">
             <button id="trip-type-toggle" class="flex items-center justify-center w-full gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
               <span id="trip-type-text">Add Return Date</span>
             </button>
           </div>
-          <!-- Return Date Container (hidden by default) -->
           <div id="return-date-container" style="display: none;">
-            <!-- <label for="return-date" class="block text-sm font-medium text-gray-700 mb-1">Return Date</label> -->
             <div class="flex items-center">
               <input type="text" id="return-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Return Date">
               <button id="remove-return-date" class="ml-1 p-1 bg-[#20006D] text-white text-xs rounded-lg hover:bg-[#A00065] flex items-center justify-center w-5 h-5 shadow-md transition cursor-pointer">
@@ -125,19 +136,15 @@
         </div>
       </div>
 
-            <!-- Search, Stopover Options, and Options Buttons -->
+      <!-- Search, Stopover Options, and Options Buttons -->
       <div class="mb-4 flex items-center justify-between">
-        <!-- Search Flights Button -->
-        <button id="search-button" class="flex items-center gap-1 px-3 py-3 bg-[#C90076] text-white text-medium font-large font-bold rounded-lg hover:bg-[#A00065] focus:outline-none transition cursor-pointer">
+        <button id="search-button" class="flex items-center gap-1 px-3 py-3 bg-[#C90076] text-white text-medium font-bold rounded-lg hover:bg-[#A00065] focus:outline-none transition cursor-pointer">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
             <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
           </svg>
           SEARCH
         </button>
-
-        <!-- Right Section: Stopovers and Options -->
         <div class="flex items-center gap-2">
-          <!-- Stopover Options Dropdown -->
           <div class="relative">
             <button id="stopover-dropdown-button" class="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition cursor-pointer">
               <span id="selected-stopover">Non-stop only</span>
@@ -145,9 +152,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
               </svg>
             </button>
-            
-            <!-- Stopover Options Dropdown Content -->
-            <div id="stopover-dropdown" class="absolute right-0 mt-2 w-56 bg-white border border-gray-300 rounded-lg shadow-lg hidden z-10">
+            <div id="stopover-dropdown" class="absolute left-0 mt-2 w-full bg-white border border-gray-300 rounded-lg shadow-lg hidden z-10">
               <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
                 <input type="radio" name="stopover" class="hidden" value="Non-stop only" checked>
                 <span>Non-stop only</span>
@@ -157,44 +162,35 @@
                 <span>One stop or fewer</span>
               </label>
               <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
-                <input type="radio" name="stopover" class="hidden" value="One stop (overnight)">
+                <input type="radio" name="stopover" class="hidden" value="One stop or fewer (overnight)">
                 <span>One stop (overnight)</span>
               </label>
               <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
-                <input type="radio" name="stopover" class="hidden" value="Two stops or fewer">
+                <input type="radio" name="stopover" class="hidden" value="Two stops or fewer (overnight)">
                 <span>Two stops or fewer</span>
               </label>
             </div>
           </div>
-
-          <!-- Options Button -->
           <button id="toggle-options" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0h9.75" />
             </svg>
             OPTIONS
           </button>
         </div>
       </div>
 
-      <!-- Options Toggle (Entire Options Hidden by Default) -->
+      <!-- Options Panel -->
       <div class="mb-4">
-        <!-- Options Panel (Hidden by Default) -->
         <div id="options-container" class="mt-3 hidden space-y-4 p-4 rounded-md border-2 border-[#20006D]">
-          <!-- Basic Options: Preferred Airport, Connection Times, and Stopover Options -->
-          <!-- Preferred Airport, Connection Time, and Clear Cache in One Line -->
           <div class="flex items-end justify-between gap-4">
-            <!-- Preferred Airport (Takes More Space) -->
             <div class="flex-1 relative">
               <label class="block text-gray-700 font-medium mb-1">PREFERRED AIRPORT</label>
               <input type="text" id="preferred-airport" placeholder="Enter preferred airport"
                 class="w-full bg-gray-100 border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]">
-                <div id="airport-suggestions-preferred" class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
+              <div id="airport-suggestions-preferred" class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
             </div>
-
-            <!-- Connection Time (Centered Title & Smaller Inputs) -->
             <div class="flex flex-col items-center">
-              <!-- Centered Header -->
               <label class="block text-gray-700 font-medium mb-1 text-center">Connection (minutes)</label>
               <div class="flex items-center gap-1">
                 <div class="flex flex-col items-center">
@@ -209,8 +205,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- Clear Cache Button (Right Aligned & Auto Width) -->
             <button id="clear-cache-button"
               class="px-2 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 whitespace-nowrap self-end cursor-pointer">
               <div>CLEAR</div>
@@ -218,49 +212,44 @@
             </button>
           </div>
 
-
-          <!-- UI Scale & Update Button -->
           <div class="grid grid-cols-1 gap-3">
             <div class="mt-0">
               <label class="block text-sm font-medium text-gray-700 mb-1">UI Scale</label>
               <div class="relative w-full h-2 rounded-full overflow-hidden">
                 <div class="absolute inset-0 pointer-events-none bg-gradient-to-r from-[#20006D] to-[#C90076]"></div>
-                <input type="range" id="ui-scale" min="50" max="100" value="85"
+                <input type="range" id="ui-scale" min="50" max="200" value="125"
                   class="relative w-full appearance-none h-2 bg-transparent cursor-pointer">
               </div>
             </div>
-          <!-- Expert Settings Toggle -->
-          <div>
-            <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-3 py-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
-              SHOW EXPERT SETTINGS
-            </button>
-            <!-- Expert Settings (Hidden by Default) -->
-            <div id="expert-settings" class="mt-3 hidden border-t pt-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-gray-700 font-medium mb-1">Max Requests in Row:</label>
-                  <input type="number" id="max-requests" value="25"
-                    class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
-                </div>
-                <div>
-                  <label class="block text-gray-700 font-medium mb-1">Requests Frequency (ms):</label>
-                  <input type="number" id="requests-frequency" value="1200"
-                    class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
-                </div>
-                <div>
-                  <label class="block text-gray-700 font-medium mb-1">Pause Duration (sec):</label>
-                  <input type="number" id="pause-duration" value="15"
-                    class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
-                </div>
-                <div>
-                  <label class="block text-gray-700 font-medium mb-1">Cache Lifetime (hrs):</label>
-                  <input type="number" id="cache-lifetime" value="4"
-                    class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
+            <div>
+              <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-3 py-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
+                SHOW EXPERT SETTINGS
+              </button>
+              <div id="expert-settings" class="mt-3 hidden border-t pt-3">
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-gray-700 font-medium mb-1">Max Requests in Row:</label>
+                    <input type="number" id="max-requests" value="25"
+                      class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
+                  </div>
+                  <div>
+                    <label class="block text-gray-700 font-medium mb-1">Requests Frequency (ms):</label>
+                    <input type="number" id="requests-frequency" value="1200"
+                      class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
+                  </div>
+                  <div>
+                    <label class="block text-gray-700 font-medium mb-1">Pause Duration (sec):</label>
+                    <input type="number" id="pause-duration" value="15"
+                      class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
+                  </div>
+                  <div>
+                    <label class="block text-gray-700 font-medium mb-1">Cache Lifetime (hrs):</label>
+                    <input type="number" id="cache-lifetime" value="4"
+                      class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          
             <div>
               <button id="update-preferred-airport" class="w-full bg-[#20006D] text-white rounded px-4 py-2 hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
                 UPDATE
@@ -269,49 +258,45 @@
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- Results and Sort Container (initially hidden) -->
-      <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
-        <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>
+    <div class="lg:w-1/2 space-y-4">
+      <div id="results-and-sort-container" class="flex hidden lg:block justify-between items-center mb-4">
+        <p id="total-results" class="text-lg lg:block font-semibold text-[#20006D] mb-0">Total results: 0</p>
         <button id="download-csv-button" class="px-2 py-1 bg-[#20006D] text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden">
           ⬇️ CSV
         </button>
-          <div class="relative w-32">
-            <select id="sort-select" class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 pr-10 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer appearance-none">
-                <option value="default" selected>Default</option>
-                <option value="airport">Departure Airport</option>
-                <option value="departure">Departure Time</option>
-                <option value="arrival">Arrival Time</option>
-                <option value="duration">Trip Length</option>
-            </select>
-            <svg xmlns="http://www.w3.org/2000/svg" class="absolute right-2 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-600 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
-            </svg>
+        <div class="relative w-32">
+          <select id="sort-select" class="block lg:block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 pr-10 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer appearance-none">
+            <option value="default" selected>Default</option>
+            <option value="airport">Departure Airport</option>
+            <option value="departure">Departure Time</option>
+            <option value="arrival">Arrival Time</option>
+            <option value="duration">Trip Length</option>
+          </select>
+          <svg xmlns="http://www.w3.org/2000/svg" class="absolute right-2 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-600 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+          </svg>
         </div>      
       </div>
 
-      <!-- Progress Display -->
-      <div id="progress-container" class="bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4 hidden">
+      <div id="progress-container" class="hidden lg:block bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4">
         <p id="progress-text" class="mb-2 font-medium"></p>
         <div class="w-full bg-gray-300 rounded-full overflow-hidden">
-          <div id="progress-bar" class="bg-[#20006D] h-2" style="width: 0%;"></div>
+          <div id="progress-bar" class="hidden lg:block bg-[#20006D] h-2" style="width: 0%;"></div>
         </div>
       </div>
 
-      <!-- Timeout Status Display -->
-      <div id="timeout-status" class="bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4 hidden"></div>
+      <div id="timeout-status" class="hidden lg:block bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4"></div>
 
-      <!-- Results Display -->
       <div class="route-list"></div>
     </div>
 
-    <!-- Notification Message (Hidden by Default) -->
-    <div id="notification-banner" class="hidden opacity-0 fixed bottom-5 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg transition-opacity duration-500">
+    <div id="notification-banner" class="hidden opacity-0 lg:block fixed bottom-5 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg transition-opacity duration-500">
       <span id="notification-text"></span>
-    </div>    
+    </div>
+  </div>
   </section>
-
-  <!-- Main App Logic -->
   <script type="module" src="src/app.js"></script>
 </body>
 </html>

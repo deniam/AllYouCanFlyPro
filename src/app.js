@@ -1,6 +1,6 @@
 import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
-import { loadAirportsData, MULTI_AIRPORT_CITIES } from './data/airports.js';
+import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
   let debug = false;
@@ -26,6 +26,16 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES } from './data/airports.js';
   let COUNTRY_AIRPORTS = {};
   let airportFlags = {};
 
+    //---------DixieDB Initialisation------------------
+    const db = new Dexie("FlightSearchCache");
+    db.version(1).stores({
+      cache: 'key, timestamp'  // 'key' is our primary key; we also index the timestamp
+    });
+    db.version(2).stores({
+      cache: 'key, timestamp',
+      routes: '++id, departureStation'
+    });
+
   async function initAirports() {
     try {
       const { AIRPORTS: loadedAirports, COUNTRY_AIRPORTS: loadedCountryAirports } = await loadAirportsData();
@@ -48,20 +58,35 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES } from './data/airports.js';
       console.error("Error loading airports data:", error);
     }
   }
-  
-  initAirports();
-  
-  
+  // Restore saved tab context (supports Chrome and Orion)
+  const storageApi = (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)
+    ? chrome.storage.local
+    : (typeof browser !== 'undefined' && browser.storage && browser.storage.local)
+      ? browser.storage.local
+      : null;
+    
+  if (storageApi) {
+    storageApi.get("currentTabContext", (result) => {
+      const ctx = result?.currentTabContext;
+      if (ctx) {
+        window.currentTabContext = ctx;
+        const tabInfoEl = document.getElementById("tab-info");
+        if (tabInfoEl) tabInfoEl.textContent = `Current Tab: ${ctx.title} (${ctx.url})`;
+        storageApi.remove("currentTabContext");
+      }
+    });
+  } else {
+    // Fallback for Orion: use localStorage
+    const saved = JSON.parse(localStorage.getItem("currentTabContext") || "{}");
+    if (saved.currentTabContext) {
+      window.currentTabContext = saved.currentTabContext;
+      const tabInfoEl = document.getElementById("tab-info");
+      if (tabInfoEl) tabInfoEl.textContent = `Current Tab: ${saved.currentTabContext.title} (${saved.currentTabContext.url})`;
+      localStorage.removeItem("currentTabContext");
+    }
+  }
 
-  //---------DixieDB Initialisation------------------
-    const db = new Dexie("FlightSearchCache");
-  db.version(1).stores({
-    cache: 'key, timestamp'  // 'key' is our primary key; we also index the timestamp
-  });
-  db.version(2).stores({
-    cache: 'key, timestamp',
-    routes: '++id, departureStation'
-  });
+  initAirports();
 
   async function importRoutes() {
     try {
@@ -544,10 +569,12 @@ function setupAutocomplete(inputId, suggestionsId) {
   });
 
   // Update suggestions as the user types.
-  inputEl.addEventListener("input", () => {
-    const query = inputEl.value.trim().toLowerCase();
+  inputEl.addEventListener("input", (e) => {
+    const query = e.target.value.trim().toLowerCase();
+    console.log("Query:", query);
     showSuggestions(query);
   });
+
 
   // Hide suggestions when clicking outside.
   document.addEventListener("click", event => {
@@ -568,7 +595,7 @@ function setupAutocomplete(inputId, suggestionsId) {
       .map(input => (input.value || "").trim())
       .filter(val => val !== "");
   }
-  
+
     // Helper to expand multi-airport city codes
   function expandMultiAirport(codes) {
     if (codes.length === 1 && MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[codes[0].toUpperCase()]) {
@@ -577,39 +604,36 @@ function setupAutocomplete(inputId, suggestionsId) {
       return expanded;
     }
     return codes;
-  }
-
+  }  
   function resolveAirport(input) {
     if (!input) return [];
     
-    // Detect pattern like "CityName (Any)" ignoring case.
     const anyPattern = /(.+)\(any\)/i;
     if (anyPattern.test(input)) {
+      for (const key in MULTI_AIRPORT_CITIES) {
+        if (cityNameLookup(key).toLowerCase() === input.toLowerCase()) {
+          return MULTI_AIRPORT_CITIES[key];
+        }
+      }
       const match = input.match(anyPattern);
-      const cityName = match[1].trim(); // e.g., "London"
-      // Derive a multi‑airport key by taking the first 3 letters (uppercased)
-      const cityCode = cityName.substring(0, 3).toUpperCase();
-      if (MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[cityCode]) {
-        return MULTI_AIRPORT_CITIES[cityCode];
+      if (match && match[1]) {
+        const cityPart = match[1].trim();
+        const derivedKey = cityPart.substring(0, 3).toUpperCase();
+        if (MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[derivedKey]) {
+          return MULTI_AIRPORT_CITIES[derivedKey];
+        }
       }
     }
-    
-    // If input contains a code in parentheses (e.g., "London (LTN)"), extract it.
     const codeMatch = input.match(/\(([A-Z]{3})\)/i);
     if (codeMatch) {
       input = codeMatch[1];
     }
-    
     const trimmed = input.trim();
-    
-    // Treat "any" or "anywhere" as wildcard.
     if (trimmed.toLowerCase() === "any" || trimmed.toLowerCase() === "anywhere") {
       return ["ANY"];
     }
-    
     const lower = trimmed.toLowerCase();
     
-    // If input is exactly 3 characters, try to resolve by code.
     if (trimmed.length === 3) {
       const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
       if (byCode) {
@@ -617,20 +641,17 @@ function setupAutocomplete(inputId, suggestionsId) {
       }
     }
     
-    // Check if input exactly matches a country name.
     for (const country in COUNTRY_AIRPORTS) {
       if (country.toLowerCase() === lower) {
         return COUNTRY_AIRPORTS[country];
       }
     }
     
-    // Fallback: try to match by code.
     const fallbackByCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
     if (fallbackByCode) {
       return expandMultiAirport([fallbackByCode.code]);
     }
     
-    // Otherwise, search by matching airport names.
     const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
     if (matches.length > 0) {
       const codes = matches.map(a => a.code);
@@ -728,13 +749,18 @@ function setupAutocomplete(inputId, suggestionsId) {
    * otherwise, returns "Date1 - Date2".
    */
   function formatFlightDateCombined(depDate, arrDate) {
-    if (!(depDate instanceof Date) || !(arrDate instanceof Date)) return "";
-    if (depDate.toDateString() === arrDate.toDateString()) {
-      return formatFlightDateSingle(depDate);
+    const dep = typeof depDate === "string" ? parseServerDate(depDate) : depDate;
+    const arr = typeof arrDate === "string" ? parseServerDate(arrDate) : arrDate;
+  
+    if (!(dep instanceof Date) || !(arr instanceof Date)) return "";
+  
+    if (dep.toDateString() === arr.toDateString()) {
+      return formatFlightDateSingle(dep);
     } else {
-      return `${formatFlightDateSingle(depDate)} - ${formatFlightDateSingle(arrDate)}`;
+      return `${formatFlightDateSingle(dep)} - ${formatFlightDateSingle(arr)}`;
     }
   }
+  
 
   /**
    * Unifies a raw flight object from the server by recalculating the departure and arrival Date objects,
@@ -777,7 +803,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     
     const displayDep = convertTo24Hour(rawFlight.departure);
     const displayArr = convertTo24Hour(rawFlight.arrival);
-    const formattedFlightDate = formatFlightDateCombined(localDeparture, localArrival);
+    const formattedFlightDate = formatFlightDateCombined(rawFlight.departureDate, rawFlight.arrivalDate);
     const route = [rawFlight.departureStationText, rawFlight.arrivalStationText];
     
     return {
@@ -912,12 +938,28 @@ function setupAutocomplete(inputId, suggestionsId) {
     return new Promise((resolve) => {
       // Instead of querying the active tab, query any tab with the multipass URL.
       chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
+        if (chrome.runtime.lastError) {
+          console.error("sendMessage error:", chrome.runtime.lastError.message);
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
         if (tabs && tabs.length > 0) {
           // Use the first multipass tab found.
           const multipassTab = tabs[0];
           chrome.tabs.sendMessage(multipassTab.id, { action: "getHeaders" }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.error("sendMessage error:", chrome.runtime.lastError.message);
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
             if (response && response.headers) {
               resolve(response.headers);
+              console.log("Message response:", response);
+            } else if
+              (chrome.runtime.lastError) {
+                console.error("sendMessage error:", chrome.runtime.lastError.message);
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
             } else {
               resolve(null);
             }
@@ -1189,76 +1231,30 @@ function setupAutocomplete(inputId, suggestionsId) {
     } catch (error) {
       console.error("Error fetching destinations:", error);
       return [];
+    }
   }
   
-  
-    // If no valid cache, query the multipass tab.
-    // return new Promise((resolve, reject) => {
-    //   chrome.tabs.query({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/*" }, async (tabs) => {
-    //     let multipassTab;
-    //     if (tabs && tabs.length > 0) {
-    //       multipassTab = tabs[0];
-    //       if (debug) console.log("Found multipass tab:", multipassTab.id, multipassTab.url);
-    //     } else {
-    //       if (debug) console.log("No multipass tab found, opening one...");
-    //       chrome.tabs.create({
-    //         url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets"
-    //       }, async (newTab) => {
-    //         multipassTab = newTab;
-    //         if (debug) console.log("Opened new multipass tab:", newTab.id, newTab.url);
-    //         await waitForTabToComplete(newTab.id);
-    //         chrome.tabs.sendMessage(newTab.id, { action: "getDestinations" }, (response) => {
-    //           if (chrome.runtime.lastError) {
-    //             reject(new Error(chrome.runtime.lastError.message));
-    //             return;
-    //           }
-    //           if (response && response.routes) {
-    //             const pageData = {
-    //               routes: response.routes,
-    //               timestamp: Date.now(),
-    //               dynamicUrl: response.dynamicUrl || null,
-    //               headers: response.headers || null
-    //             };
-    //             localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-    //             resolve(response.routes);
-    //           } else if (response && response.error) {
-    //             reject(new Error(response.error));
-    //           } else {
-    //             reject(new Error("Failed to fetch destinations"));
-    //           }
-    //         });
-    //       });
-    //       return;
-    //     }
-    //     // Ensure the tab is fully loaded.
-    //     if (multipassTab.status !== "complete") {
-    //       await waitForTabToComplete(multipassTab.id);
-    //     }
-    //     if (debug) console.log("Sending getDestinations message to tab", multipassTab.id);
-    //     chrome.tabs.sendMessage(multipassTab.id, { action: "getDestinations" }, (response) => {
-    //       if (chrome.runtime.lastError) {
-    //         reject(new Error(chrome.runtime.lastError.message));
-    //       } else if (response && response.success) {
-    //         // Save the routes in localStorage for future calls.
-    //         const pageData = {
-    //           routes: response.routes,
-    //           timestamp: Date.now(),
-    //           dynamicUrl: response.dynamicUrl || null,
-    //           headers: response.headers || null
-    //         };
-    //         localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-    //         if (debug) {
-    //           if (debug) console.log("Resolved with routes from multipass:", response.routes);
-    //         }
-    //         resolve(response.routes);
-    //       } else {
-    //         reject(new Error(response && response.error ? response.error : "Unknown error fetching routes."));
-    //       }
-    //     });
-    //   });
-    // });
+  async function sendMessageWithRetry(tabId, message, retries = 3, delay = 1000) {
+    return new Promise((resolve, reject) => {
+      function attempt() {
+        chrome.tabs.sendMessage(tabId, message, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("sendMessage error:", chrome.runtime.lastError.message);
+            if (retries > 0) {
+              retries--;
+              setTimeout(attempt, delay);
+            } else {
+              reject(new Error(chrome.runtime.lastError.message));
+            }
+          } else {
+            resolve(response);
+          }
+        });
+      }
+      attempt();
+    });
   }
-  
+
   async function getDynamicUrl() {
     const pageDataStr = localStorage.getItem("wizz_page_data");
     if (pageDataStr) {
@@ -1269,61 +1265,68 @@ function setupAutocomplete(inputId, suggestionsId) {
       }
     }
     return new Promise((resolve, reject) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-        let currentTab = tabs[0];
-        if (!currentTab || !currentTab.url || !currentTab.url.includes("multipass.wizzair.com") || !currentTab.active) {
+      chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, async (tabs) => {
+        let targetTab;
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (tabs && tabs.length > 0) {
+          targetTab = tabs[0];
+          if (debug) console.log("Found multipass tab:", targetTab);
+        } else {
           try {
             await refreshMultipassTab();
           } catch (err) {
             if (debug) console.error("Failed to refresh multipass tab:", err);
           }
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabsAfter) => {
-            currentTab = tabsAfter[0];
-            chrome.tabs.sendMessage(currentTab.id, { action: "getDynamicUrl" }, (response) => {
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-              }
-              if (response && response.dynamicUrl) {
-                const pageData = JSON.parse(localStorage.getItem("wizz_page_data") || "{}");
-                pageData.dynamicUrl = response.dynamicUrl;
-                pageData.timestamp = Date.now();
-                localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-                resolve(response.dynamicUrl);
-              } else if (response && response.error) {
-                reject(new Error(response.error));
-              } else {
-                reject(new Error("Failed to get dynamic URL"));
-              }
-            });
-          });
-        } else {
-          if (currentTab.status !== "complete") {
-            await waitForTabToComplete(currentTab.id);
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-          chrome.tabs.sendMessage(currentTab.id, { action: "getDynamicUrl" }, (response) => {
+          chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabsAfter) => {
             if (chrome.runtime.lastError) {
               reject(new Error(chrome.runtime.lastError.message));
               return;
             }
-            if (response && response.dynamicUrl) {
-              const pageData = JSON.parse(localStorage.getItem("wizz_page_data") || "{}");
-              pageData.dynamicUrl = response.dynamicUrl;
-              pageData.timestamp = Date.now();
-              localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-              resolve(response.dynamicUrl);
-            } else if (response && response.error) {
-              reject(new Error(response.error));
-            } else {
-              reject(new Error("Failed to get dynamic URL"));
+            if (tabsAfter && tabsAfter.length > 0) {
+              targetTab = tabsAfter[0];
+              if (debug) console.log("After refresh, found multipass tab:", targetTab);
             }
           });
+        }
+
+        if (!targetTab) {
+          reject(new Error("No multipass tab found"));
+          return;
+        }
+
+        if (targetTab.status !== "complete") {
+          await waitForTabToComplete(targetTab.id);
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+
+        try {
+          const response = await sendMessageWithRetry(targetTab.id, { action: "getDynamicUrl" });
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (response && response.dynamicUrl) {
+            const pageData = JSON.parse(localStorage.getItem("wizz_page_data") || "{}");
+            pageData.dynamicUrl = response.dynamicUrl;
+            pageData.timestamp = Date.now();
+            localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+            console.log("Message response:", response);
+            resolve(response.dynamicUrl);
+          } else if (response && response.error) {
+            reject(new Error(response.error));
+          } else {
+            reject(new Error("Failed to get dynamic URL"));
+          }
+        } catch (error) {
+          reject(error);
         }
       });
     });
   }
-  
+
   function waitForTabToComplete(tabId) {
     return new Promise((resolve) => {
       const listener = (updatedTabId, changeInfo) => {
@@ -1569,8 +1572,8 @@ function setupAutocomplete(inputId, suggestionsId) {
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
     const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
     const stopoverText = document.getElementById("selected-stopover").textContent;
-    // For stopover options, assume "One stop (overnight)" is a special flag; otherwise, multi-stop searches use full window.
-    const allowOvernight = stopoverText === "One stop (overnight)";
+    // For stopover options, assume "One stop or fewer (overnight)" is a special flag; otherwise, multi-stop searches use full window.
+    const allowOvernight = stopoverText === "One stop or fewer (overnight)";
     if (debug) console.log(`Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "not overnight, one stop or fewer"})`);
 
     // Interpret the selected date as UTC (e.g. "2025-03-20" becomes 2025-03-20T00:00:00Z)
@@ -1938,7 +1941,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   
     const stopoverText = document.getElementById("selected-stopover").textContent;
     let maxTransfers = 0;
-    if (stopoverText === "One stop or fewer" || stopoverText === "One stop (overnight)") {
+    if (stopoverText === "One stop or fewer" || stopoverText === "One stop or fewer (overnight)") {
       maxTransfers = 1;
     } else if (stopoverText === "Two stops or fewer") {
       maxTransfers = 2;
@@ -1952,7 +1955,7 @@ const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
 const isDestinationAnywhere = (destinations.length === 1 && destinations[0] === "ANY");
 
 // 1) Abort if either field is ANY and transfers are allowed.
-if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 0) {
+if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
   showNotification("Search for routes with 'Anywhere' is available only for direct flights with no transfers.");
   searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
               viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
@@ -2533,7 +2536,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
 }
 
 function createSegmentRow(segment) {
-  const segmentDate = formatFlightDateCombined(segment.calculatedDuration.departureDate, segment.calculatedDuration.arrivalDate);
+  const segmentDate = segment.formattedFlightDate;
   const flightCode = formatFlightCode(segment.flightCode);
   const segmentHeader = `
     <div class="flex justify-between items-center mb-1">
@@ -2809,7 +2812,7 @@ document.addEventListener("DOMContentLoaded", () => {
   
     for (let d = 1; d <= daysInMonth; d++) {
       const dateCell = document.createElement("div");
-      dateCell.className = "border rounded p-1 cursor-pointer";
+      dateCell.className = "border rounded cursor-pointer text-xs leading-tight flex items-center justify-center p-[2px]";
       const cellDate = new Date(year, month, d);
       const yyyy = cellDate.getFullYear();
       const mm = String(cellDate.getMonth() + 1).padStart(2, "0");
@@ -2951,43 +2954,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.continueToPayment = async function(outboundKey) {
     try {
-        const dynamicUrl = await getDynamicUrl(); // Fetch the dynamic URL
-        if (debug) console.log("dynamicUrl for payment:", dynamicUrl);
-        
-        const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
-        if (!subscriptionId) {
-            console.error("Failed to extract subscription ID from:", dynamicUrl);
-            return;
-        }
-
-        const url = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
-        if (debug) console.log("Using subscription ID:", subscriptionId);
-        if (debug) console.log("Final Payment URL (without sending request):", url);
-
-        const form = document.createElement("form");
-        form.method = "POST";
-        form.action = url;
-        form.target = "_blank";
-
-        // Send outboundKey as POST data
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = "outboundKey";
-        input.value = outboundKey;
-        form.appendChild(input);
-
-        if (debug) console.log("Form data:", { outboundKey: input.value });
-        if (debug) console.log("Generated form:", form);
-        if (debug) console.log("Form Action (Final URL):", form.action);
-        if (debug) console.log("Form Data:", { outboundKey: input.value });
-        document.body.appendChild(form);
-        form.submit();
-        document.body.removeChild(form);
-    } catch (error) {
-        console.error("Error in continueToPayment:", error);
+      const dynamicUrl = await getDynamicUrl();
+      const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
+      if (!subscriptionId) throw new Error("Нет subscription ID");
+  
+      chrome.tabs.create({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" }, newTab => {
+        const listener = (tabId, changeInfo) => {
+          if (tabId === newTab.id && changeInfo.status === "complete") {
+            chrome.tabs.onUpdated.removeListener(listener);
+            chrome.tabs.sendMessage(newTab.id, {
+              action: "injectPaymentForm",
+              subscriptionId,
+              outboundKey
+            });
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+      });
+    } catch (e) {
+      console.error("continueToPayment error:", e);
     }
-};
- 
+  };
   
   // ---------------- Initialize on DOMContentLoaded ----------------
   
