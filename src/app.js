@@ -2812,7 +2812,7 @@ document.addEventListener("DOMContentLoaded", () => {
   
     for (let d = 1; d <= daysInMonth; d++) {
       const dateCell = document.createElement("div");
-      dateCell.className = "border rounded p-1 cursor-pointer";
+      dateCell.className = "border rounded cursor-pointer text-xs leading-tight flex items-center justify-center p-[2px]";
       const cellDate = new Date(year, month, d);
       const yyyy = cellDate.getFullYear();
       const mm = String(cellDate.getMonth() + 1).padStart(2, "0");
