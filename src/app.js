@@ -1572,8 +1572,8 @@ function setupAutocomplete(inputId, suggestionsId) {
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
     const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
     const stopoverText = document.getElementById("selected-stopover").textContent;
-    // For stopover options, assume "One stop (overnight)" is a special flag; otherwise, multi-stop searches use full window.
-    const allowOvernight = stopoverText === "One stop (overnight)";
+    // For stopover options, assume "One stop or fewer (overnight)" is a special flag; otherwise, multi-stop searches use full window.
+    const allowOvernight = stopoverText === "One stop or fewer (overnight)";
     if (debug) console.log(`Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "not overnight, one stop or fewer"})`);
 
     // Interpret the selected date as UTC (e.g. "2025-03-20" becomes 2025-03-20T00:00:00Z)
@@ -1941,7 +1941,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   
     const stopoverText = document.getElementById("selected-stopover").textContent;
     let maxTransfers = 0;
-    if (stopoverText === "One stop or fewer" || stopoverText === "One stop (overnight)") {
+    if (stopoverText === "One stop or fewer" || stopoverText === "One stop or fewer (overnight)") {
       maxTransfers = 1;
     } else if (stopoverText === "Two stops or fewer") {
       maxTransfers = 2;
@@ -1955,7 +1955,7 @@ const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
 const isDestinationAnywhere = (destinations.length === 1 && destinations[0] === "ANY");
 
 // 1) Abort if either field is ANY and transfers are allowed.
-if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 0) {
+if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
   showNotification("Search for routes with 'Anywhere' is available only for direct flights with no transfers.");
   searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
               viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
