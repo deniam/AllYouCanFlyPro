@@ -2931,7 +2931,15 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedDates,
         minSelectable
       );
-  
+      const origWidth = 220;
+      const targetWidth = inputEl.offsetWidth;
+      const scale = targetWidth / origWidth;
+      popupEl.style.transformOrigin = 'top left';
+      popupEl.style.transform = `scale(${scale})`;
+      popupEl.style.left = '0';
+      popupEl.style.top = '100%';
+      popupEl.style.width = `${origWidth}px`;
+      popupEl.style.height = 'auto';
       // Show the popup
       popupEl.classList.remove("hidden");
     });

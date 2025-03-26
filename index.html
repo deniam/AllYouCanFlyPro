@@ -46,13 +46,13 @@
   </style>
 </head>
 <body class="bg-gray-50">
-  <section class="pt-0">
+  <section class="pt-4">
     <div class="container mx-auto px-4 lg:flex lg:space-x-6">
       <div class="lg:w-1/2 space-y-4">
       <!-- Donation & GitHub Links -->
       <div class="flex justify-between items-center p-4 bg-gray-100 rounded-md shadow-md mb-4">
         <a href="https://revolut.me/denya24" target="_blank" rel="noopener noreferrer"
-          class="external-link support-animation inline-flex items-center gap-1 justify-center flex-shrink-0 whitespace-nowrap text-white bg-[#C90076] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition mr-2">
+          class="external-link support-animation inline-flex items-center justify-center flex-shrink-0 whitespace-nowrap text-white bg-[#C90076] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition mr-2">
           ☕ Support this project
         </a>
         <div>Ver. 2.0.0</div>
@@ -260,14 +260,15 @@
       </div>
     </div>
 
-    <div class="lg:w-1/2 space-y-4">
-      <div id="results-and-sort-container" class="flex hidden lg:block justify-between items-center mb-4">
-        <p id="total-results" class="text-lg lg:block font-semibold text-[#20006D] mb-0">Total results: 0</p>
-        <button id="download-csv-button" class="px-2 py-1 bg-[#20006D] text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden">
+    <div class="lg:w-1/2 space-y-4 lg:block">
+      <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
+        <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>
+        <button id="download-csv-button" class="flex justify-between p-1 items-center bg-[#20006D] gap-1 text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden">
           ⬇️ CSV
         </button>
+
         <div class="relative w-32">
-          <select id="sort-select" class="block lg:block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 pr-10 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer appearance-none">
+          <select id="sort-select" class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 pr-10 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer appearance-none">
             <option value="default" selected>Default</option>
             <option value="airport">Departure Airport</option>
             <option value="departure">Departure Time</option>
@@ -280,22 +281,22 @@
         </div>      
       </div>
 
-      <div id="progress-container" class="hidden lg:block bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4">
+      <div id="progress-container" class="bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4 hidden">
         <p id="progress-text" class="mb-2 font-medium"></p>
         <div class="w-full bg-gray-300 rounded-full overflow-hidden">
-          <div id="progress-bar" class="hidden lg:block bg-[#20006D] h-2" style="width: 0%;"></div>
+          <div id="progress-bar" class="bg-[#20006D] h-2" style="width: 0%;"></div>
         </div>
       </div>
 
-      <div id="timeout-status" class="hidden lg:block bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4"></div>
+      <div id="timeout-status" class="bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4 hidden"></div>
 
       <div class="route-list"></div>
     </div>
 
-    <div id="notification-banner" class="hidden opacity-0 lg:block fixed bottom-5 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg transition-opacity duration-500">
+    <div id="notification-banner" class="hidden opacity-0 bg-[#20006D] text-white fixed bottom-5 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg transition-opacity duration-500">
       <span id="notification-text"></span>
     </div>
-  </div>
+    </div>
   </section>
   <script type="module" src="src/app.js"></script>
 </body>
