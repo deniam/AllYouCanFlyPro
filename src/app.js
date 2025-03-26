@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
