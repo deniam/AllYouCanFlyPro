@@ -571,6 +571,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   // Update suggestions as the user types.
   inputEl.addEventListener("input", (e) => {
     const query = e.target.value.trim().toLowerCase();
+    console.log("Query:", query);
     showSuggestions(query);
   });
 
@@ -594,7 +595,7 @@ function setupAutocomplete(inputId, suggestionsId) {
       .map(input => (input.value || "").trim())
       .filter(val => val !== "");
   }
-  
+
     // Helper to expand multi-airport city codes
   function expandMultiAirport(codes) {
     if (codes.length === 1 && MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[codes[0].toUpperCase()]) {
@@ -603,8 +604,7 @@ function setupAutocomplete(inputId, suggestionsId) {
       return expanded;
     }
     return codes;
-  }
-
+  }  
   function resolveAirport(input) {
     if (!input) return [];
     
@@ -660,7 +660,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     
     return [input.toUpperCase()];
   }
-  
 
       /**
  * Parses a 12‑hour time string (e.g., "11:20 pm") and returns an object {hour, minute} in 24‑hour format.
@@ -955,6 +954,7 @@ function setupAutocomplete(inputId, suggestionsId) {
             }
             if (response && response.headers) {
               resolve(response.headers);
+              console.log("Message response:", response);
             } else if
               (chrome.runtime.lastError) {
                 console.error("sendMessage error:", chrome.runtime.lastError.message);
@@ -1313,6 +1313,7 @@ function setupAutocomplete(inputId, suggestionsId) {
             pageData.dynamicUrl = response.dynamicUrl;
             pageData.timestamp = Date.now();
             localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
+            console.log("Message response:", response);
             resolve(response.dynamicUrl);
           } else if (response && response.error) {
             reject(new Error(response.error));
@@ -2487,7 +2488,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button external-link px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
+        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
           Continue to Payment
         </button>
       </div>
@@ -2516,7 +2517,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button external-link px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
           Continue to Payment
         </button>
       </div>
@@ -2953,56 +2954,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.continueToPayment = async function(outboundKey) {
     try {
-      const dynamicUrl = await refreshDynamicUrl();
+      const dynamicUrl = await getDynamicUrl();
       const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
-      const confirmationUrl = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
-      chrome.tabs.create({ url: confirmationUrl, active: true }, (newTab) => {
-        if (chrome.runtime.lastError) {
-          console.error("Error creating tab:", chrome.runtime.lastError.message);
-          return;
-        }
-        const listener = (tabId, changeInfo, tab) => {
+      if (!subscriptionId) throw new Error("Нет subscription ID");
+  
+      chrome.tabs.create({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" }, newTab => {
+        const listener = (tabId, changeInfo) => {
           if (tabId === newTab.id && changeInfo.status === "complete") {
-            setTimeout(() => {
-              chrome.scripting.executeScript({
-                target: { tabId: newTab.id },
-                func: (outboundKey, url) => {
-                  const form = document.createElement('form');
-                  form.method = 'POST';
-                  form.action = url;
-                  const input = document.createElement('input');
-                  input.type = 'hidden';
-                  input.name = 'outboundKey';
-                  input.value = outboundKey;
-                  form.appendChild(input);
-                  document.body.appendChild(form);
-                  form.submit();
-                },
-                args: [ outboundKey, confirmationUrl ]
-              }, () => {
-                if (chrome.runtime.lastError) {
-                  console.error("Error executing script:", chrome.runtime.lastError.message);
-                } else {
-                  console.log("Payment form submitted via executeScript");
-                }
-              });
-            }, 2000);
             chrome.tabs.onUpdated.removeListener(listener);
+            chrome.tabs.sendMessage(newTab.id, {
+              action: "injectPaymentForm",
+              subscriptionId,
+              outboundKey
+            });
           }
         };
         chrome.tabs.onUpdated.addListener(listener);
       });
-    } catch (err) {
-      console.error('continueToPayment error:', err);
+    } catch (e) {
+      console.error("continueToPayment error:", e);
     }
   };
-  
-  async function refreshDynamicUrl() {
-    localStorage.removeItem("wizz_page_data");
-    await refreshMultipassTab();
-    return await getDynamicUrl();
-  }
-
   
   // ---------------- Initialize on DOMContentLoaded ----------------
   
@@ -3279,12 +3251,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const outboundKey = btn.getAttribute("data-outbound-key");
         continueToPayment(outboundKey);
       }
-    }); 
-    document.querySelectorAll('.external-link').forEach(link => {
-      link.addEventListener('click', e => {
-        e.preventDefault();
-        window.open(link.href, '_blank');
-      });
-    });   
+    });    
   });
   

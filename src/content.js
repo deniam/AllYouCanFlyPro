@@ -1,34 +1,27 @@
 const debug = false;
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "aycf_submitPaymentForm") {
-      console.log("AYCF content script received message:", message);
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = message.url;
-  
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'outboundKey';
-      input.value = message.outboundKey;
-      form.appendChild(input);
-  
-      document.body.appendChild(form);
-      form.submit();
-      sendResponse({ status: "submitted" });
-      return true;
-    }
-  });
   
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   try {
-    if (request.action === "getDestinations") {
-      handleGetDestinations(sendResponse);
+    if (request.action === "injectPaymentForm") {
+        const { subscriptionId, outboundKey } = request;
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = `https://multipass.wizzair.com/w6/subscriptions/${subscriptionId}/confirmation`;
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = "outboundKey";
+        input.value = outboundKey;
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+        sendResponse({ success: true });
     } else if (request.action === "getDynamicUrl") {
       handleGetDynamicUrl(sendResponse);
     } else if (request.action === "getHeaders") {
       handleGetHeaders(sendResponse);
+    } else if (request.action === "getDestinations") {
+        handleGetDestinations(sendResponse);
     } else {
       console.warn("[Content.js] Unknown action:", request.action);
       sendResponse({ error: `Unknown action: ${request.action}` });
