@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -3252,6 +3252,12 @@ document.addEventListener("DOMContentLoaded", () => {
       document.body.style.zoom = this.value / 100;
     });
 
+    // ========= 12. Version Number =========
+    const manifest = chrome.runtime.getManifest();
+    const versionEl = document.getElementById('version-display');
+    if (versionEl) {
+      versionEl.textContent = `Ver. ${manifest.version}`;
+    }
     // ========= 12. Go to payment page =========
     document.querySelector(".route-list").addEventListener("click", (event) => {
       const btn = event.target.closest(".continue-payment-button");
