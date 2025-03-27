@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -1946,7 +1946,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     let maxTransfers = 0;
     if (stopoverText === "One stop or fewer" || stopoverText === "One stop or fewer (overnight)") {
       maxTransfers = 1;
-    } else if (stopoverText === "Two stops or fewer") {
+    } else if (stopoverText === "Two stops or fewer (overnight)") {
       maxTransfers = 2;
     } else {
       maxTransfers = 0;
