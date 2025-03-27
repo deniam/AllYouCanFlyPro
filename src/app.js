@@ -3261,13 +3261,6 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("stopover-dropdown").classList.add("hidden");
       });
     });
-  
-    // ========== 11. UI Scale Change ==========
-    const scaleSlider = document.getElementById("ui-scale");
-    document.body.style.zoom = scaleSlider.value / 100;
-    scaleSlider.addEventListener("input", function() {
-      document.body.style.zoom = this.value / 100;
-    });
 
     // ========= 12. Version Number =========
     const manifest = chrome.runtime.getManifest();
