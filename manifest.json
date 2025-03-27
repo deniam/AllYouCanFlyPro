@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "All You Can Fly Pro",
-    "description": "A Chrome extension for automated flight route searches, including multi-connection and return routes.",
-    "version": "2.0.0",
+    "name": "All You Can Fly Pro (AYCF)",
+    "description": "Chrome extension to easily find and book available routes for Wizz Air All-You-Can-Fly (AYCF) multipass subscribers.",
+    "version": "2.1.0",
     "permissions": [
       "activeTab",
       "storage",

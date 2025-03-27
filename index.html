@@ -14,7 +14,7 @@
       50% { background-color: #a30268; }
     }
     .support-animation {
-      animation: subtlePink 6s infinite alternate ease-in-out;
+      animation: subtlePink 10s infinite alternate ease-in-out;
     }
     /* Custom style for the UI scale slider thumb */
     #ui-scale::-webkit-slider-thumb {
@@ -271,7 +271,9 @@
     </div>
     </div>
   </div>
-    <div class="lg:w-1/2 space-y-4 lg:block">
+
+  <div class="container mb-4 mx-auto px-0 lg:w-1/2 space-y-4 lg:block">
+    <div id="results-container" class="relative bg-gray-100 rounded-lg shadow-md p-2 hidden">  
       <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
         <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>
         <button id="download-csv-button" class="flex justify-between p-1 items-center bg-[#20006D] gap-1 text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden">
@@ -304,10 +306,11 @@
       <div class="route-list"></div>
     </div>
 
-    <div id="notification-banner" class="hidden opacity-0 bg-[#20006D] text-white fixed bottom-5 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg transition-opacity duration-500">
-      <span id="notification-text"></span>
+      <div id="notification-banner" class="hidden opacity-0 bg-[#20006D] text-white fixed bottom-5 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-lg transition-opacity duration-500">
+        <span id="notification-text"></span>
+      </div>
     </div>
-    </div>
+  </div>
   </section>
   <script type="module" src="src/app.js"></script>
 </body>

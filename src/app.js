@@ -137,6 +137,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   const progressContainer = document.getElementById('progress-container');
   const progressText = document.getElementById('progress-text');
   const progressBar = document.getElementById('progress-bar');
+  const resultsContainer = document.getElementById("results-container");
   const resultsAndSortContainer = document.getElementById("results-and-sort-container");
   const totalResultsEl = document.getElementById("total-results");
   const sortSelect = document.getElementById("sort-select");
@@ -1169,6 +1170,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     sortResultsArray(results, currentSortOption);
   
     // 2) Show the container, update total results
+    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${results.length}`;
   
@@ -1187,6 +1189,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   function displayRoundTripResultsAll(outbounds) {
     // Sort outbound flights using the updated logic.
     sortResultsArray(outbounds, currentSortOption);
+    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${outbounds.length}`;
   
