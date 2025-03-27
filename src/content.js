@@ -107,7 +107,6 @@
     function handleGetDynamicUrl(sendResponse) {
       window.cachedDynamicUrlPromise
         .then(dynamicUrl => {
-          console.log("[Content.js] Found dynamicUrl:", dynamicUrl);
           sendResponse({ dynamicUrl });
         })
         .catch(err => {
@@ -129,7 +128,6 @@
             });
           }
         });
-        console.log("[Content.js] Returning headers:", headers);
         sendResponse({ headers });
       } catch (e) {
         console.error("[Content.js] Error getting headers:", e);
@@ -152,10 +150,8 @@
     
           if (headMatch && headMatch[0]) {
             routesJson = `{"routes":${headMatch[0].split('"routes":')[1].split(',"isOneWayFlightsOnly"')[0]}}`;
-            console.log("[Content.js] Extracted routes JSON from <head>");
           } else if (bodyMatch && bodyMatch[1]) {
             routesJson = `{"routes":${bodyMatch[1]}}`;
-            console.log("[Content.js] Extracted routes JSON from window.CVO");
           }
     
           if (!routesJson) {
@@ -164,7 +160,6 @@
           }
     
           const parsed = JSON.parse(routesJson);
-          console.log("[Content.js] Parsed routes:", parsed.routes);
           sendResponse({ success: true, routes: parsed.routes });
         } catch (e) {
           console.error("[Content.js] Error parsing routes:", e);

@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -168,6 +168,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   // ----------------------- UI Helper Functions -----------------------
   
   function updateProgress(current, total, message) {
+    resultsContainer.classList.remove("hidden");
     progressContainer.style.display = "block";
     progressText.textContent = `${message} (${current} of ${total})`;
     const percentage = total > 0 ? (current / total) * 100 : 0;
@@ -1171,7 +1172,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     sortResultsArray(results, currentSortOption);
   
     // 2) Show the container, update total results
-    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${results.length}`;
   
@@ -1190,7 +1190,6 @@ function setupAutocomplete(inputId, suggestionsId) {
   function displayRoundTripResultsAll(outbounds) {
     // Sort outbound flights using the updated logic.
     sortResultsArray(outbounds, currentSortOption);
-    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${outbounds.length}`;
   
