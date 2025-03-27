@@ -1037,7 +1037,7 @@ function setupAutocomplete(inputId, suggestionsId) {
           }
           if (debug) throw new Error(`HTTP error: ${fetchResponse.status}`);
         }
-  
+
         const contentType = fetchResponse.headers.get("content-type") || "";
         if (!contentType.includes("application/json")) {
           const text = await fetchResponse.text();
@@ -1047,10 +1047,11 @@ function setupAutocomplete(inputId, suggestionsId) {
             await refreshMultipassTab();
             showNotification("Authorization required: please log in to your account to search for routes.");
             throw new Error("Authorization required: expected JSON but received HTML");
+          }
             // dynamicUrl = await getDynamicUrl();
             // // Throw a specific error that we can catch below
             // throw new Error("Invalid response format: expected JSON but received HTML");
-          }
+          
         }
   
         const responseData = await fetchResponse.json();
@@ -1856,6 +1857,8 @@ function setupAutocomplete(inputId, suggestionsId) {
           }
         } catch (error) {
           console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
+          showNotification(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}. Login to your Multipass Account and try again.`);
+          return;
         }
         processed++;
         updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
