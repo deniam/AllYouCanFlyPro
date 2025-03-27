@@ -2554,9 +2554,25 @@ function createSegmentRow(segment) {
         <span class="text-xl">${getCountryFlag(segment.departureStation)}</span>
         <span class="text-base font-medium">${segment.departureStationText}</span>
       </div>
-      <div class="flex justify-center">
-        <span class="text-xl font-medium">✈</span>
-      </div>
+      <svg xmlns="http://www.w3.org/2000/svg"
+          class="block m-0 p-0"
+          width="100%" height="100%"
+          viewBox="0 40 300 40"
+          preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
+            <stop offset="0" stop-color="#20006D"/>
+            <stop offset="1" stop-color="#C90076"/>
+          </linearGradient>
+        </defs>
+        <g transform="translate(20,20)">
+          <line x1="0" y1="40" x2="260" y2="40" stroke="url(#lineGradient)" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="0" cy="40" r="6" fill="#20006D"/>
+          <circle cx="260" cy="40" r="6" fill="#C90076"/>
+          <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D"/>
+        </g>
+      </svg>
+
       <div class="flex items-center justify-end gap-1 whitespace-nowrap mb-0">
         <span class="text-base font-medium">${segment.arrivalStationText}</span>
         <span class="text-xl">${getCountryFlag(segment.arrivalStation)}</span>

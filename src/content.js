@@ -1,3 +1,6 @@
+
+const debug = false;
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   try {
@@ -52,63 +55,61 @@ function handleGetDestinations(sendResponse) {
       }
 
       if (!routesJson) {
-        console.error("[Content.js] No routes data found");
         return sendResponse({ success: false, error: "No routes data found" });
       }
 
       const parsed = JSON.parse(routesJson);
       sendResponse({ success: true, routes: parsed.routes });
     } catch (e) {
-      console.error("[Content.js] Error parsing routes:", e);
       sendResponse({ success: false, error: e.message });
     }
   }, 1000);
 }
 
 function handleGetDynamicUrl(sendResponse) {
-  setTimeout(() => {
-    try {
-      const headContent = document.head.innerHTML;
-      const bodyContent = document.body.innerHTML;
+setTimeout(() => {
+  try {
+  const headContent = document.head.innerHTML;
+  const bodyContent = document.body.innerHTML;
 
-      const headMatch = headContent.match(/"searchFlight":"https:\/\/multipass\.wizzair\.com[^"]+\/([^"]+)"/);
-      const bodyMatch = bodyContent.match(/window\.CVO\.flightSearchUrlJson\s*=\s*"(https:\/\/multipass\.wizzair\.com[^"]+)"/);
+  const headMatch = headContent.match(/"searchFlight":"https:\/\/multipass\.wizzair\.com[^"]+\/([^"]+)"/);
+  const bodyMatch = bodyContent.match(/window\.CVO\.flightSearchUrlJson\s*=\s*"(https:\/\/multipass\.wizzair\.com[^"]+)"/);
 
-      let dynamicUrl;
-      if (headMatch && headMatch[1]) {
-        dynamicUrl = `https://multipass.wizzair.com/w6/subscriptions/json/availability/${headMatch[1]}`;
-      } else if (bodyMatch && bodyMatch[1]) {
-        dynamicUrl = bodyMatch[1];
-      }
+  let dynamicUrl;
+  if (headMatch && headMatch[1]) {
+      dynamicUrl = `https://multipass.wizzair.com/w6/subscriptions/json/availability/${headMatch[1]}`;
+  } else if (bodyMatch && bodyMatch[1]) {
+      dynamicUrl = bodyMatch[1];
+  }
 
-      if (!dynamicUrl) {
-        console.error("[Content.js] Dynamic URL not found");
-        return sendResponse({ error: "Dynamic URL not found" });
-      }
+  if (!dynamicUrl) {
+      console.error("[Content.js] Dynamic URL not found");
+      return sendResponse({ error: "Dynamic URL not found" });
+  }
 
-      sendResponse({ dynamicUrl });
-    } catch (e) {
-      console.error("[Content.js] Error extracting dynamic URL:", e);
-      sendResponse({ error: e.message });
-    }
-  }, 1000);
+  sendResponse({ dynamicUrl });
+  } catch (e) {
+  console.error("[Content.js] Error extracting dynamic URL:", e);
+  sendResponse({ error: e.message });
+  }
+}, 1000);
 }
 
 function handleGetHeaders(sendResponse) {
-  try {
-    const headers = {};
-    performance.getEntriesByType("resource").forEach(entry => {
-      if (entry.name.includes("https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets")) {
-        entry.serverTiming.forEach(timing => {
-          if (timing.name.startsWith("request_header_")) {
-            headers[timing.name.replace("request_header_", "")] = timing.description;
-          }
-        });
+try {
+  const headers = {};
+  performance.getEntriesByType("resource").forEach(entry => {
+  if (entry.name.includes("https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets")) {
+      entry.serverTiming.forEach(timing => {
+      if (timing.name.startsWith("request_header_")) {
+          headers[timing.name.replace("request_header_", "")] = timing.description;
       }
-    });
-    sendResponse({ headers });
-  } catch (e) {
-    console.error("[Content.js] Error getting headers:", e);
-    sendResponse({ error: e.message });
+      });
   }
+  });
+  sendResponse({ headers });
+} catch (e) {
+  console.error("[Content.js] Error getting headers:", e);
+  sendResponse({ error: e.message });
+}
 }
