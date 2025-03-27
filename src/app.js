@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -168,6 +168,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   // ----------------------- UI Helper Functions -----------------------
   
   function updateProgress(current, total, message) {
+    resultsContainer.classList.remove("hidden");
     progressContainer.style.display = "block";
     progressText.textContent = `${message} (${current} of ${total})`;
     const percentage = total > 0 ? (current / total) * 100 : 0;
@@ -1037,7 +1038,7 @@ function setupAutocomplete(inputId, suggestionsId) {
           }
           if (debug) throw new Error(`HTTP error: ${fetchResponse.status}`);
         }
-  
+
         const contentType = fetchResponse.headers.get("content-type") || "";
         if (!contentType.includes("application/json")) {
           const text = await fetchResponse.text();
@@ -1047,10 +1048,11 @@ function setupAutocomplete(inputId, suggestionsId) {
             await refreshMultipassTab();
             showNotification("Authorization required: please log in to your account to search for routes.");
             throw new Error("Authorization required: expected JSON but received HTML");
+          }
             // dynamicUrl = await getDynamicUrl();
             // // Throw a specific error that we can catch below
             // throw new Error("Invalid response format: expected JSON but received HTML");
-          }
+          
         }
   
         const responseData = await fetchResponse.json();
@@ -1170,7 +1172,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     sortResultsArray(results, currentSortOption);
   
     // 2) Show the container, update total results
-    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${results.length}`;
   
@@ -1189,7 +1190,6 @@ function setupAutocomplete(inputId, suggestionsId) {
   function displayRoundTripResultsAll(outbounds) {
     // Sort outbound flights using the updated logic.
     sortResultsArray(outbounds, currentSortOption);
-    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${outbounds.length}`;
   
@@ -1856,6 +1856,8 @@ function setupAutocomplete(inputId, suggestionsId) {
           }
         } catch (error) {
           console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
+          showNotification(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}. Login to your Multipass Account and try again.`);
+          return;
         }
         processed++;
         updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
@@ -3260,13 +3262,6 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("selected-stopover").textContent = this.value;
         document.getElementById("stopover-dropdown").classList.add("hidden");
       });
-    });
-  
-    // ========== 11. UI Scale Change ==========
-    const scaleSlider = document.getElementById("ui-scale");
-    document.body.style.zoom = scaleSlider.value / 100;
-    scaleSlider.addEventListener("input", function() {
-      document.body.style.zoom = this.value / 100;
     });
 
     // ========= 12. Version Number =========
