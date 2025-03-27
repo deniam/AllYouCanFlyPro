@@ -2,7 +2,6 @@
   if (!window.__listenerAdded) {
     window.__listenerAdded = true;
     
-    // Если скрипт запущен не в главном фрейме, не выполнять дальнейший код.
     if (window.top !== window) {
       return;
     }
@@ -56,7 +55,6 @@
     
             const interval = setInterval(() => {
               attempt++;
-              // Первый способ: если свойство уже установлено
               if (document.body && document.body.urls && document.body.urls.flightSearchUrlJson) {
                 clearInterval(interval);
                 observer.disconnect();
@@ -64,7 +62,6 @@
                 return;
               }
     
-              // Второй способ: пытаемся извлечь через регулярные выражения
               const headContent = document.head.innerHTML;
               const bodyContent = document.body ? document.body.innerHTML : "";
               const headMatch = headContent.match(/"searchFlight":"https:\/\/multipass\.wizzair\.com[^"]+\/([^"]+)"/);
@@ -95,7 +92,6 @@
           }
         };
     
-        // Если <body> еще не загружен, подождать DOMContentLoaded
         if (!document.body) {
           document.addEventListener("DOMContentLoaded", startObserver, { once: true });
         } else {
@@ -104,7 +100,6 @@
       });
     }
     
-    // Глобально кэшируем промис, чтобы при повторных вызовах использовать один результат
     if (!window.cachedDynamicUrlPromise) {
       window.cachedDynamicUrlPromise = waitForDynamicUrl();
     }
