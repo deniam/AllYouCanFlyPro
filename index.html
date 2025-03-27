@@ -31,7 +31,7 @@
     }
     .calendar-popup {
       position: absolute;
-      z-index: 10;
+      z-index: 100;
       background: white;
       border: 1px solid #ccc;
       border-radius: 0.375rem;
@@ -52,26 +52,26 @@
 </head>
 <body class="bg-gray-50">
   <section class="pt-4">
-    <div class="container mx-auto px-4 lg:flex lg:space-x-6">
+    <div class="container mx-auto px-2 lg:flex lg:space-x-6">
       <div class="lg:w-1/2 space-y-4">
       <!-- Donation & GitHub Links -->
-      <div class="flex justify-between items-center p-4 bg-gray-100 rounded-md shadow-md mb-4">
+      <div class="flex justify-between items-center p-2 bg-gray-100 rounded-md shadow-md mb-4">
         <a href="https://revolut.me/denya24" target="_blank" rel="noopener noreferrer"
-          class="external-link support-animation inline-flex gap-1 items-center justify-center flex-shrink-0 whitespace-nowrap text-white bg-[#C90076] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition mr-2">
+          class="external-link support-animation inline-flex gap-1 items-center justify-center flex-nowrap  min-w-0 flex-1 whitespace-nowrap text-white bg-[#C90076] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition mr-2">
           ☕ Support this project
         </a>
         <div class="ml-auto flex gap-2 items-center">
-        <div id="version-display" class="inline-flex items-center justify-center flex-shrink-0 whitespace-nowrap text-gray-800 bg-gray-200 px-3 py-2 rounded-md font-bold shadow-md transition">
+        <div id="version-display" class="inline-flex items-center justify-center flex-nowrap  min-w-0 flex-1 whitespace-nowrap text-gray-800 bg-gray-200 px-3 py-2 rounded-md font-bold shadow-md transition">
         </div>
         <a href="https://github.com/deniam/AllYouCanFlyPro" target="_blank" rel="noopener noreferrer"
-           class="external-link inline-flex items-center gap-1 justify-center flex-shrink-0 whitespace-nowrap text-white bg-[#20006D] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] transition">
+           class="external-link inline-flex items-center gap-1 justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-white bg-[#20006D] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] transition">
           ⭐  GitHub
         </a>
         </div>
       </div>
 
       <!-- Header / Logo -->
-      <div class="text-center mt-[-20px] mb-6">
+      <div class="text-center mt-[-40px] mb-2">
         <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 10 300 100" preserveAspectRatio="xMidYMid meet">
           <defs>
             <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
@@ -92,6 +92,8 @@
         </svg>
       </div>
 
+      <div class="container mb-4 mx-auto px-0">
+        <div class="relative bg-gray-100 rounded-lg shadow-md p-2 overflow-visible">          
       <!-- Flight Search Form -->
       <div class="mb-2 flex items-center relative">
         <!-- Departure Container as flex item -->
@@ -145,7 +147,7 @@
       </div>
 
       <!-- Search, Stopover Options, and Options Buttons -->
-      <div class="mb-4 flex items-center justify-between">
+      <div class="mb-0 flex items-center justify-between">
         <button id="search-button" class="flex items-center gap-1 px-3 py-3 bg-[#C90076] text-white text-medium font-bold rounded-lg hover:bg-[#A00065] focus:outline-none transition cursor-pointer">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
             <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -189,7 +191,7 @@
       </div>
 
       <!-- Options Panel -->
-      <div class="mb-4">
+      <div class="mb-0">
         <div id="options-container" class="mt-3 hidden space-y-4 p-4 rounded-md border-2 border-[#20006D]">
           <div class="flex items-end justify-between gap-4">
             <div class="flex-1 relative">
@@ -267,7 +269,8 @@
         </div>
       </div>
     </div>
-
+    </div>
+  </div>
     <div class="lg:w-1/2 space-y-4 lg:block">
       <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
         <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>

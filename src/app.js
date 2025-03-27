@@ -954,7 +954,6 @@ function setupAutocomplete(inputId, suggestionsId) {
             }
             if (response && response.headers) {
               resolve(response.headers);
-              console.log("Message response:", response);
             } else if
               (chrome.runtime.lastError) {
                 console.error("sendMessage error:", chrome.runtime.lastError.message);
@@ -1313,7 +1312,6 @@ function setupAutocomplete(inputId, suggestionsId) {
             pageData.dynamicUrl = response.dynamicUrl;
             pageData.timestamp = Date.now();
             localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-            console.log("Message response:", response);
             resolve(response.dynamicUrl);
           } else if (response && response.error) {
             reject(new Error(response.error));
@@ -3273,9 +3271,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const versionEl = document.getElementById('version-display');
     if (versionEl) {
       versionEl.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V3m0 0L8.5 6.5M12 3l3.5 3.5M6 12H3m0 0l3.5 3.5M3 12l3.5-3.5M12 18v3m0 0l-3.5-3.5M12 21l3.5-3.5M18 12h3m0 0l-3.5-3.5M21 12l-3.5 3.5" />
-      </svg>
       <span>v${manifest.version}</span>
       `;
     }
