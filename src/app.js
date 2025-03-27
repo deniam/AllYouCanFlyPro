@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -137,6 +137,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   const progressContainer = document.getElementById('progress-container');
   const progressText = document.getElementById('progress-text');
   const progressBar = document.getElementById('progress-bar');
+  const resultsContainer = document.getElementById("results-container");
   const resultsAndSortContainer = document.getElementById("results-and-sort-container");
   const totalResultsEl = document.getElementById("total-results");
   const sortSelect = document.getElementById("sort-select");
@@ -954,7 +955,6 @@ function setupAutocomplete(inputId, suggestionsId) {
             }
             if (response && response.headers) {
               resolve(response.headers);
-              console.log("Message response:", response);
             } else if
               (chrome.runtime.lastError) {
                 console.error("sendMessage error:", chrome.runtime.lastError.message);
@@ -1170,6 +1170,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     sortResultsArray(results, currentSortOption);
   
     // 2) Show the container, update total results
+    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${results.length}`;
   
@@ -1188,6 +1189,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   function displayRoundTripResultsAll(outbounds) {
     // Sort outbound flights using the updated logic.
     sortResultsArray(outbounds, currentSortOption);
+    resultsContainer.classList.remove("hidden");
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${outbounds.length}`;
   
@@ -1313,7 +1315,6 @@ function setupAutocomplete(inputId, suggestionsId) {
             pageData.dynamicUrl = response.dynamicUrl;
             pageData.timestamp = Date.now();
             localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-            console.log("Message response:", response);
             resolve(response.dynamicUrl);
           } else if (response && response.error) {
             reject(new Error(response.error));
@@ -2550,14 +2551,30 @@ function createSegmentRow(segment) {
   `;
   const gridRow = `
     <div class="grid grid-cols-3 grid-rows-2 gap-1 items-center w-full py-1">
-      <div class="flex items-center gap-1 whitespace-nowrap">
+      <div class="flex items-center gap-1 whitespace-normal break-words">
         <span class="text-xl">${getCountryFlag(segment.departureStation)}</span>
         <span class="text-base font-medium">${segment.departureStationText}</span>
       </div>
-      <div class="flex justify-center">
-        <span class="text-xl font-medium">✈</span>
-      </div>
-      <div class="flex items-center justify-end gap-1 whitespace-nowrap mb-0">
+      <svg xmlns="http://www.w3.org/2000/svg"
+          class="block m-0 p-0"
+          width="100%" height="100%"
+          viewBox="0 40 300 40"
+          preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
+            <stop offset="0" stop-color="#20006D"/>
+            <stop offset="1" stop-color="#C90076"/>
+          </linearGradient>
+        </defs>
+        <g transform="translate(20,20)">
+          <line x1="0" y1="40" x2="260" y2="40" stroke="url(#lineGradient)" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="0" cy="40" r="6" fill="#20006D"/>
+          <circle cx="260" cy="40" r="6" fill="#C90076"/>
+          <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D"/>
+        </g>
+      </svg>
+
+      <div class="flex items-center justify-end gap-1 whitespace-normal break-words mb-0">
         <span class="text-base font-medium">${segment.arrivalStationText}</span>
         <span class="text-xl">${getCountryFlag(segment.arrivalStation)}</span>
       </div>
@@ -3252,6 +3269,14 @@ document.addEventListener("DOMContentLoaded", () => {
       document.body.style.zoom = this.value / 100;
     });
 
+    // ========= 12. Version Number =========
+    const manifest = chrome.runtime.getManifest();
+    const versionEl = document.getElementById('version-display');
+    if (versionEl) {
+      versionEl.innerHTML = `
+      <span>v${manifest.version}</span>
+      `;
+    }
     // ========= 12. Go to payment page =========
     document.querySelector(".route-list").addEventListener("click", (event) => {
       const btn = event.target.closest(".continue-payment-button");
