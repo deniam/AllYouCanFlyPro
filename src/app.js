@@ -2550,7 +2550,7 @@ function createSegmentRow(segment) {
   `;
   const gridRow = `
     <div class="grid grid-cols-3 grid-rows-2 gap-1 items-center w-full py-1">
-      <div class="flex items-center gap-1 whitespace-nowrap">
+      <div class="flex items-center gap-1 whitespace-normal break-words">
         <span class="text-xl">${getCountryFlag(segment.departureStation)}</span>
         <span class="text-base font-medium">${segment.departureStationText}</span>
       </div>
@@ -2573,7 +2573,7 @@ function createSegmentRow(segment) {
         </g>
       </svg>
 
-      <div class="flex items-center justify-end gap-1 whitespace-nowrap mb-0">
+      <div class="flex items-center justify-end gap-1 whitespace-normal break-words mb-0">
         <span class="text-base font-medium">${segment.arrivalStationText}</span>
         <span class="text-xl">${getCountryFlag(segment.arrivalStation)}</span>
       </div>

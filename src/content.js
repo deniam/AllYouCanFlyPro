@@ -1,6 +1,3 @@
-
-const debug = false;
-
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   try {
