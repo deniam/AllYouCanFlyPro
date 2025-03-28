@@ -59,8 +59,8 @@
           </div>
 
           <!-- Header / Logo -->
-          <div class="text-center mt-[-50px] mb-2">
-            <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 10 300 100" preserveAspectRatio="xMidYMid meet">
+          <div class="text-center mt-[0px] mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 40 300 70" preserveAspectRatio="xMidYMid meet">
               <defs>
                 <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
                   <stop offset="0" stop-color="#20006D" />
@@ -112,7 +112,7 @@
                            placeholder="Select Departure Date">
                     <div id="departure-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
                   </div>
-                  <!-- Return Date (с кнопкой добавления/удаления) -->
+                  <!-- Return Date -->
                   <div class="flex-1 relative" id="return-date-wrapper">
                     <div id="add-return-date-button-container" class="w-full">
                       <button id="trip-type-toggle" class="w-full flex items-center justify-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
@@ -124,7 +124,6 @@
                         <input type="text" id="return-date" readonly
                                class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
                                placeholder="Select Return Date">
-                        <!-- Позиционируем кнопку удаления абсолютно, чтобы она не уменьшала ширину поля -->
                         <button id="remove-return-date"
                                 class="absolute top-1.5 right-1 bg-[#20006D] text-white text-xs rounded-2xl hover:bg-[#A00065] flex items-center justify-center shadow-md transition cursor-pointer"
                                 style="width:1.5rem; height:1.5rem;">
