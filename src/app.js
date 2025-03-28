@@ -2355,7 +2355,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "—";
     // Added cursor-pointer for hover feedback
-    deleteBtn.className = "delete-btn  w-5 h-5 text-white text-xs bg-[#20006D] rounded-lg hover:bg-red-600 flex items-center justify-center cursor-pointer";
+    deleteBtn.className = "delete-btn  w-5 h-5 text-white text-xs bg-[#20006D] rounded-xl hover:bg-red-600 flex items-center justify-center cursor-pointer";
     deleteBtn.addEventListener("click", () => {
       row.remove();
       updateAirportRows(container);
@@ -2371,7 +2371,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     const plusBtn = document.createElement("button");
     plusBtn.textContent = "+";
     // Initially hidden, will be shown only when at least one field is filled
-    plusBtn.className = "plus-btn w-5 h-5 text-white text-xs bg-[#C90076] rounded-lg hover:bg-[#A00065] flex items-center justify-center cursor-pointer hidden";
+    plusBtn.className = "plus-btn w-5 h-5 text-white text-xs bg-[#C90076] rounded-xl hover:bg-[#A00065] flex items-center justify-center cursor-pointer hidden";
 
     plusBtn.addEventListener("click", () => {
       addAirportRow(container, fieldName);

@@ -42,7 +42,7 @@
     <div class="container mx-auto px-4">
       <div class="flex flex-col lg:flex-row gap-1">
         <div class="w-full lg:w-1/2 space-y-4">
-          <!-- Donation & GitHub Links -->
+          <!-- Donation, Version and GitHub Links -->
           <div class="flex justify-between items-center p-2 bg-gray-100 rounded-md shadow-md mb-4">
             <a href="https://revolut.me/denya24" target="_blank" rel="noopener noreferrer"
               class="external-link support-animation inline-flex gap-1 items-center justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-white bg-[#C90076] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition mr-2">
@@ -79,53 +79,63 @@
               </text>
             </svg>
           </div>
-
+          <!-- Main block -->
           <div class="container mb-4 mx-auto px-0">
             <div class="relative bg-gray-100 rounded-lg shadow-md p-2 overflow-visible">
               <!-- Flight Search Form -->
               <div class="mb-2 flex items-center relative">
+                <!-- Origin Multi -->
                 <div class="flex-1">
                   <label for="origin-multi" class="sr-only">Origin</label>
                   <div id="origin-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pr-4">
                   </div>
                 </div>
-
+                <!-- Swap button -->
                 <button id="swap-button" class="p-1.5 bg-[#20006D] text-white rounded-full hover:bg-[#A00065] flex items-center justify-center w-7 h-7 shadow-md transition cursor-pointer" title="Swap">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                   </svg>
                 </button>
-
+                <!-- Destination Multi --> 
                 <div class="flex-1">
                   <label for="destination-multi" class="sr-only">Destination</label>
                   <div id="destination-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pl-4">
                   </div>
                 </div>
               </div>
-
-              <div class="mb-2 flex gap-1 items-center">
-                <div class="flex-1 relative">
-                  <input type="text" id="departure-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Departure Date">
-                  <div id="departure-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
-                </div>
-                <div class="flex-1 relative" id="return-date-wrapper">
-                  <div id="add-return-date-button-container">
-                    <button id="trip-type-toggle" class="flex items-center justify-center w-full gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
-                      <span id="trip-type-text">Add Return Date</span>
-                    </button>
+              <!-- Calendars -->
+                <div class="mb-2 flex gap-15 items-center">
+                  <!-- Departure Date -->
+                  <div class="flex-1 relative">
+                    <input type="text" id="departure-date" readonly
+                           class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
+                           placeholder="Select Departure Date">
+                    <div id="departure-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
                   </div>
-                  <div id="return-date-container" style="display: none;">
-                    <div class="flex items-center">
-                      <input type="text" id="return-date" readonly class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer" placeholder="Select Return Date">
-                      <button id="remove-return-date" class="ml-1 p-1 bg-[#20006D] text-white text-xs rounded-lg hover:bg-[#A00065] flex items-center justify-center w-5 h-5 shadow-md transition cursor-pointer">
-                        ✕
+                  <!-- Return Date (с кнопкой добавления/удаления) -->
+                  <div class="flex-1 relative" id="return-date-wrapper">
+                    <div id="add-return-date-button-container" class="w-full">
+                      <button id="trip-type-toggle" class="w-full flex items-center justify-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+                        <span id="trip-type-text">Add Return Date</span>
                       </button>
                     </div>
-                    <div id="return-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
+                    <div id="return-date-container" class="w-full" style="display: none;">
+                      <div class="relative">
+                        <input type="text" id="return-date" readonly
+                               class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
+                               placeholder="Select Return Date">
+                        <!-- Позиционируем кнопку удаления абсолютно, чтобы она не уменьшала ширину поля -->
+                        <button id="remove-return-date"
+                                class="absolute top-1.5 right-1 bg-[#20006D] text-white text-xs rounded-2xl hover:bg-[#A00065] flex items-center justify-center shadow-md transition cursor-pointer"
+                                style="width:1.5rem; height:1.5rem;">
+                          ✕
+                        </button>
+                      </div>
+                      <div id="return-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
+                    </div>
                   </div>
                 </div>
-              </div>
-
+              <!-- Search button -->
               <div class="flex items-center justify-between">
                 <button id="search-button" class="flex items-center gap-1 px-3 py-3 bg-[#C90076] text-white text-medium font-bold rounded-lg hover:bg-[#A00065] focus:outline-none transition cursor-pointer">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
@@ -133,6 +143,7 @@
                   </svg>
                   SEARCH
                 </button>
+                <!-- Stopover button -->
                 <div class="flex items-center gap-2">
                   <div class="relative ml-2">
                     <button id="stopover-dropdown-button" class="flex items-center px-2 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition cursor-pointer">
@@ -141,6 +152,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
                       </svg>
                     </button>
+                    <!-- Stopover dropdown -->
                     <div id="stopover-dropdown" class="absolute left-0 mt-2 w-full bg-white border border-gray-300 rounded-lg shadow-lg hidden z-10">
                       <label class="flex items-center gap-2 px-4 py-2 text-gray-700 cursor-pointer hover:bg-gray-100">
                         <input type="radio" name="stopover" class="hidden" value="Non-stop only" checked>
@@ -160,6 +172,7 @@
                       </label>
                     </div>
                   </div>
+                  <!-- Options button -->
                   <button id="toggle-options" class="flex items-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg hover:bg-[#1A005D] focus:bg-[#C90076] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 inline-block align-middle">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0h9.75" />
@@ -169,6 +182,7 @@
                 </div>
               </div>
 
+              <!-- Options Container -->
               <div class="mb-0">
                 <div id="options-container" class="mt-2 p-2 rounded-md border-2 border-[#20006D] hidden">
                   <div class="flex items-center justify-between flex-nowrap pb-2 gap-1">
