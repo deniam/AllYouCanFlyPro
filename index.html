@@ -23,7 +23,7 @@
         border: 1px solid #ccc;
         border-radius: 0.375rem;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        padding: 1rem;
+        padding: 0.5rem;
         margin-top: 0.25rem;
       }
       img.emoji {
@@ -104,7 +104,7 @@
                 </div>
               </div>
               <!-- Calendars -->
-                <div class="mb-2 flex gap-15 items-center">
+                <div class="mb-2 flex gap-7 items-center">
                   <!-- Departure Date -->
                   <div class="flex-1 relative">
                     <input type="text" id="departure-date" readonly
@@ -124,11 +124,12 @@
                         <input type="text" id="return-date" readonly
                                class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
                                placeholder="Select Return Date">
-                        <button id="remove-return-date"
-                                class="absolute top-1.5 right-1 bg-[#20006D] text-white text-xs rounded-2xl hover:bg-[#A00065] flex items-center justify-center shadow-md transition cursor-pointer"
-                                style="width:1.5rem; height:1.5rem;">
-                          ✕
-                        </button>
+                      <button id="remove-return-date"
+                      class="absolute top-1/2 right-1 bg-[#20006D] text-white text-xs rounded-2xl hover:bg-[#A00065] flex items-center justify-center shadow-md transition cursor-pointer"
+                      style="width:1.5rem; height:1.5rem; transform: translateY(-50%);">
+                         ✕
+                       </button>
+                       
                       </div>
                       <div id="return-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
                     </div>
