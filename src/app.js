@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -1953,112 +1953,109 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
     if (debug) console.log("Max transfers set to:", maxTransfers);
   
-// --- Anywhere logic in handleSearch ---
-const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
-const isDestinationAnywhere = (destinations.length === 1 && destinations[0] === "ANY");
-
-// 1) Abort if either field is ANY and transfers are allowed.
-if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
-  showNotification("Search for routes with 'Anywhere' is available only for direct flights with no transfers.");
-  searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-              viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                <path stroke-linecap="round" stroke-linejoin="round" 
-                  d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-              </svg> SEARCH`;
-  searchActive = false;
-  hideProgress();
-  return;
-}
-
-// 2) Abort if both fields are ANY and trip type is roundtrip.
-if (isOriginAnywhere && isDestinationAnywhere && window.currentTripType === "return") {
-  showNotification("Search for 'Anywhere to Anywhere' is available only for one-way direct flights.");
-  searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-              viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                <path stroke-linecap="round" stroke-linejoin="round" 
-                  d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-              </svg> SEARCH`;
-  searchActive = false;
-  hideProgress();
-  return;
-}
-
-// 3) If both origin and destination are ANY (and allowed), replace origins with all unique departure codes.
-if (isOriginAnywhere && isDestinationAnywhere) {
-  showNotification("Searching all available direct flights. Please wait.");
-  let allRoutes = await fetchDestinations();
-  allRoutes = allRoutes.map(route => {
-    if (Array.isArray(route.arrivalStations)) {
-      route.arrivalStations = route.arrivalStations.filter(arrival => {
-        if (typeof arrival === "object" && arrival.operationStartDate) {
-          // Use the first departure date for filtering
-          return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
-        }
-        return true;
-      });
-    }
-    return route;
-  }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
-  const allOrigins = allRoutes.map(route => (
-    typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
-  ));
-  origins = Array.from(new Set(allOrigins));
-  if (debug) console.log("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
-}
-
-// 4) If only origin is ANY and destination is specified, filter origins.
-if (isOriginAnywhere && !isDestinationAnywhere) {
-  if (debug) console.log("Origin is 'ANY'; filtering origins based on provided destination(s).");
-  let fetchedRoutes = await fetchDestinations();
-  fetchedRoutes = fetchedRoutes.map(route => {
-    if (Array.isArray(route.arrivalStations)) {
-      route.arrivalStations = route.arrivalStations.filter(arrival => {
-        if (typeof arrival === "object" && arrival.operationStartDate) {
-          return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
-        }
-        return true;
-      });
-    }
-    return route;
-  }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
-  const destSet = new Set(destinations);
-  const filteredOrigins = fetchedRoutes.filter(route =>
-    route.arrivalStations.some(arr => {
-      const arrId = typeof arr === "object" ? arr.id : arr;
-      return destSet.has(arrId);
-    })
-  ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
-  origins = Array.from(new Set(filteredOrigins));
-  if (debug) console.log("Filtered origins:", origins);
-}
-
-// 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
-if (isDestinationAnywhere && !isOriginAnywhere) {
-  if (debug) console.log("Destination is 'ANY'; filtering destinations based on provided origin(s).");
-  let fetchedRoutes = await fetchDestinations();
-  fetchedRoutes = fetchedRoutes.map(route => {
-    if (Array.isArray(route.arrivalStations)) {
-      route.arrivalStations = route.arrivalStations.filter(arrival => {
-        if (typeof arrival === "object" && arrival.operationStartDate) {
-          return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
-        }
-        return true;
-      });
-    }
-    return route;
-  }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
-  const originSet = new Set(origins);
-  const filteredDestinations = fetchedRoutes.filter(route =>
-    originSet.has(typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation)
-  ).flatMap(route => route.arrivalStations.map(arr => (typeof arr === "object" ? arr.id : arr)));
-  destinations = Array.from(new Set(filteredDestinations));
-  if (debug) console.log("Filtered destinations:", destinations);
-}
-
-// --- End Anywhere logic ---
-
-// Then proceed with the search process using the processed origins and destinations.
+    // --- Anywhere logic in handleSearch ---
+    const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
+    const isDestinationAnywhere = (destinations.length === 1 && destinations[0] === "ANY");
   
+    // 1) Abort if either field is ANY and transfers are allowed.
+    if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
+      showNotification("Search for routes with 'Anywhere' is available only for direct flights with no transfers.");
+      searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
+                  viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" 
+                      d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                  </svg> SEARCH`;
+      searchActive = false;
+      hideProgress();
+      return;
+    }
+  
+    // 2) Abort if both fields are ANY and trip type is roundtrip.
+    if (isOriginAnywhere && isDestinationAnywhere && window.currentTripType === "return") {
+      showNotification("Search for 'Anywhere to Anywhere' is available only for one-way direct flights.");
+      searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
+                  viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" 
+                      d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                  </svg> SEARCH`;
+      searchActive = false;
+      hideProgress();
+      return;
+    }
+  
+    // 3) If both origin and destination are ANY (and allowed), replace origins with all unique departure codes.
+    if (isOriginAnywhere && isDestinationAnywhere) {
+      showNotification("Searching all available direct flights. Please wait.");
+      let allRoutes = await fetchDestinations();
+      allRoutes = allRoutes.map(route => {
+        if (Array.isArray(route.arrivalStations)) {
+          route.arrivalStations = route.arrivalStations.filter(arrival => {
+            if (typeof arrival === "object" && arrival.operationStartDate) {
+              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+            }
+            return true;
+          });
+        }
+        return route;
+      }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
+      const allOrigins = allRoutes.map(route => (
+        typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
+      ));
+      origins = Array.from(new Set(allOrigins));
+      if (debug) console.log("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
+    }
+  
+    // 4) If only origin is ANY and destination is specified, filter origins.
+    if (isOriginAnywhere && !isDestinationAnywhere) {
+      if (debug) console.log("Origin is 'ANY'; filtering origins based on provided destination(s).");
+      let fetchedRoutes = await fetchDestinations();
+      fetchedRoutes = fetchedRoutes.map(route => {
+        if (Array.isArray(route.arrivalStations)) {
+          route.arrivalStations = route.arrivalStations.filter(arrival => {
+            if (typeof arrival === "object" && arrival.operationStartDate) {
+              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+            }
+            return true;
+          });
+        }
+        return route;
+      }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
+      const destSet = new Set(destinations);
+      const filteredOrigins = fetchedRoutes.filter(route =>
+        route.arrivalStations.some(arr => {
+          const arrId = typeof arr === "object" ? arr.id : arr;
+          return destSet.has(arrId);
+        })
+      ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
+      origins = Array.from(new Set(filteredOrigins));
+      if (debug) console.log("Filtered origins:", origins);
+    }
+  
+    // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
+    if (isDestinationAnywhere && !isOriginAnywhere) {
+      if (debug) console.log("Destination is 'ANY'; filtering destinations based on provided origin(s).");
+      let fetchedRoutes = await fetchDestinations();
+      fetchedRoutes = fetchedRoutes.map(route => {
+        if (Array.isArray(route.arrivalStations)) {
+          route.arrivalStations = route.arrivalStations.filter(arrival => {
+            if (typeof arrival === "object" && arrival.operationStartDate) {
+              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+            }
+            return true;
+          });
+        }
+        return route;
+      }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
+      const originSet = new Set(origins);
+      const filteredDestinations = fetchedRoutes.filter(route =>
+        originSet.has(typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation)
+      ).flatMap(route => route.arrivalStations.map(arr => (typeof arr === "object" ? arr.id : arr)));
+      destinations = Array.from(new Set(filteredDestinations));
+      if (debug) console.log("Filtered destinations:", destinations);
+    }
+    // --- End Anywhere logic ---
+  
+    // Then proceed with the search process using the processed origins and destinations.
     try {
       if (tripType === "oneway") {
         for (const dateStr of departureDates) {
@@ -2071,7 +2068,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
           }
         }
       } else {
-        // Round-trip search (existing logic)
+        // Round-trip search
         if (debug) console.log("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
         suppressDisplay = true;
         let outboundFlights = [];
@@ -2109,24 +2106,29 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
         window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
         const originalOrigins = resolveAirport(window.originalOriginInput);
         if (debug) console.log("Original origins for round-trip:", originalOrigins);
-        for (const outbound of outboundFlights) {
-          let outboundDestination = outbound.arrivalStation;
-          for (const rDate of returnDates) {
-            for (const origin of originalOrigins) {
-              const key = `${outboundDestination}-${origin}-${rDate}`;
+  
+        // If the original origin value is "ANY", search for inbound flights so that:
+        // inbound.origin is any airport in the destination group, and inbound.destination equals outbound.origin.
+        if (originalOrigins[0] === "ANY") {
+          for (const outbound of outboundFlights) {
+            // outboundOrigin is the actual departure airport of the outbound flight.
+            let outboundOrigin = (typeof outbound.departureStation === "object" ? outbound.departureStation.id : outbound.departureStation);
+            for (const rDate of returnDates) {
+              // Use the same key as when building the inbound queries.
+              const key = `${destinations.join(",")}-${outboundOrigin}-${rDate}`;
               if (!inboundQueries[key]) {
                 if (maxTransfers > 0) {
                   inboundQueries[key] = async () => {
                     const connectingResults = await searchConnectingRoutes(
-                      [outbound.arrivalStation],
-                      [origin],
+                      destinations, // search inbound flights from any airport in the destination group
+                      [outboundOrigin],
                       rDate,
                       maxTransfers,
                       false
                     );
                     const directResults = await searchDirectRoutes(
-                      [outbound.arrivalStation],
-                      [origin],
+                      destinations, // use the entire destination array
+                      [outboundOrigin],
                       rDate,
                       false,
                       false,
@@ -2136,8 +2138,58 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
                   };
                 } else {
                   inboundQueries[key] = async () => {
-                    return await searchDirectRoutes([outbound.arrivalStation], [origin], rDate, false, false, maxTransfers);
+                    return await searchDirectRoutes(
+                      destinations, // use the entire destination array
+                      [outboundOrigin],
+                      rDate,
+                      false,
+                      false,
+                      maxTransfers
+                    );
                   };
+                }
+              }
+            }
+          }
+        } else {
+          // Standard logic when origin is explicitly defined.
+          for (const outbound of outboundFlights) {
+            let outboundDestination = outbound.arrivalStation;
+            for (const rDate of returnDates) {
+              for (const origin of originalOrigins) {
+                const key = `${outboundDestination}-${origin}-${rDate}`;
+                if (!inboundQueries[key]) {
+                  if (maxTransfers > 0) {
+                    inboundQueries[key] = async () => {
+                      const connectingResults = await searchConnectingRoutes(
+                        [outbound.arrivalStation],
+                        [origin],
+                        rDate,
+                        maxTransfers,
+                        false
+                      );
+                      const directResults = await searchDirectRoutes(
+                        [outbound.arrivalStation],
+                        [origin],
+                        rDate,
+                        false,
+                        false,
+                        maxTransfers
+                      );
+                      return [...connectingResults, ...directResults];
+                    };
+                  } else {
+                    inboundQueries[key] = async () => {
+                      return await searchDirectRoutes(
+                        [outbound.arrivalStation],
+                        [origin],
+                        rDate,
+                        false,
+                        false,
+                        maxTransfers
+                      );
+                    };
+                  }
                 }
               }
             }
@@ -2154,22 +2206,53 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
             inboundResults[key] = [];
           }
         }
+        // Flitering inbound flights.
         for (const outbound of outboundFlights) {
-          let outboundDestination = outbound.arrivalStation;
+          let outboundDestination = (typeof outbound.arrivalStation === "object" ? outbound.arrivalStation.id : outbound.arrivalStation);
           let matchedInbound = [];
-          for (const rDate of returnDates) {
-            for (const origin of originalOrigins) {
-              const key = `${outboundDestination}-${origin}-${rDate}`;
+          if (originalOrigins[0] === "ANY") {
+            // For reverse search: inbound.origin should be one of the airports in the destination group,
+            // and inbound.destination should equal outbound.origin.
+            let outboundOrigin = (typeof outbound.departureStation === "object" ? outbound.departureStation.id : outbound.departureStation);
+            for (const rDate of returnDates) {
+              // Use the same key as above.
+              const key = `${destinations.join(",")}-${outboundOrigin}-${rDate}`;
               let inboundForKey = inboundResults[key] || [];
               const filteredInbound = inboundForKey.filter(inbound => {
+                const inboundDep = (typeof inbound.departureStation === "object" ? inbound.departureStation.id : inbound.departureStation);
+                const inboundArr = (typeof inbound.arrivalStation === "object" ? inbound.arrivalStation.id : inbound.arrivalStation);
+                const validDep = destinations.includes(inboundDep);
+                const validArr = inboundArr === outboundOrigin;
                 const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
                 const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
-                if (!validGap) {
-                  if (debug) console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
+                if (!validDep) {
+                  if (debug) console.log(`Inbound flight ${inbound.flightCode} rejected: departure station ${inboundDep} is not in the destination group ${destinations}`);
                 }
-                return validGap;
+                if (!validArr) {
+                  if (debug) console.log(`Inbound flight ${inbound.flightCode} rejected: arrival station ${inboundArr} does not match outbound origin ${outboundOrigin}`);
+                }
+                if (!validGap) {
+                  if (debug) console.log(`Inbound flight ${inbound.flightCode} rejected: connection gap ${connectionGap} minutes`);
+                }
+                return validDep && validArr && validGap;
               });
               matchedInbound = matchedInbound.concat(filteredInbound);
+            }
+          } else {
+            for (const rDate of returnDates) {
+              for (const origin of originalOrigins) {
+                const key = `${outboundDestination}-${origin}-${rDate}`;
+                let inboundForKey = inboundResults[key] || [];
+                const filteredInbound = inboundForKey.filter(inbound => {
+                  const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
+                  const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
+                  if (!validGap) {
+                    if (debug) console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
+                  }
+                  return validGap;
+                });
+                matchedInbound = matchedInbound.concat(filteredInbound);
+              }
             }
           }
           const seenInbound = new Set();
@@ -2209,6 +2292,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
       if (debug) console.log("Search process finished.");
     }
   }
+  
   
   // ---------------- Additional UI Functions ----------------
   
@@ -2271,7 +2355,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "—";
     // Added cursor-pointer for hover feedback
-    deleteBtn.className = "delete-btn  w-5 h-5 text-white text-xs bg-[#20006D] rounded-lg hover:bg-red-600 flex items-center justify-center cursor-pointer";
+    deleteBtn.className = "delete-btn  w-5 h-5 text-white text-xs bg-[#20006D] rounded-xl hover:bg-red-600 flex items-center justify-center cursor-pointer";
     deleteBtn.addEventListener("click", () => {
       row.remove();
       updateAirportRows(container);
@@ -2287,7 +2371,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
     const plusBtn = document.createElement("button");
     plusBtn.textContent = "+";
     // Initially hidden, will be shown only when at least one field is filled
-    plusBtn.className = "plus-btn w-5 h-5 text-white text-xs bg-[#C90076] rounded-lg hover:bg-[#A00065] flex items-center justify-center cursor-pointer hidden";
+    plusBtn.className = "plus-btn w-5 h-5 text-white text-xs bg-[#C90076] rounded-xl hover:bg-[#A00065] flex items-center justify-center cursor-pointer hidden";
 
     plusBtn.addEventListener("click", () => {
       addAirportRow(container, fieldName);
@@ -2553,9 +2637,9 @@ function createSegmentRow(segment) {
   `;
   const gridRow = `
     <div class="grid grid-cols-3 grid-rows-2 gap-1 items-center w-full py-1">
-      <div class="flex items-center gap-1 whitespace-normal break-words">
+      <div class="flex items-center gap-1 whitespace-normal">
         <span class="text-xl">${getCountryFlag(segment.departureStation)}</span>
-        <span class="text-base font-medium">${segment.departureStationText}</span>
+        <span class="text-base font-medium break-words max-w-[calc(100%-2rem)">${segment.departureStationText}</span>
       </div>
       <svg xmlns="http://www.w3.org/2000/svg"
           class="block m-0 p-0"
@@ -2576,9 +2660,9 @@ function createSegmentRow(segment) {
         </g>
       </svg>
 
-      <div class="flex items-center justify-end gap-1 whitespace-normal break-words mb-0">
-        <span class="text-base font-medium">${segment.arrivalStationText}</span>
-        <span class="text-xl">${getCountryFlag(segment.arrivalStation)}</span>
+      <div class="flex justify-end gap-1 mb-0">
+        <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">${segment.arrivalStationText}</span>
+        <span class="text-xl flex-shrink-0">${getCountryFlag(segment.arrivalStation)}</span>
       </div>
       <div class="flex items-center gap-1">
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
