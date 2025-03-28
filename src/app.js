@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -460,7 +460,7 @@ function setupAutocomplete(inputId, suggestionsId) {
         // If the suggestion is in recent entries (and not "Anywhere"), add a delete button.
         if (getRecentEntries().includes(match.name) && match.name.toLowerCase() !== "anywhere") {
           const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "✕";
+          deleteBtn.textContent = "—";
           deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
           deleteBtn.addEventListener("click", (event) => {
             event.stopPropagation();
@@ -491,7 +491,7 @@ function setupAutocomplete(inputId, suggestionsId) {
             suggestionsEl.classList.add("hidden");
           });
           const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "✕";
+          deleteBtn.textContent = "—";
           deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
           deleteBtn.addEventListener("click", (event) => {
             event.stopPropagation();
@@ -550,7 +550,7 @@ function setupAutocomplete(inputId, suggestionsId) {
         suggestionsEl.classList.add("hidden");
       });
       const deleteBtn = document.createElement("button");
-      deleteBtn.textContent = "✕";
+      deleteBtn.textContent = "—";
       deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
       deleteBtn.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -1946,7 +1946,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     let maxTransfers = 0;
     if (stopoverText === "One stop or fewer" || stopoverText === "One stop or fewer (overnight)") {
       maxTransfers = 1;
-    } else if (stopoverText === "Two stops or fewer") {
+    } else if (stopoverText === "Two stops or fewer (overnight)") {
       maxTransfers = 2;
     } else {
       maxTransfers = 0;
@@ -2269,7 +2269,7 @@ if (isDestinationAnywhere && !isOriginAnywhere) {
   
     // Always add a delete button (even for the first row)
     const deleteBtn = document.createElement("button");
-    deleteBtn.textContent = "✕";
+    deleteBtn.textContent = "—";
     // Added cursor-pointer for hover feedback
     deleteBtn.className = "delete-btn  w-5 h-5 text-white text-xs bg-[#20006D] rounded-lg hover:bg-red-600 flex items-center justify-center cursor-pointer";
     deleteBtn.addEventListener("click", () => {
