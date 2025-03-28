@@ -170,43 +170,42 @@
               </div>
 
               <div class="mb-0">
-                <div id="options-container" class="mt-2 p-2 space-y-2 rounded-md border-2 border-[#20006D] hidden">
-                  <div class="flex items-center justify-between flex-wrap gap-1">
-                    <div class="relative flex-shrink basis-33 min-w-0">
+                <div id="options-container" class="mt-2 p-2 rounded-md border-2 border-[#20006D] hidden">
+                  <div class="flex items-center justify-between flex-nowrap pb-2 gap-1">
+                    <!-- Preferred Airport -->
+                    <div class="relative flex-shrink min-w-0 basis-48">
                       <label class="block text-gray-700 font-medium mb-1">PREFERRED AIRPORT</label>
-                      <input
-                        type="text"
-                        id="preferred-airport"
-                        class="w-full max-w-full bg-gray-100 border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]"
-                        placeholder="Enter preferred airport"
-                      >
-                      <div id="airport-suggestions-preferred" class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
+                      <input type="text" id="preferred-airport"
+                             class="w-full bg-gray-100 border border-gray-300 rounded px-3 py-2 focus:ring-[#C90076]"
+                             placeholder="Enter preferred airport">
+                      <div id="airport-suggestions-preferred"
+                           class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
                     </div>
-                    
-                    <div class="flex flex-col items-center border-2 border-grey300 rounded-md p-2 mx-auto">
-                      <label class="block text-gray-700 font-medium mb-1 text-center">Connection time (minutes)</label>
+                
+                    <!-- Connection Time -->
+                    <div class="flex flex-col items-center border-2 border-gray-300 rounded-md p-2 shrink-0">
+                      <label class="text-gray-700 text-xsfont-medium mb-1">Connection time (mins)</label>
                       <div class="flex items-center gap-1">
-                        <div class="flex items-center">
-                          <label class="block px-1 text-gray-700 text-xs font-medium mb-1 text-center">MIN</label>
+                        <div class="flex flex-col items-center">
+                          <span class="text-xs font-medium mb-1">MIN</span>
                           <input type="number" id="min-connection-time" value="90"
-                            class="bg-gray-100 border border-gray-300 rounded px-1 py-1 text-right focus:outline-none focus:ring-1 focus:ring-[#C90076] w-[55px]">
+                                 class="bg-gray-100 border border-gray-300 rounded px-1 py-1 w-[55px] text-right focus:ring-[#C90076]">
                         </div>
-                        <div class="flex items-center">
-                          <label class="block px-1 text-gray-700 text-xs font-medium mb-1 text-center">MAX</label>
+                        <div class="flex flex-col items-center">
+                          <span class="text-xs font-medium mb-1">MAX</span>
                           <input type="number" id="max-connection-time" value="1440"
-                            class="bg-gray-100 border border-gray-300 rounded px-1 py-1 text-right focus:outline-none focus:ring-1 focus:ring-[#C90076] w-[55px]">
+                                 class="bg-gray-100 border border-gray-300 rounded px-1 py-1 w-[55px] text-right focus:ring-[#C90076]">
                         </div>
                       </div>
                     </div>
-                    <div class="flex-col items-centerrounded-md">
+                
+                    <!-- Clear Cache -->
                     <button id="clear-cache-button"
-                      class="px-10 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 whitespace-nowrap self-end cursor-pointer">
-                      <div>CLEAR</div>
-                      <div>CACHE</div>
+                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:ring-[#C90076] shrink-0">
+                      CLEAR<br>CACHE
                     </button>
                   </div>
-                  </div>
-                  <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-1 py-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
+                  <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-1 py-2 mb-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
                     SHOW EXPERT SETTINGS
                   </button>
                   <div id="expert-settings" class="mt-1 hidden border-t pt-1">
