@@ -168,10 +168,15 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
 
   // ----------------------- UI Helper Functions -----------------------
-  
+  let progressVisible = false;
   function updateProgress(current, total, message) {
     resultsContainer.classList.remove("hidden");
-    progressContainer.style.display = "block";
+    if (!progressVisible) {
+      progressContainer.style.display = "block";
+      animateElement(progressContainer, "dropdown-enter", 300);
+      progressVisible = true;
+    }
+    
     progressText.textContent = `${message} (${current} of ${total})`;
     const percentage = total > 0 ? (current / total) * 100 : 0;
     progressBar.style.width = percentage + "%";
@@ -272,6 +277,15 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const hours = parseFloat(document.getElementById("cache-lifetime").value);
     CACHE_LIFETIME = hours * 60 * 60 * 1000;
     localStorage.setItem("cacheLifetimeHours", hours);
+  }
+
+  function animateElement(element, animationClass, duration = 300) {
+    if (element) {
+      element.classList.add(animationClass);
+      setTimeout(() => {
+        element.classList.remove(animationClass);
+      }, duration);
+    }
   }
   //===========Autocomplete Functions================
 // Assumptions:
@@ -2409,6 +2423,9 @@ function setupAutocomplete(inputId, suggestionsId) {
   function toggleOptions() {
     const optionsContainer = document.getElementById("options-container");
     optionsContainer.classList.toggle("hidden");
+    if (!optionsContainer.classList.contains("hidden")) {
+      animateElement(optionsContainer, "dropdown-enter", 300);
+    }
   }
 
   function showNotification(message) {
@@ -2418,7 +2435,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     text.textContent = message; // Set the message text
     banner.classList.remove("hidden", "opacity-0"); // Show banner
     banner.classList.add("opacity-100");
-  
+    animateElement(banner, "notification-enter", 500);
     // Hide after 3 seconds
     setTimeout(() => {
       banner.classList.remove("opacity-100");
@@ -3033,6 +3050,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const expertSettings = document.getElementById("expert-settings");
       if (expertSettings.classList.contains("hidden")) {
         expertSettings.classList.remove("hidden");
+        animateElement(expertSettings, "dropdown-enter", 300);
         event.target.textContent = "Hide Expert Settings";
       } else {
         expertSettings.classList.add("hidden");
@@ -3265,6 +3283,9 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("click", function (event) {
       const dropdown = document.getElementById("stopover-dropdown");
       const button = document.getElementById("stopover-dropdown-button");
+      if (!dropdown.classList.contains("hidden")) {
+        animateElement(dropdown, "dropdown-enter", 300);
+      }
       if (!dropdown.contains(event.target) && !button.contains(event.target)) {
         dropdown.classList.add("hidden");
       }

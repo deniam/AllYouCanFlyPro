@@ -17,6 +17,23 @@
         animation: subtlePink 10s infinite alternate ease-in-out;
       }
 
+      .dropdown-enter {
+        animation: fadeInSlide 0.3s ease-out forwards;
+      }
+
+      @keyframes fadeInSlide {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .notification-enter {
+        animation: slideUpFadeIn 0.5s ease-out forwards;
+      }
       .suggestions-enter {
         animation: fadeInDropdown 0.3s ease-out forwards;
       }
@@ -184,7 +201,7 @@
                       </label>
                       <label class="flex items-center gap-1 px-1 py-1 text-gray-700 cursor-pointer hover:bg-gray-100">
                         <input type="radio" name="stopover" class="hidden" value="Two stops or fewer (overnight)">
-                        <span>Two stops or fewer</span>
+                        <span>Two stops or fewer (overnight)</span>
                       </label>
                     </div>
                   </div>
