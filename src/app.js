@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
@@ -1936,7 +1936,9 @@ function setupAutocomplete(inputId, suggestionsId) {
     const tripType = window.currentTripType || "oneway";
     let departureDates = [];
     const departureInputRaw = document.getElementById("departure-date").value.trim();
+    console.log("departureInputRaw", departureInputRaw);
     departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
+    console.log("departureDates", departureDates);
     if (debug) console.log("Departure dates:", departureDates);
   
     document.querySelector(".route-list").innerHTML = "";
@@ -2339,7 +2341,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     } else {
       input.placeholder = "Enter Airport";
     }
-    input.className = "block w-full bg-transparent border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
+    input.className = "block w-full bg-transparent border border-gray-300 text-gray-800 rounded-md px-1 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
     const inputId = fieldName + "-input-" + Date.now();
     input.id = inputId;
     inputWrapper.appendChild(input);
@@ -2350,7 +2352,10 @@ function setupAutocomplete(inputId, suggestionsId) {
     inputWrapper.appendChild(suggestions);
 
     row.appendChild(inputWrapper);
-  
+
+    // --- NEW: Button container (right side, vertical layout) ---
+    const buttonGroup = document.createElement("div");
+    buttonGroup.className = "flex flex-col items-center justify-start gap-1";
     // Always add a delete button (even for the first row)
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "—";
@@ -2365,7 +2370,6 @@ function setupAutocomplete(inputId, suggestionsId) {
         updateAirportRows(container);
       }
     });
-    row.appendChild(deleteBtn);
   
     // Add the plus button for adding new rows.
     const plusBtn = document.createElement("button");
@@ -2379,7 +2383,12 @@ function setupAutocomplete(inputId, suggestionsId) {
     });
 
     // Append the button to the row but keep it hidden initially
-    row.appendChild(plusBtn);
+    // Append both buttons to buttonGroup
+    buttonGroup.appendChild(deleteBtn);
+    buttonGroup.appendChild(plusBtn);
+
+    // Append the button group to the row
+    row.appendChild(buttonGroup);
 
     // Function to update plus button visibility
     function updatePlusButtonVisibility() {
@@ -2662,7 +2671,7 @@ function createSegmentRow(segment) {
 
       <div class="flex justify-end gap-1 mb-0">
         <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">${segment.arrivalStationText}</span>
-        <span class="text-xl flex-shrink-0">${getCountryFlag(segment.arrivalStation)}</span>
+        <span class="text-xl items-center flex">${getCountryFlag(segment.arrivalStation)}</span>
       </div>
       <div class="flex items-center gap-1">
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>

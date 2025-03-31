@@ -49,7 +49,7 @@
               ☕ Support this project
             </a>
             <div class="ml-auto flex gap-2 items-center">
-              <div id="version-display" class="inline-flex items-center justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-gray-800 bg-gray-200 px-3 py-2 rounded-md font-bold shadow-md transition">
+              <div id="version-display" class="inline-flex items-center justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-gray-800 bg-gray-200 py-2 rounded-md font-bold shadow-md transition">
               </div>
               <a href="https://github.com/deniam/AllYouCanFlyPro" target="_blank" rel="noopener noreferrer"
                  class="external-link inline-flex items-center gap-1 justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-white bg-[#20006D] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] transition">
@@ -87,7 +87,7 @@
                 <!-- Origin Multi -->
                 <div class="flex-1">
                   <label for="origin-multi" class="sr-only">Origin</label>
-                  <div id="origin-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pr-4">
+                  <div id="origin-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pr-2">
                   </div>
                 </div>
                 <!-- Swap button -->
@@ -99,7 +99,7 @@
                 <!-- Destination Multi --> 
                 <div class="flex-1">
                   <label for="destination-multi" class="sr-only">Destination</label>
-                  <div id="destination-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pl-4">
+                  <div id="destination-multi" class="multi-airport-container bg-gray-100 border border-gray-300 rounded-md pl-2">
                   </div>
                 </div>
               </div>
@@ -108,21 +108,21 @@
                   <!-- Departure Date -->
                   <div class="flex-1 relative">
                     <input type="text" id="departure-date" readonly
-                           class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
+                           class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-1 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
                            placeholder="Select Departure Date">
                     <div id="departure-calendar-popup" class="calendar-popup hidden" style="width: 220px; font-size: 0.8rem;"></div>
                   </div>
                   <!-- Return Date -->
                   <div class="flex-1 relative" id="return-date-wrapper">
                     <div id="add-return-date-button-container" class="w-full">
-                      <button id="trip-type-toggle" class="w-full flex items-center justify-center gap-1 px-2 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
+                      <button id="trip-type-toggle" class="w-full flex items-center justify-center gap-1 px-1 py-2 bg-[#20006D] text-white font-medium rounded-lg shadow-md hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] transition cursor-pointer">
                         <span id="trip-type-text">Add Return Date</span>
                       </button>
                     </div>
                     <div id="return-date-container" class="w-full" style="display: none;">
                       <div class="relative">
                         <input type="text" id="return-date" readonly
-                               class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
+                               class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-1 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer"
                                placeholder="Select Return Date">
                       <button id="remove-return-date"
                       class="absolute top-1/2 right-1 bg-[#20006D] text-white text-xs rounded-2xl hover:bg-[#A00065] flex items-center justify-center shadow-md transition cursor-pointer"
@@ -146,7 +146,7 @@
                 <!-- Stopover button -->
                 <div class="flex items-center gap-2">
                   <div class="relative ml-2">
-                    <button id="stopover-dropdown-button" class="flex items-center px-2 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition cursor-pointer">
+                    <button id="stopover-dropdown-button" class="flex items-center px-2 py-2 bg-gray-200 text-gray-800 text-s font-medium rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition cursor-pointer">
                       <span id="selected-stopover">Non-stop only</span>
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
@@ -186,15 +186,6 @@
               <div class="mb-0">
                 <div id="options-container" class="mt-2 p-2 rounded-md border-2 border-[#20006D] hidden">
                   <div class="flex items-center justify-between flex-nowrap pb-2 gap-1">
-                    <!-- Preferred Airport -->
-                    <div class="relative flex-shrink min-w-0 basis-48">
-                      <label class="block text-gray-700 font-xs mb-1">Preferred Airport</label>
-                      <input type="text" id="preferred-airport"
-                             class="w-full bg-gray-100 border border-gray-300 rounded px-3 py-2 focus:ring-[#C90076]"
-                             placeholder="Enter preferred airport">
-                      <div id="airport-suggestions-preferred"
-                           class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
-                    </div>
                 
                     <!-- Connection Time -->
                     <div class="flex flex-col items-center border-2 border-gray-300 rounded-md p-2 shrink-0">
@@ -213,11 +204,23 @@
                       </div>
                     </div>
                 
+                    <!-- Preferred Airport -->
+                    <div class="w-full">
+                    <div class="relative flex-shrink min-w-0 basis-20 mb-2">
+                      <label class="block text-gray-700 font-xs mb-1">Preferred Airport</label>
+                      <input type="text" id="preferred-airport"
+                             class="w-full bg-gray-100 border border-gray-300 rounded px-1 py-1 focus:ring-[#C90076]"
+                             placeholder="Enter preferred airport">
+                      <div id="airport-suggestions-preferred"
+                           class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
+                    </div>
+
                     <!-- Clear Cache -->
                     <button id="clear-cache-button"
-                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:ring-[#C90076] shrink-0">
-                      CLEAR<br>CACHE
+                            class="w-full relative flex-shrink py-2 min-w-0 basis-20 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 focus:ring-[#C90076]">
+                      CLEAR CACHE
                     </button>
+                  </div>
                   </div>
                   <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-1 py-2 mb-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
                     SHOW EXPERT SETTINGS
@@ -247,7 +250,7 @@
                     </div>
                   </div>
                   <button id="update-preferred-airport" class="w-full bg-[#20006D] text-white rounded px-4 py-2 hover:bg-[#A00065] focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
-                    UPDATE
+                    SAVE CHANGES
                   </button>
                 </div>
               </div>
