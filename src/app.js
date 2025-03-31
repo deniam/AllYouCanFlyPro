@@ -86,8 +86,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
   }
 
-  initAirports();
-
   async function importRoutes() {
     try {
       await db.routes.clear();
@@ -100,7 +98,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
   }
   
-  importRoutes();  
+  async function initApp() {
+    await importRoutes();    // Wait for routes data to be imported and stored in IndexedDB (fills window.ROUTES)
+    await initAirports();    // Then load airports and initialize autocomplete (which uses window.ROUTES)
+  }
+  initApp();
   // ---------------- Helper: Airport Flag ----------------
   const airportLookup = {};
   AIRPORTS.forEach(a => {
@@ -364,6 +366,9 @@ function setupAutocomplete(inputId, suggestionsId) {
     suggestions.sort((a, b) => a.name.localeCompare(b.name));
     return suggestions;
   }
+
+  let previousQuery = "";
+  let directAnimated = false;
   function showSuggestions(query = "") {
     // Guard: if suggestionsEl or inputEl are not defined, do nothing.
     if (!inputEl || !suggestionsEl) return;
@@ -383,7 +388,13 @@ function setupAutocomplete(inputId, suggestionsId) {
       }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
       
       let matches = [...countryMatches, ...airportMatches];
-      matches.sort((a, b) => a.name.localeCompare(b.name));
+      matches.sort((a, b) => {
+        const aStarts = a.name.toLowerCase().startsWith(query);
+        const bStarts = b.name.toLowerCase().startsWith(query);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return a.name.localeCompare(b.name);
+      });
       // Limit to six suggestions from filtering
       matches = matches.slice(0, 6);
       // For fields other than preferred-airport, always add "Anywhere" first.
@@ -406,9 +417,18 @@ function setupAutocomplete(inputId, suggestionsId) {
         });
         suggestionsEl.appendChild(div);
       });
+      const shouldAnimate = previousQuery.length === 0 && query.length > 0;
+      previousQuery = query;
       suggestionsEl.style.maxHeight = "250px";
       suggestionsEl.style.overflowY = "auto";
       suggestionsEl.classList.remove("hidden");
+      if (shouldAnimate) {
+        suggestionsEl.classList.add("suggestions-enter");
+        setTimeout(() => {
+          suggestionsEl.classList.remove("suggestions-enter");
+        }, 300);
+      }
+      directAnimated = false;
       return;
     }
     
@@ -443,9 +463,19 @@ function setupAutocomplete(inputId, suggestionsId) {
         });
         suggestionsEl.appendChild(div);
       });
+      const shouldAnimate = previousQuery.length === 0 && query.length > 0;
+      previousQuery = query;
       suggestionsEl.style.maxHeight = "250px";
       suggestionsEl.style.overflowY = "auto";
       suggestionsEl.classList.remove("hidden");
+      if (!directAnimated) {
+        suggestionsEl.classList.add("suggestions-enter");
+        setTimeout(() => {
+          suggestionsEl.classList.remove("suggestions-enter");
+        }, 300);
+        directAnimated = true;
+      }
+      previousQuery = "";
       return;
     }
     
