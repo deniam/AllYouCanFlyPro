@@ -283,49 +283,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   const suggestionsEl = document.getElementById(suggestionsId);
 
   const lowerInputId = inputId.toLowerCase();
-  const recentKey = lowerInputId.includes("destination")
-    ? "recentAirports_destination"
-    : lowerInputId.includes("origin")
-      ? "recentAirports_origin"
-      : "recentAirports_" + inputId;
-
-  // Gather all used entries from other origin/destination fields.
-  function getAllUsedEntries() {
-    const originUsed = Array.from(document.querySelectorAll("#origin-multi input"))
-      .filter(el => el.id !== inputId)
-      .map(el => el.value.trim().toLowerCase());
-    const destUsed = Array.from(document.querySelectorAll("#destination-multi input"))
-      .filter(el => el.id !== inputId)
-      .map(el => el.value.trim().toLowerCase());
-    return new Set([...originUsed, ...destUsed]);
-  }
-
-  // Retrieve recent entries from localStorage.
-  function getRecentEntries() {
-    const stored = localStorage.getItem(recentKey);
-    let recents = stored ? JSON.parse(stored) : [];
-    // Remove "Anywhere" (case-insensitive) and add it to the top.
-    recents = recents.filter(e => e.toLowerCase() !== "anywhere");
-    recents.unshift("Anywhere");
-    return recents;
-  }
-
-  // Add a new entry or update its position in recent entries.
-  function addRecentEntry(entry) {
-    let recents = getRecentEntries();
-    recents = recents.filter(e => e !== entry);
-    recents.unshift(entry);
-    if (recents.length > 6) recents = recents.slice(0, 6);
-    localStorage.setItem(recentKey, JSON.stringify(recents));
-  }
-
-  // Remove an entry from recent entries.
-  function removeRecentEntry(entry) {
-    let recents = getRecentEntries().filter(e => e !== entry);
-    localStorage.setItem(recentKey, JSON.stringify(recents));
-    // Refresh suggestions.
-    showSuggestions(inputEl.value.trim().toLowerCase());
-  }
+  
   function getDirectSuggestionsForDestination() {
     const origins = getMultiAirportValues("origin-multi")
       .filter(v => (v || "").toLowerCase() !== "anywhere" && (v || "").trim() !== "");
@@ -411,26 +369,16 @@ function setupAutocomplete(inputId, suggestionsId) {
     if (!inputEl || !suggestionsEl) return;
     
     suggestionsEl.innerHTML = "";
-    const usedEntries = getAllUsedEntries();
     
     // When a query is entered: filter the full catalog
-    if (query) {
-      const usedCountryAirports = new Set();
-      Object.keys(COUNTRY_AIRPORTS).forEach(country => {
-        if (usedEntries.has(country.toLowerCase())) {
-          COUNTRY_AIRPORTS[country].forEach(code => usedCountryAirports.add(code.toLowerCase()));
-        }
-      });
-      
+    if (query) {     
       const countryMatches = Object.keys(COUNTRY_AIRPORTS)
-        .filter(country => country.toLowerCase().includes(query) && !usedEntries.has(country.toLowerCase()))
+        .filter(country => country.toLowerCase().includes(query))
         .map(country => ({ isCountry: true, code: country, name: country }));
       
       const airportMatches = AIRPORTS.filter(a => {
         const codeLower = a.code.toLowerCase();
         const nameLower = a.name.toLowerCase();
-        if (usedEntries.has(codeLower) || usedEntries.has(nameLower)) return false;
-        if (usedCountryAirports.has(codeLower)) return false;
         return codeLower.includes(query) || nameLower.includes(query);
       }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
       
@@ -450,24 +398,12 @@ function setupAutocomplete(inputId, suggestionsId) {
       
       matches.forEach(match => {
         const div = document.createElement("div");
-        div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
+        div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
         div.textContent = match.name;
         div.addEventListener("click", () => {
           inputEl.value = match.name;
-          addRecentEntry(match.name);
           suggestionsEl.classList.add("hidden");
         });
-        // If the suggestion is in recent entries (and not "Anywhere"), add a delete button.
-        if (getRecentEntries().includes(match.name) && match.name.toLowerCase() !== "anywhere") {
-          const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "—";
-          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-          deleteBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            removeRecentEntry(match.name);
-          });
-          div.appendChild(deleteBtn);
-        }
         suggestionsEl.appendChild(div);
       });
       suggestionsEl.style.maxHeight = "250px";
@@ -480,26 +416,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     if (!query) {
       // For the preferred-airport field, do not include "Anywhere"
       if (inputId === "preferred-airport") {
-        const recents = getRecentEntries().filter(e => e.toLowerCase() !== "anywhere");
-        recents.forEach(entry => {
-          const div = document.createElement("div");
-          div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
-          div.textContent = entry;
-          div.addEventListener("click", () => {
-            inputEl.value = entry;
-            addRecentEntry(entry);
-            suggestionsEl.classList.add("hidden");
-          });
-          const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "—";
-          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-          deleteBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            removeRecentEntry(entry);
-          });
-          div.appendChild(deleteBtn);
-          suggestionsEl.appendChild(div);
-        });
         // Show full list without fixed height
         suggestionsEl.style.maxHeight = "";
         suggestionsEl.style.overflowY = "";
@@ -519,11 +435,10 @@ function setupAutocomplete(inputId, suggestionsId) {
       
       directSuggestions.forEach(suggestion => {
         const div = document.createElement("div");
-        div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
+        div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
         div.textContent = suggestion.name;
         div.addEventListener("click", () => {
           inputEl.value = suggestion.name;
-          addRecentEntry(suggestion.name);
           suggestionsEl.classList.add("hidden");
         });
         suggestionsEl.appendChild(div);
@@ -534,31 +449,6 @@ function setupAutocomplete(inputId, suggestionsId) {
       return;
     }
     
-    // Fallback: if none of the above conditions met, show the full recents list.
-    const recents = getRecentEntries();
-    if (recents.length === 0) {
-      suggestionsEl.classList.add("hidden");
-      return;
-    }
-    recents.forEach(entry => {
-      const div = document.createElement("div");
-      div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
-      div.textContent = entry;
-      div.addEventListener("click", () => {
-        inputEl.value = entry;
-        addRecentEntry(entry);
-        suggestionsEl.classList.add("hidden");
-      });
-      const deleteBtn = document.createElement("button");
-      deleteBtn.textContent = "—";
-      deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-      deleteBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        removeRecentEntry(entry);
-      });
-      div.appendChild(deleteBtn);
-      suggestionsEl.appendChild(div);
-    });
     suggestionsEl.style.maxHeight = "";
     suggestionsEl.style.overflowY = "";
     suggestionsEl.classList.remove("hidden");
@@ -586,7 +476,6 @@ function setupAutocomplete(inputId, suggestionsId) {
   });
   
 }
-
   
   // Helper function to get values from all input fields within a container.
   function getMultiAirportValues(containerId) {
@@ -897,7 +786,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     } catch (error) {
       console.error("Error clearing Dexie cache:", error);
     }
-  
+    localStorage.removeItem("wizz_page_data");
     showNotification("✅ Cache successfully cleared!");
   }  
 
@@ -2609,11 +2498,11 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
   } else {
     bodyHtml = createSegmentRow(unifiedFlight);
     bodyHtml += `
-      <div class="flex justify-between items-center mt-2">
+      <div class="flex justify-between items-center mt-0">
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+        <button class="continue-payment-button px-2 py-1 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
           Continue to Payment
         </button>
       </div>
