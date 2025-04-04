@@ -199,10 +199,13 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const timeoutEl = document.getElementById("timeout-status");
     let seconds = Math.floor(waitTimeMs / 1000);
     timeoutEl.style.display = "block";
-    timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
     timeoutInterval = setInterval(() => {
       seconds--;
-      timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
+      if (waitTimeMs == 40) {
+        timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Try to increase Requests Frequency inside of Expert Settings.`;
+      } else {
+        timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
+      }
       if (seconds <= 0) {
         clearInterval(timeoutInterval);
         timeoutInterval = null;
@@ -1446,6 +1449,7 @@ function setupAutocomplete(inputId, suggestionsId) {
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
           flights = [];
+          return
         }
       }
       // Convert flight dates if they are not already Date objects.
