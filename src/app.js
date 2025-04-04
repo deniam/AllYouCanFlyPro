@@ -201,8 +201,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     timeoutEl.style.display = "block";
     timeoutInterval = setInterval(() => {
       seconds--;
-      if (waitTimeMs == 40) {
-        timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Try to increase Requests Frequency inside of Expert Settings.`;
+      if (waitTimeMs == 40000) {
+        timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Try to change values inside of Expert Settings or take a break between searhes.`;
       } else {
         timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
       }
