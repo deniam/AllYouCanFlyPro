@@ -6,14 +6,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
-  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
+  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
   const MAX_RETRY_ATTEMPTS = 2;  
   let PAUSE_DURATION_MS = Number(localStorage.getItem('pauseDurationSeconds'))
     ? Number(localStorage.getItem('pauseDurationSeconds')) * 1000
-    : 15000;
+    : 1500;
   let CACHE_LIFETIME = (Number(localStorage.getItem('cacheLifetimeHours')) || 4) * 60 * 60 * 1000;
   // 4 hours in ms
-  let MAX_REQUESTS_IN_ROW = Number(localStorage.getItem('maxRequestsInRow')) || 25;
+  let MAX_REQUESTS_IN_ROW = Number(localStorage.getItem('maxRequestsInRow')) || 1000;
   // Variables to track state
   let requestsThisWindow = 0;
   let searchCancelled = false;
@@ -1003,6 +1003,10 @@ function setupAutocomplete(inputId, suggestionsId) {
           } else if (error.message.includes("429")) {
             waitTime = 40000;
             if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+          } else if (error.message.includes("501")) {
+            waitTime = 15000;
+            if (debug) console.warn(`Rate limit encountered (501) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+
           } else if (error.message.includes("Invalid response format")) {
             waitTime = 2000;
             if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
