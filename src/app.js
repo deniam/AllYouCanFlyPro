@@ -3,17 +3,17 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
-  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1200;
+  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
   const MAX_RETRY_ATTEMPTS = 2;  
   let PAUSE_DURATION_MS = Number(localStorage.getItem('pauseDurationSeconds'))
     ? Number(localStorage.getItem('pauseDurationSeconds')) * 1000
-    : 15000;
+    : 1500;
   let CACHE_LIFETIME = (Number(localStorage.getItem('cacheLifetimeHours')) || 4) * 60 * 60 * 1000;
   // 4 hours in ms
-  let MAX_REQUESTS_IN_ROW = Number(localStorage.getItem('maxRequestsInRow')) || 25;
+  let MAX_REQUESTS_IN_ROW = Number(localStorage.getItem('maxRequestsInRow')) || 50;
   // Variables to track state
   let requestsThisWindow = 0;
   let searchCancelled = false;
@@ -86,8 +86,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
   }
 
-  initAirports();
-
   async function importRoutes() {
     try {
       await db.routes.clear();
@@ -100,7 +98,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
   }
   
-  importRoutes();  
+  async function initApp() {
+    await importRoutes();    // Wait for routes data to be imported and stored in IndexedDB (fills window.ROUTES)
+    await initAirports();    // Then load airports and initialize autocomplete (which uses window.ROUTES)
+  }
+  initApp();
   // ---------------- Helper: Airport Flag ----------------
   const airportLookup = {};
   AIRPORTS.forEach(a => {
@@ -166,13 +168,12 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
 
   // ----------------------- UI Helper Functions -----------------------
-  
   function updateProgress(current, total, message) {
     resultsContainer.classList.remove("hidden");
-    progressContainer.style.display = "block";
-    progressText.textContent = `${message} (${current} of ${total})`;
-    const percentage = total > 0 ? (current / total) * 100 : 0;
-    progressBar.style.width = percentage + "%";
+      progressContainer.style.display = "block";
+      progressText.textContent = `${message} (${current} of ${total})`;
+      const percentage = total > 0 ? (current / total) * 100 : 0;
+      progressBar.style.width = percentage + "%";
   }
 
   function hideProgress() {
@@ -198,10 +199,16 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const timeoutEl = document.getElementById("timeout-status");
     let seconds = Math.floor(waitTimeMs / 1000);
     timeoutEl.style.display = "block";
-    timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
+    timeoutEl.style.color = "";
     timeoutInterval = setInterval(() => {
       seconds--;
-      timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
+      if (waitTimeMs == 40000) {
+        timeoutEl.style.color = "red";
+        timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Increase values inside of Expert Settings or take a break between searches.`;
+      } else {
+        timeoutEl.style.color = "";
+        timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
+      }
       if (seconds <= 0) {
         clearInterval(timeoutInterval);
         timeoutInterval = null;
@@ -271,6 +278,15 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     CACHE_LIFETIME = hours * 60 * 60 * 1000;
     localStorage.setItem("cacheLifetimeHours", hours);
   }
+
+  function animateElement(element, animationClass, duration = 300) {
+    if (element) {
+      element.classList.add(animationClass);
+      setTimeout(() => {
+        element.classList.remove(animationClass);
+      }, duration);
+    }
+  }
   //===========Autocomplete Functions================
 // Assumptions:
 //   - Global variables AIRPORTS, COUNTRY_AIRPORTS, and ROUTES are available and populated.
@@ -283,49 +299,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   const suggestionsEl = document.getElementById(suggestionsId);
 
   const lowerInputId = inputId.toLowerCase();
-  const recentKey = lowerInputId.includes("destination")
-    ? "recentAirports_destination"
-    : lowerInputId.includes("origin")
-      ? "recentAirports_origin"
-      : "recentAirports_" + inputId;
-
-  // Gather all used entries from other origin/destination fields.
-  function getAllUsedEntries() {
-    const originUsed = Array.from(document.querySelectorAll("#origin-multi input"))
-      .filter(el => el.id !== inputId)
-      .map(el => el.value.trim().toLowerCase());
-    const destUsed = Array.from(document.querySelectorAll("#destination-multi input"))
-      .filter(el => el.id !== inputId)
-      .map(el => el.value.trim().toLowerCase());
-    return new Set([...originUsed, ...destUsed]);
-  }
-
-  // Retrieve recent entries from localStorage.
-  function getRecentEntries() {
-    const stored = localStorage.getItem(recentKey);
-    let recents = stored ? JSON.parse(stored) : [];
-    // Remove "Anywhere" (case-insensitive) and add it to the top.
-    recents = recents.filter(e => e.toLowerCase() !== "anywhere");
-    recents.unshift("Anywhere");
-    return recents;
-  }
-
-  // Add a new entry or update its position in recent entries.
-  function addRecentEntry(entry) {
-    let recents = getRecentEntries();
-    recents = recents.filter(e => e !== entry);
-    recents.unshift(entry);
-    if (recents.length > 6) recents = recents.slice(0, 6);
-    localStorage.setItem(recentKey, JSON.stringify(recents));
-  }
-
-  // Remove an entry from recent entries.
-  function removeRecentEntry(entry) {
-    let recents = getRecentEntries().filter(e => e !== entry);
-    localStorage.setItem(recentKey, JSON.stringify(recents));
-    // Refresh suggestions.
-    showSuggestions(inputEl.value.trim().toLowerCase());
-  }
+  
   function getDirectSuggestionsForDestination() {
     const origins = getMultiAirportValues("origin-multi")
       .filter(v => (v || "").toLowerCase() !== "anywhere" && (v || "").trim() !== "");
@@ -406,36 +380,35 @@ function setupAutocomplete(inputId, suggestionsId) {
     suggestions.sort((a, b) => a.name.localeCompare(b.name));
     return suggestions;
   }
+
+  let previousQuery = "";
+  let directAnimated = false;
   function showSuggestions(query = "") {
     // Guard: if suggestionsEl or inputEl are not defined, do nothing.
     if (!inputEl || !suggestionsEl) return;
     
     suggestionsEl.innerHTML = "";
-    const usedEntries = getAllUsedEntries();
     
     // When a query is entered: filter the full catalog
-    if (query) {
-      const usedCountryAirports = new Set();
-      Object.keys(COUNTRY_AIRPORTS).forEach(country => {
-        if (usedEntries.has(country.toLowerCase())) {
-          COUNTRY_AIRPORTS[country].forEach(code => usedCountryAirports.add(code.toLowerCase()));
-        }
-      });
-      
+    if (query) {     
       const countryMatches = Object.keys(COUNTRY_AIRPORTS)
-        .filter(country => country.toLowerCase().includes(query) && !usedEntries.has(country.toLowerCase()))
+        .filter(country => country.toLowerCase().includes(query))
         .map(country => ({ isCountry: true, code: country, name: country }));
       
       const airportMatches = AIRPORTS.filter(a => {
         const codeLower = a.code.toLowerCase();
         const nameLower = a.name.toLowerCase();
-        if (usedEntries.has(codeLower) || usedEntries.has(nameLower)) return false;
-        if (usedCountryAirports.has(codeLower)) return false;
         return codeLower.includes(query) || nameLower.includes(query);
       }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
       
       let matches = [...countryMatches, ...airportMatches];
-      matches.sort((a, b) => a.name.localeCompare(b.name));
+      matches.sort((a, b) => {
+        const aStarts = a.name.toLowerCase().startsWith(query);
+        const bStarts = b.name.toLowerCase().startsWith(query);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return a.name.localeCompare(b.name);
+      });
       // Limit to six suggestions from filtering
       matches = matches.slice(0, 6);
       // For fields other than preferred-airport, always add "Anywhere" first.
@@ -450,29 +423,26 @@ function setupAutocomplete(inputId, suggestionsId) {
       
       matches.forEach(match => {
         const div = document.createElement("div");
-        div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
+        div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
         div.textContent = match.name;
         div.addEventListener("click", () => {
           inputEl.value = match.name;
-          addRecentEntry(match.name);
           suggestionsEl.classList.add("hidden");
         });
-        // If the suggestion is in recent entries (and not "Anywhere"), add a delete button.
-        if (getRecentEntries().includes(match.name) && match.name.toLowerCase() !== "anywhere") {
-          const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "—";
-          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-          deleteBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            removeRecentEntry(match.name);
-          });
-          div.appendChild(deleteBtn);
-        }
         suggestionsEl.appendChild(div);
       });
+      const shouldAnimate = previousQuery.length === 0 && query.length > 0;
+      previousQuery = query;
       suggestionsEl.style.maxHeight = "250px";
       suggestionsEl.style.overflowY = "auto";
       suggestionsEl.classList.remove("hidden");
+      if (shouldAnimate) {
+        suggestionsEl.classList.add("suggestions-enter");
+        setTimeout(() => {
+          suggestionsEl.classList.remove("suggestions-enter");
+        }, 300);
+      }
+      directAnimated = false;
       return;
     }
     
@@ -480,26 +450,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     if (!query) {
       // For the preferred-airport field, do not include "Anywhere"
       if (inputId === "preferred-airport") {
-        const recents = getRecentEntries().filter(e => e.toLowerCase() !== "anywhere");
-        recents.forEach(entry => {
-          const div = document.createElement("div");
-          div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
-          div.textContent = entry;
-          div.addEventListener("click", () => {
-            inputEl.value = entry;
-            addRecentEntry(entry);
-            suggestionsEl.classList.add("hidden");
-          });
-          const deleteBtn = document.createElement("button");
-          deleteBtn.textContent = "—";
-          deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-          deleteBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            removeRecentEntry(entry);
-          });
-          div.appendChild(deleteBtn);
-          suggestionsEl.appendChild(div);
-        });
         // Show full list without fixed height
         suggestionsEl.style.maxHeight = "";
         suggestionsEl.style.overflowY = "";
@@ -519,46 +469,30 @@ function setupAutocomplete(inputId, suggestionsId) {
       
       directSuggestions.forEach(suggestion => {
         const div = document.createElement("div");
-        div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
+        div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
         div.textContent = suggestion.name;
         div.addEventListener("click", () => {
           inputEl.value = suggestion.name;
-          addRecentEntry(suggestion.name);
           suggestionsEl.classList.add("hidden");
         });
         suggestionsEl.appendChild(div);
       });
+      const shouldAnimate = previousQuery.length === 0 && query.length > 0;
+      previousQuery = query;
       suggestionsEl.style.maxHeight = "250px";
       suggestionsEl.style.overflowY = "auto";
       suggestionsEl.classList.remove("hidden");
+      if (!directAnimated) {
+        suggestionsEl.classList.add("suggestions-enter");
+        setTimeout(() => {
+          suggestionsEl.classList.remove("suggestions-enter");
+        }, 300);
+        directAnimated = true;
+      }
+      previousQuery = "";
       return;
     }
     
-    // Fallback: if none of the above conditions met, show the full recents list.
-    const recents = getRecentEntries();
-    if (recents.length === 0) {
-      suggestionsEl.classList.add("hidden");
-      return;
-    }
-    recents.forEach(entry => {
-      const div = document.createElement("div");
-      div.className = "flex justify-between items-center px-4 py-2 cursor-pointer hover:bg-gray-100";
-      div.textContent = entry;
-      div.addEventListener("click", () => {
-        inputEl.value = entry;
-        addRecentEntry(entry);
-        suggestionsEl.classList.add("hidden");
-      });
-      const deleteBtn = document.createElement("button");
-      deleteBtn.textContent = "—";
-      deleteBtn.className = "ml-3 px-2 text-sm text-gray-500 hover:text-red-600 cursor-pointer";
-      deleteBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        removeRecentEntry(entry);
-      });
-      div.appendChild(deleteBtn);
-      suggestionsEl.appendChild(div);
-    });
     suggestionsEl.style.maxHeight = "";
     suggestionsEl.style.overflowY = "";
     suggestionsEl.classList.remove("hidden");
@@ -573,7 +507,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   // Update suggestions as the user types.
   inputEl.addEventListener("input", (e) => {
     const query = e.target.value.trim().toLowerCase();
-    console.log("Query:", query);
+    if (debug) console.log("Query:", query);
     showSuggestions(query);
   });
 
@@ -586,7 +520,6 @@ function setupAutocomplete(inputId, suggestionsId) {
   });
   
 }
-
   
   // Helper function to get values from all input fields within a container.
   function getMultiAirportValues(containerId) {
@@ -897,7 +830,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     } catch (error) {
       console.error("Error clearing Dexie cache:", error);
     }
-  
+    localStorage.removeItem("wizz_page_data");
     showNotification("✅ Cache successfully cleared!");
   }  
 
@@ -1073,6 +1006,10 @@ function setupAutocomplete(inputId, suggestionsId) {
           } else if (error.message.includes("429")) {
             waitTime = 40000;
             if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+          } else if (error.message.includes("501")) {
+            waitTime = 15000;
+            if (debug) console.warn(`Rate limit encountered (501) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+
           } else if (error.message.includes("Invalid response format")) {
             waitTime = 2000;
             if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
@@ -1225,15 +1162,7 @@ function setupAutocomplete(inputId, suggestionsId) {
 
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
-    try {
-      // Retrieve all routes from the Dexie database
-      const routes = await db.routes.toArray();
-      if (debug) console.log("Routes from Dexie:", routes);
-      return routes;
-    } catch (error) {
-      console.error("Error fetching destinations:", error);
-      return [];
-    }
+    return window.ROUTES || [];
   }
   
   async function sendMessageWithRetry(tabId, message, retries = 3, delay = 1000) {
@@ -1519,6 +1448,7 @@ function setupAutocomplete(inputId, suggestionsId) {
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
           flights = [];
+          return
         }
       }
       // Convert flight dates if they are not already Date objects.
@@ -1567,9 +1497,11 @@ function setupAutocomplete(inputId, suggestionsId) {
     return validChains;
   }
 
-  async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true) {
+  async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true, skipProgress = false) {
     if (debug) console.log("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
+    const graph = buildGraph(routesData);
+    
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
     const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
     const stopoverText = document.getElementById("selected-stopover").textContent;
@@ -1581,40 +1513,29 @@ function setupAutocomplete(inputId, suggestionsId) {
     const baseDateUTC = new Date(selectedDate + "T00:00:00Z");
     const bookingHorizon = addDaysUTC(baseDateUTC, 3);
     if (debug) console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
-
     if (origins.length === 1 && origins[0] === "ANY") {
-      origins = [...new Set(routesData.map(route =>
-        typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
-      ))];
-      if (debug) console.log(`Expanded origin ANY to: ${origins.join(", ")}`);
-    }
+        origins = Object.keys(graph);
+        if (debug) console.log("Expanded origins ANY →", origins);
+      }
     let destinationList = [];
     if (destinations.length === 1 && destinations[0] === "ANY") {
-      const destSet = new Set();
+      const allDestinations = new Set();
       routesData.forEach(route => {
         if (route.arrivalStations && Array.isArray(route.arrivalStations)) {
-          route.arrivalStations.forEach(station =>
-            destSet.add(typeof station === "object" ? station.id : station)
-          );
+          route.arrivalStations.forEach(station => {
+            const id = typeof station === "object" ? station.id : station;
+            allDestinations.add(id);
+          });
         }
       });
-      destinationList = Array.from(destSet);
+      destinations = Array.from(allDestinations);
+      destinationList = destinations;  
       if (debug) console.log(`Expanded destination ANY to: ${destinationList.join(", ")}`);
     } else {
       destinationList = destinations;
     }
-        
-    const graph = buildGraph(routesData);
-    let candidateRoutes = [];
-    origins.forEach(origin => {
-      findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
-    });
-    const totalCandidates = candidateRoutes.length;
-    let processedCandidates = 0;
-    updateProgress(processedCandidates, totalCandidates, "Processing routes");
-    if (debug) console.log(`Total candidate routes found: ${totalCandidates}`);
-
-    // Determine allowed offsets based on maxConnection, stopover option, and maxTransfers.
+    
+        // Determine allowed offsets based on maxConnection, stopover option, and maxTransfers.
     // For multi-stop searches (maxTransfers > 1) we want to check all available days (up to booking horizon),
     // while for a single transfer without overnight, only offset 0 is allowed.
     let allowedOffsets;
@@ -1640,15 +1561,27 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
     if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
 
+    let candidateRoutes = [];
+    origins.forEach(origin => {
+      findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
+    });
+
     // Preliminary check: filter candidate routes based on flightDates availability across the full allowed window.
     candidateRoutes = candidateRoutes.filter(candidate => {
       const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
-      if (!valid) {
-        if (debug) console.log(`Candidate route ${candidate.join(" -> ")} rejected by preliminary flightDates check.`);
+      if (!valid && debug) {
+        if (debug) console.log(`Candidate route ${candidate.join(" → ")} rejected: no flights on selected date(s).`);
       }
       return valid;
     });
     if (debug) console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
+
+    const totalCandidates = candidateRoutes.length;
+    let processedCandidates = 0;
+    if (!skipProgress) {
+      updateProgress(processedCandidates, totalCandidates, "Processing routes");
+    }
+    if (debug) console.log(`Total candidate routes found: ${totalCandidates}`);
 
     const aggregatedResults = [];
     for (const candidate of candidateRoutes) {
@@ -1657,7 +1590,9 @@ function setupAutocomplete(inputId, suggestionsId) {
       // Pass the maximum allowed offset (i.e. the last element in allowedOffsets) to processSegment.
       const candidateChains = await processSegment(candidate, 0, baseDateUTC, null, bookingHorizon, minConnection, maxConnection, allowedOffsets[allowedOffsets.length - 1], selectedDate, routesData);
       processedCandidates++;
-      updateProgress(processedCandidates, totalCandidates, `Checking: ${candidate.join(" → ")} on ${selectedDate}`);
+      if (!skipProgress) {
+        updateProgress(processedCandidates, totalCandidates, `Checking outbound: ${candidate.join(" → ")} on ${selectedDate}`);
+      }
       if (candidateChains.length > 0) {
         for (let chain of candidateChains) {
           // 'chain' is an array of flights for the candidate route
@@ -1733,137 +1668,129 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
     return aggregatedResults;
   }
-
-  async function searchDirectRoutes(origins, destinations, selectedDate, shouldAppend = true, reverse = false, maxTransfers = 0) {
+  
+  async function searchDirectRoutes(
+    origins,
+    destinations,
+    selectedDate,
+    shouldAppend = true,
+    reverse = false,
+    skipProgress = false
+  ) {
     if (debug) console.log("Starting searchDirectRoutes");
-    
+
     let allowedReversePairs = null;
-    if (reverse && globalResults && globalResults.length > 0) {
-      allowedReversePairs = new Set();
-      globalResults.forEach(flight => {
-        allowedReversePairs.add(`${flight.arrivalStation}-${flight.departureStation}`);
-      });
-      if (debug) console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
+    if (reverse && globalResults.length) {
+      allowedReversePairs = new Set(
+        globalResults.map(f => `${f.arrivalStation}-${f.departureStation}`)
+      );
+      if (debug) console.log(
+        "Allowed reverse pairs:", Array.from(allowedReversePairs)
+      );
     }
-    
+
     if (reverse) {
-      if (debug) console.log("Reverse mode enabled: swapping origins and destinations.");
       [origins, destinations] = [destinations, origins];
-      if (debug) console.log("After swap, origins:", origins, "destinations:", destinations);
+      if (debug) console.log("After swap:", origins, destinations);
     }
-    
+
     let routesData = await fetchDestinations();
-    if (debug) console.log(`Fetched ${routesData.length} routes from fetchDestinations`);
-    routesData = routesData.map(route => {
-      if (Array.isArray(route.arrivalStations)) {
-        route.arrivalStations = route.arrivalStations.filter(arrival => {
-          if (typeof arrival === "object" && arrival.operationStartDate) {
-            return new Date(selectedDate) >= new Date(arrival.operationStartDate);
+    if (debug) console.log(`Fetched ${routesData.length} routes`);
+    routesData = routesData
+      .map(route => {
+        route.arrivalStations = (route.arrivalStations || []).filter(arr => {
+          if (arr.operationStartDate && new Date(selectedDate) < new Date(arr.operationStartDate)) {
+            return false;
+          }
+          if (!reverse && arr.flightDates) {
+            return arr.flightDates.includes(selectedDate);
           }
           return true;
         });
-      }
-      return route;
-    }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
-    
-    let validDirectFlights = [];
+        return route;
+      })
+      .filter(r => r.arrivalStations.length > 0);
+    if (debug) console.log(
+      `After date-filter: ${routesData.length} origins remain`
+    );
+
+    const pairs = [];
     for (const origin of origins) {
-      if (searchCancelled) {
-        if (debug) console.log("Search cancelled. Exiting loop.");
-        break;
-      }
-      if (debug) console.log(`Processing origin: ${origin}`);
-      let routeData = routesData.find(route => {
-        return typeof route.departureStation === "string"
-          ? route.departureStation === origin
-          : route.departureStation.id === origin;
+      const route = routesData.find(r => {
+        const dep = typeof r.departureStation === "object"
+          ? r.departureStation.id
+          : r.departureStation;
+        return dep === origin;
       });
-      if (!routeData || !routeData.arrivalStations) {
-        if (debug) console.log(`No route data found for origin ${origin}. Skipping.`);
-        continue;
-      }
-      if (debug) console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}`);
-      
-      const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
-        ? routeData.arrivalStations
-        : routeData.arrivalStations.filter(arr => {
-            const arrCode = typeof arr === "object" ? arr.id : arr;
-            return destinations.includes(arrCode);
+      if (!route) continue;
+
+      const arrivals = (destinations.length === 1 && destinations[0] === "ANY")
+        ? route.arrivalStations
+        : route.arrivalStations.filter(arr => {
+            const code = typeof arr === "object" ? arr.id : arr;
+            return destinations.includes(code);
           });
-      if (matchingArrivals.length === 0) {
-        if (debug) console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations.join(", ")}. Skipping.`);
+
+      arrivals.forEach(arr => {
+        const code = typeof arr === "object" ? arr.id : arr;
+        pairs.push({ origin, arrivalCode: code });
+      });
+    }
+
+    const totalArrivals = pairs.length;
+    if (debug) console.log(`Total direct pairs to check: ${totalArrivals}`);
+
+    let processed = 0;
+    if (!skipProgress) {
+      updateProgress(processed, totalArrivals, "Checking direct flights");
+    }
+
+    const validDirectFlights = [];
+    for (const { origin, arrivalCode } of pairs) {
+      if (searchCancelled) break;
+
+      processed++;
+      if (!skipProgress) {
+        updateProgress(
+          processed,
+          totalArrivals,
+          `Checking ${origin} → ${arrivalCode} on ${selectedDate}`
+        );
+      }
+      if (debug) console.log(`Checking ${origin} → ${arrivalCode}`);
+
+      if (reverse && !allowedReversePairs.has(`${origin}-${arrivalCode}`)) {
+        if (debug) console.log(`Skipping reverse pair ${origin}-${arrivalCode}`);
         continue;
       }
-      if (debug) console.log(`Matching arrivals for ${origin}: ${matchingArrivals.map(arr => (typeof arr === "object" ? arr.id : arr)).join(", ")}`);
-      
-      const totalArrivals = matchingArrivals.length;
-      let processed = 0;
-      updateProgress(processed, totalArrivals, `Checking direct flights for ${origin} on ${selectedDate}`);
-      
-      for (const arrival of matchingArrivals) {
-        if (searchCancelled) {
-          if (debug) console.log("Search cancelled during processing. Exiting inner loop.");
-          break;
-        }
-        let arrivalCode = typeof arrival === "object" ? arrival.id : arrival;
-        // Check operational start date and flightDates
-        if (typeof arrival === "object" && arrival.operationStartDate) {
-          if (new Date(selectedDate) < new Date(arrival.operationStartDate)) {
-            if (debug) console.log(`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
-            continue;
-          }
-        }
-        if (typeof arrival === "object" && arrival.flightDates) {
-          if (!arrival.flightDates.includes(selectedDate)) {
-            if (debug) console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
-            continue;
-          }
-        }
-        if (debug) console.log(`Checking direct route ${origin} → ${arrivalCode} on ${selectedDate}`);
-        if (reverse && allowedReversePairs) {
-          const reversePairKey = `${origin}-${arrivalCode}`;
-          if (!allowedReversePairs.has(reversePairKey)) {
-            if (debug) console.log(`Reverse pair ${origin} → ${arrivalCode} not allowed based on outbound flights. Skipping.`);
-            continue;
-          } else {
-            if (debug) console.log(`Reverse route ${origin} → ${arrivalCode} is allowed.`);
-          }
-        }
-        const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-        if (debug) console.log(`Checking cache for direct flight ${origin} → ${arrivalCode} on ${selectedDate} (cache key: ${cacheKey})`);
-        let cachedDirect = await getCachedResults(cacheKey);
-        if (cachedDirect) {
-          cachedDirect = cachedDirect.map(unifyRawFlight);
-          if (debug) console.log(`Cache hit: found ${cachedDirect.length} direct flights for ${origin} → ${arrivalCode}`);
-          if (shouldAppend) cachedDirect.forEach(flight => appendRouteToDisplay(flight));
-          validDirectFlights = validDirectFlights.concat(cachedDirect);
-          processed++;
-          updateProgress(processed, totalArrivals, `Checking: ${origin} → ${arrivalCode} on ${selectedDate}`);
-          continue;
-        }
-        
-        try {
-          let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
-          if (debug) console.log(`Fetched ${flights.length} flights for ${origin} → ${arrivalCode} on ${selectedDate}`);
-          if (flights.length > 0) {
-            flights = flights.map(unifyRawFlight);
-            if (shouldAppend) flights.forEach(flight => appendRouteToDisplay(flight));
-            await setCachedResults(cacheKey, flights);
-            validDirectFlights = validDirectFlights.concat(flights);
-          } else {
-            if (debug) console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
-            await setCachedResults(cacheKey, []);
-          }
-        } catch (error) {
-          console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
-          showNotification(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}. Login to your Multipass Account and try again.`);
-          return;
-        }
-        processed++;
-        updateProgress(processed, totalArrivals, `Checked ${origin} → ${arrivalCode}`);
+
+      const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
+      let cached = await getCachedResults(cacheKey);
+      if (cached) {
+        const flights = cached.map(unifyRawFlight);
+        if (shouldAppend) flights.forEach(appendRouteToDisplay);
+        validDirectFlights.push(...flights);
+        continue;
+      }
+
+      try {
+        let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
+        flights = flights.map(unifyRawFlight);
+        if (shouldAppend) flights.forEach(appendRouteToDisplay);
+        validDirectFlights.push(...flights);
+        await setCachedResults(cacheKey, flights);
+      } catch (err) {
+        console.error(`Error checking ${origin}→${arrivalCode}:`, err);
+        showNotification(
+          `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
+        );
+        return;
       }
     }
-    if (debug) console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
+
+    if (debug) console.log(
+      `Direct flight search complete. Found ${validDirectFlights.length} flights.`
+    );
     return validDirectFlights;
   }
   
@@ -1957,9 +1884,9 @@ function setupAutocomplete(inputId, suggestionsId) {
     const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
     const isDestinationAnywhere = (destinations.length === 1 && destinations[0] === "ANY");
   
-    // 1) Abort if either field is ANY and transfers are allowed.
+    // 1) Abort if either field is ANY and more then 2 transfers are allowed.
     if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
-      showNotification("Search for routes with 'Anywhere' is available only for direct flights with no transfers.");
+      showNotification("Search for routes with 'Anywhere' is available only for flights with up to one stop.");
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
                   viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                     <path stroke-linecap="round" stroke-linejoin="round" 
@@ -2006,8 +1933,8 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
   
     // 4) If only origin is ANY and destination is specified, filter origins.
-    if (isOriginAnywhere && !isDestinationAnywhere) {
-      if (debug) console.log("Origin is 'ANY'; filtering origins based on provided destination(s).");
+    if (isOriginAnywhere && !isDestinationAnywhere && maxTransfers === 0) {
+      if (debug) console.log("Origin = ANY; filtering origins by direct routes");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -2021,19 +1948,25 @@ function setupAutocomplete(inputId, suggestionsId) {
         return route;
       }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
       const destSet = new Set(destinations);
-      const filteredOrigins = fetchedRoutes.filter(route =>
-        route.arrivalStations.some(arr => {
-          const arrId = typeof arr === "object" ? arr.id : arr;
-          return destSet.has(arrId);
-        })
-      ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
+      const filteredOrigins = fetchedRoutes
+        .filter(route =>
+          route.arrivalStations.some(arr => {
+            const arrId = typeof arr === "object" ? arr.id : arr;
+            return destSet.has(arrId);
+          })
+        )
+        .map(route =>
+          typeof route.departureStation === "object"
+            ? route.departureStation.id
+            : route.departureStation
+        );
       origins = Array.from(new Set(filteredOrigins));
       if (debug) console.log("Filtered origins:", origins);
     }
   
     // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
-    if (isDestinationAnywhere && !isOriginAnywhere) {
-      if (debug) console.log("Destination is 'ANY'; filtering destinations based on provided origin(s).");
+    if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
+      if (debug) console.log("Destination = ANY; filtering destinations by direct routes");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -2047,9 +1980,19 @@ function setupAutocomplete(inputId, suggestionsId) {
         return route;
       }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
       const originSet = new Set(origins);
-      const filteredDestinations = fetchedRoutes.filter(route =>
-        originSet.has(typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation)
-      ).flatMap(route => route.arrivalStations.map(arr => (typeof arr === "object" ? arr.id : arr)));
+      const filteredDestinations = fetchedRoutes
+        .filter(route =>
+          originSet.has(
+            typeof route.departureStation === "object"
+              ? route.departureStation.id
+              : route.departureStation
+          )
+        )
+        .flatMap(route =>
+          route.arrivalStations.map(arr =>
+            typeof arr === "object" ? arr.id : arr
+          )
+        );
       destinations = Array.from(new Set(filteredDestinations));
       if (debug) console.log("Filtered destinations:", destinations);
     }
@@ -2064,7 +2007,7 @@ function setupAutocomplete(inputId, suggestionsId) {
           if (maxTransfers > 0) {
             await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
           } else {
-            await searchDirectRoutes(origins, destinations, dateStr, true, false, maxTransfers);
+            await searchDirectRoutes(origins, destinations, dateStr, true, false);
           }
         }
       } else {
@@ -2082,7 +2025,7 @@ function setupAutocomplete(inputId, suggestionsId) {
             );
           } else {
             outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchDirectRoutes(origins, destinations, outboundDate, true, false, maxTransfers)
+              await searchDirectRoutes(origins, destinations, outboundDate, true, false)
             );
           }
           outboundFlights = outboundFlights.concat(outboundFlightsForDate);
@@ -2116,95 +2059,118 @@ function setupAutocomplete(inputId, suggestionsId) {
             for (const rDate of returnDates) {
               // Use the same key as when building the inbound queries.
               const key = `${destinations.join(",")}-${outboundOrigin}-${rDate}`;
-              if (!inboundQueries[key]) {
+                // Example for direct inbound search:
                 if (maxTransfers > 0) {
                   inboundQueries[key] = async () => {
                     const connectingResults = await searchConnectingRoutes(
-                      destinations, // search inbound flights from any airport in the destination group
+                      destinations,
                       [outboundOrigin],
                       rDate,
                       maxTransfers,
-                      false
+                      false,
+                      true // pass skipProgress = true if you've similarly updated searchConnectingRoutes
                     );
                     const directResults = await searchDirectRoutes(
-                      destinations, // use the entire destination array
+                      destinations,
                       [outboundOrigin],
                       rDate,
                       false,
                       false,
-                      maxTransfers
+                      true  // skipProgress set to true
                     );
                     return [...connectingResults, ...directResults];
                   };
                 } else {
                   inboundQueries[key] = async () => {
                     return await searchDirectRoutes(
-                      destinations, // use the entire destination array
+                      destinations,
                       [outboundOrigin],
                       rDate,
                       false,
                       false,
-                      maxTransfers
+                      true  // skipProgress set to true
                     );
                   };
-                }
               }
             }
           }
         } else {
-          // Standard logic when origin is explicitly defined.
-          for (const outbound of outboundFlights) {
-            let outboundDestination = outbound.arrivalStation;
-            for (const rDate of returnDates) {
-              for (const origin of originalOrigins) {
-                const key = `${outboundDestination}-${origin}-${rDate}`;
-                if (!inboundQueries[key]) {
-                  if (maxTransfers > 0) {
-                    inboundQueries[key] = async () => {
-                      const connectingResults = await searchConnectingRoutes(
-                        [outbound.arrivalStation],
-                        [origin],
-                        rDate,
-                        maxTransfers,
-                        false
-                      );
-                      const directResults = await searchDirectRoutes(
-                        [outbound.arrivalStation],
-                        [origin],
-                        rDate,
-                        false,
-                        false,
-                        maxTransfers
-                      );
-                      return [...connectingResults, ...directResults];
-                    };
-                  } else {
-                    inboundQueries[key] = async () => {
-                      return await searchDirectRoutes(
-                        [outbound.arrivalStation],
-                        [origin],
-                        rDate,
-                        false,
-                        false,
-                        maxTransfers
-                      );
-                    };
-                  }
-                }
-              }
-            }
-          }
+// Standard logic when origin is explicitly defined – ensure skipProgress is true
+for (const outbound of outboundFlights) {
+  let outboundDestination = outbound.arrivalStation;
+  for (const rDate of returnDates) {
+    for (const origin of originalOrigins) {
+      const key = `${outboundDestination}-${origin}-${rDate}`;
+      if (!inboundQueries[key]) {
+        if (maxTransfers > 0) {
+          inboundQueries[key] = async () => {
+            const connectingResults = await searchConnectingRoutes(
+              [outbound.arrivalStation],
+              [origin],
+              rDate,
+              maxTransfers,
+              false,
+              true  // pass skipProgress = true
+            );
+            const directResults = await searchDirectRoutes(
+              [outbound.arrivalStation],
+              [origin],
+              rDate,
+              false,
+              false,
+              true  // pass skipProgress = true
+            );
+            return [...connectingResults, ...directResults];
+          };
+        } else {
+          inboundQueries[key] = async () => {
+            return await searchDirectRoutes(
+              [outbound.arrivalStation],
+              [origin],
+              rDate,
+              false,
+              false,
+              true  // pass skipProgress = true
+            );
+          };
         }
+      }
+    }
+  }
+}
+        }
+        // Process each inbound query and update overall progress accordingly.
         const inboundResults = {};
         const inboundKeys = Object.keys(inboundQueries);
+        
+        // 1) Pre-calculate totalInbound exactly as before
+        const totalInbound = inboundKeys.length;        
+        if (debug) console.log("Total inbound combinations:", totalInbound);
+        
+        // 2) Kick off the progress bar
+        let inboundProcessed = 0;
+        updateProgress(inboundProcessed, totalInbound, "Checking inbound flights");
+        // 3) Now loop *per key*, update the bar there, then fetch the flights:
         for (const key of inboundKeys) {
+          // 3.1 increment and update
+          inboundProcessed++;
+          // parse key again for the label
+          const m = key.match(/^(.+?)-(.+?)-(\d{4}-\d{2}-\d{2})$/) || [];
+          const fromGroup = m[1] || "";
+          const toCode    = m[2] || "";
+          const dateStr   = m[3] || "";
+          let flights = [];
           try {
-            if (debug) console.log(`Searching inbound flights for key ${key}`);
-            inboundResults[key] = await inboundQueries[key]();
-          } catch (error) {
-            console.error(`Error searching inbound flights for ${key}: ${error.message}`);
-            inboundResults[key] = [];
+            flights = await inboundQueries[key]();
+          } catch {
+            flights = [];
           }
+          inboundResults[key] = flights;
+          updateProgress(
+            inboundProcessed,
+            totalInbound,
+            `Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`
+          );
         }
         // Flitering inbound flights.
         for (const outbound of outboundFlights) {
@@ -2339,7 +2305,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     } else {
       input.placeholder = "Enter Airport";
     }
-    input.className = "block w-full bg-transparent border border-gray-300 text-gray-800 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
+    input.className = "block w-full bg-transparent border border-gray-300 text-gray-800 rounded-md px-1 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
     const inputId = fieldName + "-input-" + Date.now();
     input.id = inputId;
     inputWrapper.appendChild(input);
@@ -2350,7 +2316,10 @@ function setupAutocomplete(inputId, suggestionsId) {
     inputWrapper.appendChild(suggestions);
 
     row.appendChild(inputWrapper);
-  
+
+    // --- NEW: Button container (right side, vertical layout) ---
+    const buttonGroup = document.createElement("div");
+    buttonGroup.className = "flex flex-col items-center justify-start gap-1";
     // Always add a delete button (even for the first row)
     const deleteBtn = document.createElement("button");
     deleteBtn.textContent = "—";
@@ -2365,7 +2334,6 @@ function setupAutocomplete(inputId, suggestionsId) {
         updateAirportRows(container);
       }
     });
-    row.appendChild(deleteBtn);
   
     // Add the plus button for adding new rows.
     const plusBtn = document.createElement("button");
@@ -2379,7 +2347,12 @@ function setupAutocomplete(inputId, suggestionsId) {
     });
 
     // Append the button to the row but keep it hidden initially
-    row.appendChild(plusBtn);
+    // Append both buttons to buttonGroup
+    buttonGroup.appendChild(deleteBtn);
+    buttonGroup.appendChild(plusBtn);
+
+    // Append the button group to the row
+    row.appendChild(buttonGroup);
 
     // Function to update plus button visibility
     function updatePlusButtonVisibility() {
@@ -2481,6 +2454,9 @@ function setupAutocomplete(inputId, suggestionsId) {
   function toggleOptions() {
     const optionsContainer = document.getElementById("options-container");
     optionsContainer.classList.toggle("hidden");
+    if (!optionsContainer.classList.contains("hidden")) {
+      animateElement(optionsContainer, "dropdown-enter", 300);
+    }
   }
 
   function showNotification(message) {
@@ -2490,7 +2466,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     text.textContent = message; // Set the message text
     banner.classList.remove("hidden", "opacity-0"); // Show banner
     banner.classList.add("opacity-100");
-  
+    animateElement(banner, "notification-enter", 500);
     // Hide after 3 seconds
     setTimeout(() => {
       banner.classList.remove("opacity-100");
@@ -2575,8 +2551,8 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
-          Continue to Payment
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
+          Continue to customize
         </button>
       </div>
     `;
@@ -2600,12 +2576,12 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
   } else {
     bodyHtml = createSegmentRow(unifiedFlight);
     bodyHtml += `
-      <div class="flex justify-between items-center mt-2">
+      <div class="flex justify-between items-center mt-0">
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
-          Continue to Payment
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+          Continue to customize
         </button>
       </div>
     `;
@@ -2630,7 +2606,7 @@ function createSegmentRow(segment) {
       <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
         ${segmentDate}
       </div>
-      <div class="text-xs font-semibold bg-[#20006D] text-white px-2 py-1 rounded">
+      <div class="text-xs font-semibold bg-white border border-[#20006D] text-[#20006D] px-1 py-1 rounded">
         ${flightCode}
       </div>
     </div>
@@ -2662,7 +2638,7 @@ function createSegmentRow(segment) {
 
       <div class="flex justify-end gap-1 mb-0">
         <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">${segment.arrivalStationText}</span>
-        <span class="text-xl flex-shrink-0">${getCountryFlag(segment.arrivalStation)}</span>
+        <span class="text-xl items-center flex">${getCountryFlag(segment.arrivalStation)}</span>
       </div>
       <div class="flex items-center gap-1">
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
@@ -3105,6 +3081,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const expertSettings = document.getElementById("expert-settings");
       if (expertSettings.classList.contains("hidden")) {
         expertSettings.classList.remove("hidden");
+        animateElement(expertSettings, "dropdown-enter", 300);
         event.target.textContent = "Hide Expert Settings";
       } else {
         expertSettings.classList.add("hidden");
@@ -3337,6 +3314,9 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("click", function (event) {
       const dropdown = document.getElementById("stopover-dropdown");
       const button = document.getElementById("stopover-dropdown-button");
+      if (!dropdown.classList.contains("hidden")) {
+        animateElement(dropdown, "dropdown-enter", 300);
+      }
       if (!dropdown.contains(event.target) && !button.contains(event.target)) {
         dropdown.classList.add("hidden");
       }
