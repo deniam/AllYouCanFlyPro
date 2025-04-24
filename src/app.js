@@ -1508,6 +1508,8 @@ function setupAutocomplete(inputId, suggestionsId) {
   async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true, skipProgress = false) {
     if (debug) console.log("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
+    const graph = buildGraph(routesData);
+    
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
     const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
     const stopoverText = document.getElementById("selected-stopover").textContent;
@@ -1519,13 +1521,13 @@ function setupAutocomplete(inputId, suggestionsId) {
     const baseDateUTC = new Date(selectedDate + "T00:00:00Z");
     const bookingHorizon = addDaysUTC(baseDateUTC, 3);
     if (debug) console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
-
     if (origins.length === 1 && origins[0] === "ANY") {
-      origins = Object.keys(graph);
-    }
+        origins = Object.keys(graph);
+        if (debug) console.log("Expanded origins ANY →", origins);
+      }
     let destinationList = [];
     if (destinations.length === 1 && destinations[0] === "ANY") {
-      let allDestinations = new Set();
+      const allDestinations = new Set();
       routesData.forEach(route => {
         if (route.arrivalStations && Array.isArray(route.arrivalStations)) {
           route.arrivalStations.forEach(station => {
@@ -1535,6 +1537,7 @@ function setupAutocomplete(inputId, suggestionsId) {
         }
       });
       destinations = Array.from(allDestinations);
+      destinationList = destinations;  
       if (debug) console.log(`Expanded destination ANY to: ${destinationList.join(", ")}`);
     } else {
       destinationList = destinations;
@@ -1566,7 +1569,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
     if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
 
-    const graph = buildGraph(routesData);
     let candidateRoutes = [];
     origins.forEach(origin => {
       findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
@@ -1943,8 +1945,8 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
   
     // 4) If only origin is ANY and destination is specified, filter origins.
-    if (isOriginAnywhere && !isDestinationAnywhere) {
-      if (debug) console.log("Origin is 'ANY'; filtering origins based on provided destination(s).");
+    if (isOriginAnywhere && !isDestinationAnywhere && maxTransfers === 0) {
+      if (debug) console.log("Origin = ANY; фильтрация origins по прямым рейсам");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -1958,19 +1960,25 @@ function setupAutocomplete(inputId, suggestionsId) {
         return route;
       }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
       const destSet = new Set(destinations);
-      const filteredOrigins = fetchedRoutes.filter(route =>
-        route.arrivalStations.some(arr => {
-          const arrId = typeof arr === "object" ? arr.id : arr;
-          return destSet.has(arrId);
-        })
-      ).map(route => (typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation));
+      const filteredOrigins = fetchedRoutes
+        .filter(route =>
+          route.arrivalStations.some(arr => {
+            const arrId = typeof arr === "object" ? arr.id : arr;
+            return destSet.has(arrId);
+          })
+        )
+        .map(route =>
+          typeof route.departureStation === "object"
+            ? route.departureStation.id
+            : route.departureStation
+        );
       origins = Array.from(new Set(filteredOrigins));
-      if (debug) console.log("Filtered origins:", origins);
+      if (debug) console.log("Отфильтрованные origins:", origins);
     }
   
     // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
-    if (isDestinationAnywhere && !isOriginAnywhere) {
-      if (debug) console.log("Destination is 'ANY'; filtering destinations based on provided origin(s).");
+    if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
+      if (debug) console.log("Destination = ANY; фильтрация destinations по прямым рейсам");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -1984,11 +1992,21 @@ function setupAutocomplete(inputId, suggestionsId) {
         return route;
       }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
       const originSet = new Set(origins);
-      const filteredDestinations = fetchedRoutes.filter(route =>
-        originSet.has(typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation)
-      ).flatMap(route => route.arrivalStations.map(arr => (typeof arr === "object" ? arr.id : arr)));
+      const filteredDestinations = fetchedRoutes
+        .filter(route =>
+          originSet.has(
+            typeof route.departureStation === "object"
+              ? route.departureStation.id
+              : route.departureStation
+          )
+        )
+        .flatMap(route =>
+          route.arrivalStations.map(arr =>
+            typeof arr === "object" ? arr.id : arr
+          )
+        );
       destinations = Array.from(new Set(filteredDestinations));
-      if (debug) console.log("Filtered destinations:", destinations);
+      if (debug) console.log("Отфильтрованные destinations:", destinations);
     }
     // --- End Anywhere logic ---
   
