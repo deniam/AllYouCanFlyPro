@@ -1502,7 +1502,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     return validChains;
   }
 
-  async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true) {
+  async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true, skipProgress = false) {
     if (debug) console.log("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
@@ -1568,6 +1568,8 @@ function setupAutocomplete(inputId, suggestionsId) {
     origins.forEach(origin => {
       findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
     });
+
+    // Preliminary check: filter candidate routes based on flightDates availability across the full allowed window.
     candidateRoutes = candidateRoutes.filter(candidate => {
       const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
       if (!valid && debug) {
@@ -1575,21 +1577,14 @@ function setupAutocomplete(inputId, suggestionsId) {
       }
       return valid;
     });
+    if (debug) console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
 
     const totalCandidates = candidateRoutes.length;
     let processedCandidates = 0;
-    updateProgress(processedCandidates, totalCandidates, "Processing routes");
+    if (!skipProgress) {
+      updateProgress(processedCandidates, totalCandidates, "Processing routes");
+    }
     if (debug) console.log(`Total candidate routes found: ${totalCandidates}`);
-
-    // Preliminary check: filter candidate routes based on flightDates availability across the full allowed window.
-    candidateRoutes = candidateRoutes.filter(candidate => {
-      const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
-      if (!valid) {
-        if (debug) console.log(`Candidate route ${candidate.join(" -> ")} rejected by preliminary flightDates check.`);
-      }
-      return valid;
-    });
-    if (debug) console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
 
     const aggregatedResults = [];
     for (const candidate of candidateRoutes) {
@@ -1598,7 +1593,9 @@ function setupAutocomplete(inputId, suggestionsId) {
       // Pass the maximum allowed offset (i.e. the last element in allowedOffsets) to processSegment.
       const candidateChains = await processSegment(candidate, 0, baseDateUTC, null, bookingHorizon, minConnection, maxConnection, allowedOffsets[allowedOffsets.length - 1], selectedDate, routesData);
       processedCandidates++;
-      updateProgress(processedCandidates, totalCandidates, `Checking: ${candidate.join(" → ")} on ${selectedDate}`);
+      if (!skipProgress) {
+        updateProgress(processedCandidates, totalCandidates, `Checking outbound: ${candidate.join(" → ")} on ${selectedDate}`);
+      }
       if (candidateChains.length > 0) {
         for (let chain of candidateChains) {
           // 'chain' is an array of flights for the candidate route
@@ -1674,202 +1671,133 @@ function setupAutocomplete(inputId, suggestionsId) {
     }
     return aggregatedResults;
   }
+  
+  async function searchDirectRoutes(
+    origins,
+    destinations,
+    selectedDate,
+    shouldAppend = true,
+    reverse = false,
+    maxTransfers = 0,
+    skipProgress = false
+  ) {
+    if (debug) console.log("Starting searchDirectRoutes");
 
-  async function computeTotalArrivals(origins, destinations) {
-    // Fetch the routes data (assumes fetchDestinations() returns all routes)
-    const routesData = await fetchDestinations();
-    let totalArrivals = 0;
-  
-    // If origins is ANY, then use all departure codes from routesData
-    if (origins.length === 1 && origins[0] === "ANY") {
-      origins = Array.from(new Set(routesData.map(route => {
-        return typeof route.departureStation === "object"
-          ? route.departureStation.id
-          : route.departureStation;
-      })));
+    let allowedReversePairs = null;
+    if (reverse && globalResults.length) {
+      allowedReversePairs = new Set(
+        globalResults.map(f => `${f.arrivalStation}-${f.departureStation}`)
+      );
+      if (debug) console.log(
+        "Allowed reverse pairs:", Array.from(allowedReversePairs)
+      );
     }
-    
-    // If destinations is ANY, then use all arrival codes from routesData
-    if (destinations.length === 1 && destinations[0] === "ANY") {
-      let allDestinations = new Set();
-      routesData.forEach(route => {
-        if (route.arrivalStations && Array.isArray(route.arrivalStations)) {
-          route.arrivalStations.forEach(arr => {
-            const id = typeof arr === "object" ? arr.id : arr;
-            allDestinations.add(id);
-          });
-        }
-      });
-      destinations = Array.from(allDestinations);
-    }
-    
-    // Now, for each route, if its departure station is among the origins,
-    // count how many of its arrival stations are in the destinations array.
-    routesData.forEach(route => {
-      const routeOrigin = typeof route.departureStation === "object"
-        ? route.departureStation.id
-        : route.departureStation;
-      if (origins.includes(routeOrigin)) {
-        if (route.arrivalStations && Array.isArray(route.arrivalStations)) {
-          const matchingArrivals = route.arrivalStations.filter(arr => {
-            const id = typeof arr === "object" ? arr.id : arr;
-            return destinations.includes(id);
-          });
-          totalArrivals += matchingArrivals.length;
-        }
-      }
-    });
-    
-    return totalArrivals;
-  }
-  
-// Modify searchDirectRoutes to accept a new parameter 'skipProgress'
-async function searchDirectRoutes(
-  origins,
-  destinations,
-  selectedDate,
-  shouldAppend = true,
-  reverse = false,
-  maxTransfers = 0,
-  skipProgress = false  // new parameter, defaults to false
-) {
-  if (debug) console.log("Starting searchDirectRoutes");
-  
-  let allowedReversePairs = null;
-  if (reverse && globalResults && globalResults.length > 0) {
-    allowedReversePairs = new Set();
-    globalResults.forEach(flight => {
-      allowedReversePairs.add(`${flight.arrivalStation}-${flight.departureStation}`);
-    });
-    if (debug) console.log("Allowed reverse pairs from outbound flights:", Array.from(allowedReversePairs));
-  }
-  
-  const totalArrivals = await computeTotalArrivals(origins, destinations);
-  if (reverse) {
-    if (debug) console.log("Reverse mode enabled: swapping origins and destinations.");
-    [origins, destinations] = [destinations, origins];
-    if (debug) console.log("After swap, origins:", origins, "destinations:", destinations);
-  }
-  
-  let routesData = await fetchDestinations();
-  if (debug) console.log(`Fetched ${routesData.length} routes from fetchDestinations`);
-  routesData = routesData.map(route => {
-    if (Array.isArray(route.arrivalStations)) {
-      route.arrivalStations = route.arrivalStations.filter(arrival => {
-        if (typeof arrival === "object" && arrival.operationStartDate) {
-          return new Date(selectedDate) >= new Date(arrival.operationStartDate);
-        }
-        return true;
-      });
-    }
-    return route;
-  }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
 
-  let validDirectFlights = [];
-  let processed = 1;
-  for (const origin of origins) {
-    if (searchCancelled) {
-      if (debug) console.log("Search cancelled. Exiting loop.");
-      break;
+    if (reverse) {
+      [origins, destinations] = [destinations, origins];
+      if (debug) console.log("After swap:", origins, destinations);
     }
-    if (debug) console.log(`Processing origin: ${origin}`);
-    let routeData = routesData.find(route => {
-      return typeof route.departureStation === "string"
-        ? route.departureStation === origin
-        : route.departureStation.id === origin;
-    });
-    if (!routeData || !routeData.arrivalStations) {
-      if (debug) console.log(`No route data found for origin ${origin}. Skipping.`);
-      continue;
-    }
-    if (debug) console.log(`Found ${routeData.arrivalStations.length} possible arrivals for origin ${origin}`);
-    
-    const matchingArrivals = (destinations.length === 1 && destinations[0] === "ANY")
-      ? routeData.arrivalStations
-      : routeData.arrivalStations.filter(arr => {
-          const arrCode = typeof arr === "object" ? arr.id : arr;
-          return destinations.includes(arrCode);
+
+    let routesData = await fetchDestinations();
+    if (debug) console.log(`Fetched ${routesData.length} routes`);
+    routesData = routesData
+      .map(route => {
+        route.arrivalStations = (route.arrivalStations || []).filter(arr => {
+          if (arr.operationStartDate &&
+              new Date(selectedDate) < new Date(arr.operationStartDate)) {
+            return false;
+          }
+          if (arr.flightDates) {
+            return arr.flightDates.includes(selectedDate);
+          }
+          return true;
         });
-    if (matchingArrivals.length === 0) {
-      if (debug) console.log(`No matching arrivals found for origin ${origin} with destinations ${destinations.join(", ")}. Skipping.`);
-      continue;
+        return route;
+      })
+      .filter(r => r.arrivalStations.length > 0);
+    if (debug) console.log(
+      `After date-filter: ${routesData.length} origins remain`
+    );
+
+    const pairs = [];
+    for (const origin of origins) {
+      const route = routesData.find(r => {
+        const dep = typeof r.departureStation === "object"
+          ? r.departureStation.id
+          : r.departureStation;
+        return dep === origin;
+      });
+      if (!route) continue;
+
+      const arrivals = (destinations.length === 1 && destinations[0] === "ANY")
+        ? route.arrivalStations
+        : route.arrivalStations.filter(arr => {
+            const code = typeof arr === "object" ? arr.id : arr;
+            return destinations.includes(code);
+          });
+
+      arrivals.forEach(arr => {
+        const code = typeof arr === "object" ? arr.id : arr;
+        pairs.push({ origin, arrivalCode: code });
+      });
     }
-    
+
+    const totalArrivals = pairs.length;
+    if (debug) console.log(`Total direct pairs to check: ${totalArrivals}`);
+
+    let processed = 0;
     if (!skipProgress) {
-      updateProgress(processed, totalArrivals, `Checking direct flights ${origin} → ${matchingArrivals.map(arr => (typeof arr === "object" ? arr.id : arr)).join(", ")} on ${selectedDate}`);
+      updateProgress(processed, totalArrivals, "Checking direct flights");
     }
-    console.log(`Checking direct flights ${origin} → ${matchingArrivals.map(arr => (typeof arr === "object" ? arr.id : arr)).join(", ")} on ${selectedDate}`);
-    
-    for (const arrival of matchingArrivals) {
-      if (searchCancelled) {
-        if (debug) console.log("Search cancelled during processing. Exiting inner loop.");
-        break;
-      }
-      let arrivalCode = typeof arrival === "object" ? arrival.id : arrival;
-      // Check operational start date and flightDates
-      if (typeof arrival === "object" && arrival.operationStartDate) {
-        if (new Date(selectedDate) < new Date(arrival.operationStartDate)) {
-          if (debug) console.log(`Selected date ${selectedDate} is before operationStartDate (${arrival.operationStartDate}) for ${origin} → ${arrivalCode}`);
-          continue;
-        }
-      }
-      if (typeof arrival === "object" && arrival.flightDates) {
-        if (!arrival.flightDates.includes(selectedDate)) {
-          if (debug) console.log(`Direct flight not available on ${selectedDate} for ${origin} → ${arrivalCode}`);
-          continue;
-        }
-      }
-      if (debug) console.log(`Checking direct route ${origin} → ${arrivalCode} on ${selectedDate}`);
-      if (reverse && allowedReversePairs) {
-        const reversePairKey = `${origin}-${arrivalCode}`;
-        if (!allowedReversePairs.has(reversePairKey)) {
-          if (debug) console.log(`Reverse pair ${origin} → ${arrivalCode} not allowed based on outbound flights. Skipping.`);
-          continue;
-        } else {
-          if (debug) console.log(`Reverse route ${origin} → ${arrivalCode} is allowed.`);
-        }
-      }
-      const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-      if (debug) console.log(`Checking cache for direct flight ${origin} → ${arrivalCode} on ${selectedDate} (cache key: ${cacheKey})`);
-      let cachedDirect = await getCachedResults(cacheKey);
-      if (cachedDirect) {
-        cachedDirect = cachedDirect.map(unifyRawFlight);
-        if (debug) console.log(`Cache hit: found ${cachedDirect.length} direct flights for ${origin} → ${arrivalCode}`);
-        if (shouldAppend) cachedDirect.forEach(flight => appendRouteToDisplay(flight));
-        validDirectFlights = validDirectFlights.concat(cachedDirect);
-        processed++;
-        if (!skipProgress) {
-          updateProgress(processed, totalArrivals, `Checking: ${origin} → ${arrivalCode} on ${selectedDate}`);
-        }
-        continue;
-      }
-      
-      try {
-        let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
-        if (debug) console.log(`Fetched ${flights.length} flights for ${origin} → ${arrivalCode} on ${selectedDate}`);
-        if (flights.length > 0) {
-          flights = flights.map(unifyRawFlight);
-          if (shouldAppend) flights.forEach(flight => appendRouteToDisplay(flight));
-          await setCachedResults(cacheKey, flights);
-          validDirectFlights = validDirectFlights.concat(flights);
-        } else {
-          if (debug) console.log(`No flights found for ${origin} → ${arrivalCode}. Caching empty result.`);
-          await setCachedResults(cacheKey, []);
-        }
-      } catch (error) {
-        console.error(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}`);
-        showNotification(`Error checking direct flight ${origin} → ${arrivalCode}: ${error.message}. Login to your Multipass Account and try again.`);
-        return;
-      }
+
+    const validDirectFlights = [];
+    for (const { origin, arrivalCode } of pairs) {
+      if (searchCancelled) break;
+
       processed++;
       if (!skipProgress) {
-        updateProgress(processed, totalArrivals, `Checking ${origin} → ${arrivalCode} on ${selectedDate}`);
+        updateProgress(
+          processed,
+          totalArrivals,
+          `Checking ${origin} → ${arrivalCode} on ${selectedDate}`
+        );
+      }
+      if (debug) console.log(`Checking ${origin} → ${arrivalCode}`);
+
+      if (reverse && !allowedReversePairs.has(`${origin}-${arrivalCode}`)) {
+        if (debug) console.log(`Skipping reverse pair ${origin}-${arrivalCode}`);
+        continue;
+      }
+
+      const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
+      let cached = await getCachedResults(cacheKey);
+      if (cached) {
+        const flights = cached.map(unifyRawFlight);
+        if (shouldAppend) flights.forEach(appendRouteToDisplay);
+        validDirectFlights.push(...flights);
+        continue;
+      }
+
+      try {
+        let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
+        flights = flights.map(unifyRawFlight);
+        if (shouldAppend) flights.forEach(appendRouteToDisplay);
+        validDirectFlights.push(...flights);
+        await setCachedResults(cacheKey, flights);
+      } catch (err) {
+        console.error(`Error checking ${origin}→${arrivalCode}:`, err);
+        showNotification(
+          `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
+        );
+        return;
       }
     }
+
+    if (debug) console.log(
+      `Direct flight search complete. Found ${validDirectFlights.length} flights.`
+    );
+    return validDirectFlights;
   }
-  if (debug) console.log(`Direct flight search complete. Found ${validDirectFlights.length} flights.`);
-  return validDirectFlights;
-}
   
   let searchActive = false;
   async function handleSearch() {
@@ -2210,20 +2138,82 @@ for (const outbound of outboundFlights) {
         // Process each inbound query and update overall progress accordingly.
         const inboundResults = {};
         const inboundKeys = Object.keys(inboundQueries);
-        const totalInbound = inboundKeys.length;
-        let inboundProcessed = 0;
+        
+        // 1) Pre-calculate totalInbound exactly as before
+        let totalInbound = 0;
         for (const key of inboundKeys) {
-          try {
-            if (debug) console.log(`Searching inbound flights for key ${key}`);
-            inboundResults[key] = await inboundQueries[key]();
-          } catch (error) {
-            console.error(`Error searching inbound flights for ${key}: ${error.message}`);
-            inboundResults[key] = [];
+          // parse key = "FROM-TO-YYYY-MM-DD"
+          const m = key.match(/^(.+?)-(.+?)-(\d{4}-\d{2}-\d{2})$/);
+          if (!m) continue;
+          const [, fromGroup, toCode, returnDate] = m;
+        
+          const originsList = fromGroup === "ANY" ? destinations : [fromGroup];
+          let countForKey = 0;
+        
+          if (maxTransfers > 0) {
+            // connecting inbound: count how many candidateRoutes exist
+            const routesData = await fetchDestinations();
+            const graph = buildGraph(routesData);
+            const bookingHorizon = addDaysUTC(new Date(returnDate + "T00:00:00Z"), 3);
+            let candidateRoutes = [];
+            originsList.forEach(o =>
+              findRoutesDFS(graph, o, [toCode], [o], maxTransfers, candidateRoutes)
+            );
+            candidateRoutes = candidateRoutes.filter(c =>
+              candidateHasValidFlightDates(c, routesData, returnDate, bookingHorizon, [0])
+            );
+            countForKey = candidateRoutes.length;
+          } else {
+            // direct inbound: count origins that have flightDates for returnDate
+            const routesData = await fetchDestinations();
+            originsList.forEach(o => {
+              const route = routesData.find(r =>
+                ((r.departureStation.id || r.departureStation) === o)
+              );
+              if (route && route.arrivalStations.some(arr =>
+                ((arr.id || arr) === toCode) &&
+                Array.isArray(arr.flightDates) &&
+                arr.flightDates.includes(returnDate)
+              )) {
+                countForKey++;
+              }
+            });
           }
-          inboundProcessed++;
-          updateProgress(inboundProcessed, totalInbound, `Checking inbound flights`);
+        
+          totalInbound += countForKey;
         }
-                // Flitering inbound flights.
+        
+        if (debug) console.log("Total inbound combinations:", totalInbound);
+        
+        // 2) Start progress at 0 / totalInbound
+        let inboundProcessed = 0;
+        updateProgress(inboundProcessed, totalInbound, "Checking inbound flights");
+        
+        // 3) Now loop *per key*, update the bar there, then fetch the flights:
+        for (const key of inboundKeys) {
+          // 3.1 increment and update
+          inboundProcessed++;
+          // parse key again for the label
+          const m = key.match(/^(.+?)-(.+?)-(\d{4}-\d{2}-\d{2})$/) || [];
+          const fromGroup = m[1] || "";
+          const toCode    = m[2] || "";
+          const dateStr   = m[3] || "";
+          updateProgress(
+            inboundProcessed,
+            totalInbound,
+            `Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`
+          );
+        
+          // 3.2 actually run the query and store the flights
+          let flights = [];
+          try {
+            flights = await inboundQueries[key]();
+          } catch (err) {
+            flights = [];
+          }
+          inboundResults[key] = flights;
+        }
+        // Flitering inbound flights.
         for (const outbound of outboundFlights) {
           let outboundDestination = (typeof outbound.arrivalStation === "object" ? outbound.arrivalStation.id : outbound.arrivalStation);
           let matchedInbound = [];
@@ -2602,7 +2592,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
           Continue to customize
         </button>
       </div>
@@ -2631,7 +2621,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
           Continue to customize
         </button>
       </div>
