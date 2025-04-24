@@ -1536,18 +1536,8 @@ function setupAutocomplete(inputId, suggestionsId) {
     } else {
       destinationList = destinations;
     }
-        
-    const graph = buildGraph(routesData);
-    let candidateRoutes = [];
-    origins.forEach(origin => {
-      findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
-    });
-    const totalCandidates = candidateRoutes.length;
-    let processedCandidates = 0;
-    updateProgress(processedCandidates, totalCandidates, "Processing routes");
-    if (debug) console.log(`Total candidate routes found: ${totalCandidates}`);
-
-    // Determine allowed offsets based on maxConnection, stopover option, and maxTransfers.
+    
+        // Determine allowed offsets based on maxConnection, stopover option, and maxTransfers.
     // For multi-stop searches (maxTransfers > 1) we want to check all available days (up to booking horizon),
     // while for a single transfer without overnight, only offset 0 is allowed.
     let allowedOffsets;
@@ -1572,6 +1562,24 @@ function setupAutocomplete(inputId, suggestionsId) {
       }
     }
     if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
+
+    const graph = buildGraph(routesData);
+    let candidateRoutes = [];
+    origins.forEach(origin => {
+      findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
+    });
+    candidateRoutes = candidateRoutes.filter(candidate => {
+      const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
+      if (!valid && debug) {
+        console.log(`Candidate route ${candidate.join(" → ")} rejected: no flights on selected date(s).`);
+      }
+      return valid;
+    });
+
+    const totalCandidates = candidateRoutes.length;
+    let processedCandidates = 0;
+    updateProgress(processedCandidates, totalCandidates, "Processing routes");
+    if (debug) console.log(`Total candidate routes found: ${totalCandidates}`);
 
     // Preliminary check: filter candidate routes based on flightDates availability across the full allowed window.
     candidateRoutes = candidateRoutes.filter(candidate => {
@@ -1957,7 +1965,7 @@ async function searchDirectRoutes(
   
     // 1) Abort if either field is ANY and transfers are allowed.
     if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
-      showNotification("Search for routes with 'Anywhere' is available only for direct flights with no transfers.");
+      showNotification("Search for routes with 'Anywhere' is available only for flights with up to one stop.");
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
                   viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                     <path stroke-linecap="round" stroke-linejoin="round" 
