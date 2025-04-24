@@ -2594,7 +2594,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button px-3 py-2 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
           Continue to customize
         </button>
       </div>
@@ -2623,7 +2623,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-2 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
           Continue to customize
         </button>
       </div>
@@ -2649,7 +2649,7 @@ function createSegmentRow(segment) {
       <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
         ${segmentDate}
       </div>
-      <div class="text-xs font-semibold bg-[#20006D] text-white px-2 py-1 rounded">
+      <div class="text-xs font-semibold bg-white border border-[#20006D] text-[#20006D] px-1 py-1 rounded">
         ${flightCode}
       </div>
     </div>
