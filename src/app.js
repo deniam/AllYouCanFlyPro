@@ -13,7 +13,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     : 1500;
   let CACHE_LIFETIME = (Number(localStorage.getItem('cacheLifetimeHours')) || 4) * 60 * 60 * 1000;
   // 4 hours in ms
-  let MAX_REQUESTS_IN_ROW = Number(localStorage.getItem('maxRequestsInRow')) || 1000;
+  let MAX_REQUESTS_IN_ROW = Number(localStorage.getItem('maxRequestsInRow')) || 50;
   // Variables to track state
   let requestsThisWindow = 0;
   let searchCancelled = false;
@@ -204,7 +204,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       seconds--;
       if (waitTimeMs == 40000) {
         timeoutEl.style.color = "red";
-        timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Try to change values inside of Expert Settings or take a break between searhes.`;
+        timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Increase values inside of Expert Settings or take a break between searches.`;
       } else {
         timeoutEl.style.color = "";
         timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
@@ -507,7 +507,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   // Update suggestions as the user types.
   inputEl.addEventListener("input", (e) => {
     const query = e.target.value.trim().toLowerCase();
-    console.log("Query:", query);
+    if (debug) console.log("Query:", query);
     showSuggestions(query);
   });
 
@@ -1162,15 +1162,7 @@ function setupAutocomplete(inputId, suggestionsId) {
 
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
-    try {
-      // Retrieve all routes from the Dexie database
-      const routes = await db.routes.toArray();
-      if (debug) console.log("Routes from Dexie:", routes);
-      return routes;
-    } catch (error) {
-      console.error("Error fetching destinations:", error);
-      return [];
-    }
+    return window.ROUTES || [];
   }
   
   async function sendMessageWithRetry(tabId, message, retries = 3, delay = 1000) {
@@ -1578,7 +1570,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     candidateRoutes = candidateRoutes.filter(candidate => {
       const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
       if (!valid && debug) {
-        console.log(`Candidate route ${candidate.join(" → ")} rejected: no flights on selected date(s).`);
+        if (debug) console.log(`Candidate route ${candidate.join(" → ")} rejected: no flights on selected date(s).`);
       }
       return valid;
     });
@@ -1683,7 +1675,6 @@ function setupAutocomplete(inputId, suggestionsId) {
     selectedDate,
     shouldAppend = true,
     reverse = false,
-    maxTransfers = 0,
     skipProgress = false
   ) {
     if (debug) console.log("Starting searchDirectRoutes");
@@ -1708,11 +1699,10 @@ function setupAutocomplete(inputId, suggestionsId) {
     routesData = routesData
       .map(route => {
         route.arrivalStations = (route.arrivalStations || []).filter(arr => {
-          if (arr.operationStartDate &&
-              new Date(selectedDate) < new Date(arr.operationStartDate)) {
+          if (arr.operationStartDate && new Date(selectedDate) < new Date(arr.operationStartDate)) {
             return false;
           }
-          if (arr.flightDates) {
+          if (!reverse && arr.flightDates) {
             return arr.flightDates.includes(selectedDate);
           }
           return true;
@@ -1873,9 +1863,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     const tripType = window.currentTripType || "oneway";
     let departureDates = [];
     const departureInputRaw = document.getElementById("departure-date").value.trim();
-    console.log("departureInputRaw", departureInputRaw);
     departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
-    console.log("departureDates", departureDates);
     if (debug) console.log("Departure dates:", departureDates);
   
     document.querySelector(".route-list").innerHTML = "";
@@ -1896,7 +1884,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
     const isDestinationAnywhere = (destinations.length === 1 && destinations[0] === "ANY");
   
-    // 1) Abort if either field is ANY and transfers are allowed.
+    // 1) Abort if either field is ANY and more then 2 transfers are allowed.
     if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
       showNotification("Search for routes with 'Anywhere' is available only for flights with up to one stop.");
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
@@ -1946,7 +1934,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   
     // 4) If only origin is ANY and destination is specified, filter origins.
     if (isOriginAnywhere && !isDestinationAnywhere && maxTransfers === 0) {
-      if (debug) console.log("Origin = ANY; фильтрация origins по прямым рейсам");
+      if (debug) console.log("Origin = ANY; filtering origins by direct routes");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -1973,12 +1961,12 @@ function setupAutocomplete(inputId, suggestionsId) {
             : route.departureStation
         );
       origins = Array.from(new Set(filteredOrigins));
-      if (debug) console.log("Отфильтрованные origins:", origins);
+      if (debug) console.log("Filtered origins:", origins);
     }
   
     // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
     if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
-      if (debug) console.log("Destination = ANY; фильтрация destinations по прямым рейсам");
+      if (debug) console.log("Destination = ANY; filtering destinations by direct routes");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -2006,7 +1994,7 @@ function setupAutocomplete(inputId, suggestionsId) {
           )
         );
       destinations = Array.from(new Set(filteredDestinations));
-      if (debug) console.log("Отфильтрованные destinations:", destinations);
+      if (debug) console.log("Filtered destinations:", destinations);
     }
     // --- End Anywhere logic ---
   
@@ -2019,7 +2007,7 @@ function setupAutocomplete(inputId, suggestionsId) {
           if (maxTransfers > 0) {
             await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
           } else {
-            await searchDirectRoutes(origins, destinations, dateStr, true, false, maxTransfers);
+            await searchDirectRoutes(origins, destinations, dateStr, true, false);
           }
         }
       } else {
@@ -2037,7 +2025,7 @@ function setupAutocomplete(inputId, suggestionsId) {
             );
           } else {
             outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchDirectRoutes(origins, destinations, outboundDate, true, false, maxTransfers)
+              await searchDirectRoutes(origins, destinations, outboundDate, true, false)
             );
           }
           outboundFlights = outboundFlights.concat(outboundFlightsForDate);
@@ -2088,7 +2076,6 @@ function setupAutocomplete(inputId, suggestionsId) {
                       rDate,
                       false,
                       false,
-                      maxTransfers,
                       true  // skipProgress set to true
                     );
                     return [...connectingResults, ...directResults];
@@ -2101,7 +2088,6 @@ function setupAutocomplete(inputId, suggestionsId) {
                       rDate,
                       false,
                       false,
-                      maxTransfers,
                       true  // skipProgress set to true
                     );
                   };
@@ -2109,7 +2095,6 @@ function setupAutocomplete(inputId, suggestionsId) {
             }
           }
         } else {
-          // Standard logic when origin is explicitly defined.
 // Standard logic when origin is explicitly defined – ensure skipProgress is true
 for (const outbound of outboundFlights) {
   let outboundDestination = outbound.arrivalStation;
@@ -2133,7 +2118,6 @@ for (const outbound of outboundFlights) {
               rDate,
               false,
               false,
-              maxTransfers,
               true  // pass skipProgress = true
             );
             return [...connectingResults, ...directResults];
@@ -2146,7 +2130,6 @@ for (const outbound of outboundFlights) {
               rDate,
               false,
               false,
-              maxTransfers,
               true  // pass skipProgress = true
             );
           };
@@ -2161,55 +2144,12 @@ for (const outbound of outboundFlights) {
         const inboundKeys = Object.keys(inboundQueries);
         
         // 1) Pre-calculate totalInbound exactly as before
-        let totalInbound = 0;
-        for (const key of inboundKeys) {
-          // parse key = "FROM-TO-YYYY-MM-DD"
-          const m = key.match(/^(.+?)-(.+?)-(\d{4}-\d{2}-\d{2})$/);
-          if (!m) continue;
-          const [, fromGroup, toCode, returnDate] = m;
-        
-          const originsList = fromGroup === "ANY" ? destinations : [fromGroup];
-          let countForKey = 0;
-        
-          if (maxTransfers > 0) {
-            // connecting inbound: count how many candidateRoutes exist
-            const routesData = await fetchDestinations();
-            const graph = buildGraph(routesData);
-            const bookingHorizon = addDaysUTC(new Date(returnDate + "T00:00:00Z"), 3);
-            let candidateRoutes = [];
-            originsList.forEach(o =>
-              findRoutesDFS(graph, o, [toCode], [o], maxTransfers, candidateRoutes)
-            );
-            candidateRoutes = candidateRoutes.filter(c =>
-              candidateHasValidFlightDates(c, routesData, returnDate, bookingHorizon, [0])
-            );
-            countForKey = candidateRoutes.length;
-          } else {
-            // direct inbound: count origins that have flightDates for returnDate
-            const routesData = await fetchDestinations();
-            originsList.forEach(o => {
-              const route = routesData.find(r =>
-                ((r.departureStation.id || r.departureStation) === o)
-              );
-              if (route && route.arrivalStations.some(arr =>
-                ((arr.id || arr) === toCode) &&
-                Array.isArray(arr.flightDates) &&
-                arr.flightDates.includes(returnDate)
-              )) {
-                countForKey++;
-              }
-            });
-          }
-        
-          totalInbound += countForKey;
-        }
-        
+        const totalInbound = inboundKeys.length;        
         if (debug) console.log("Total inbound combinations:", totalInbound);
         
-        // 2) Start progress at 0 / totalInbound
+        // 2) Kick off the progress bar
         let inboundProcessed = 0;
         updateProgress(inboundProcessed, totalInbound, "Checking inbound flights");
-        
         // 3) Now loop *per key*, update the bar there, then fetch the flights:
         for (const key of inboundKeys) {
           // 3.1 increment and update
@@ -2225,7 +2165,7 @@ for (const outbound of outboundFlights) {
           } catch {
             flights = [];
           }
-          
+          inboundResults[key] = flights;
           updateProgress(
             inboundProcessed,
             totalInbound,
