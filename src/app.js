@@ -199,11 +199,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const timeoutEl = document.getElementById("timeout-status");
     let seconds = Math.floor(waitTimeMs / 1000);
     timeoutEl.style.display = "block";
+    timeoutEl.style.color = "";
     timeoutInterval = setInterval(() => {
       seconds--;
       if (waitTimeMs == 40000) {
+        timeoutEl.style.color = "red";
         timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Try to change values inside of Expert Settings or take a break between searhes.`;
       } else {
+        timeoutEl.style.color = "";
         timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
       }
       if (seconds <= 0) {
@@ -2198,20 +2201,18 @@ for (const outbound of outboundFlights) {
           const fromGroup = m[1] || "";
           const toCode    = m[2] || "";
           const dateStr   = m[3] || "";
+          let flights = [];
+          try {
+            flights = await inboundQueries[key]();
+          } catch {
+            flights = [];
+          }
+          
           updateProgress(
             inboundProcessed,
             totalInbound,
             `Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`
           );
-        
-          // 3.2 actually run the query and store the flights
-          let flights = [];
-          try {
-            flights = await inboundQueries[key]();
-          } catch (err) {
-            flights = [];
-          }
-          inboundResults[key] = flights;
         }
         // Flitering inbound flights.
         for (const outbound of outboundFlights) {
