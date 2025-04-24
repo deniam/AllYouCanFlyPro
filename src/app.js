@@ -2594,8 +2594,8 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button px-3 py-2 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
-          Continue to Payment
+        <button class="continue-payment-button px-3 py-2 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${segment.key}">
+          Continue to customize
         </button>
       </div>
     `;
@@ -2623,8 +2623,8 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-2 py-1 bg-[#C90076] text-white rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
-          Continue to Payment
+        <button class="continue-payment-button px-2 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+          Continue to customize
         </button>
       </div>
     `;
