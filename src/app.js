@@ -3107,7 +3107,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const dynamicUrl = await getDynamicUrl();
       const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
-      if (!subscriptionId) throw new Error("Нет subscription ID");
+      if (!subscriptionId) throw new Error("Lost subscription ID");
   
       chrome.tabs.create({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" }, newTab => {
         const listener = (tabId, changeInfo) => {
