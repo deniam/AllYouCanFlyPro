@@ -301,85 +301,149 @@ function setupAutocomplete(inputId, suggestionsId) {
   const lowerInputId = inputId.toLowerCase();
   
   function getDirectSuggestionsForDestination() {
+    // 1) Read dates: Input field, or default to 4 days from now
+    const rawDates = document.getElementById("departure-date").value || "";
+    let selectedDates = rawDates
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (!selectedDates.length) {
+      const today = new Date();
+      selectedDates = Array.from({ length: 4 }, (_, i) =>
+        new Date(today.getTime() + i * 86400000)
+          .toISOString()
+          .slice(0, 10)
+      );
+    }
+  
+    // 2) Take origins
     const origins = getMultiAirportValues("origin-multi")
-      .filter(v => (v || "").toLowerCase() !== "anywhere" && (v || "").trim() !== "");
-    
-    let suggestionsMap = new Map();
+      .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
+  
+    const suggestionsMap = new Map();
+  
     origins.forEach(origin => {
-      const resolvedCodes = resolveAirport(origin);
-      let originCodes = resolvedCodes;
-      // Always use uppercase for the lookup.
-      if (originCodes.length === 1 && MULTI_AIRPORT_CITIES[originCodes[0].toUpperCase()]) {
-        originCodes = MULTI_AIRPORT_CITIES[originCodes[0].toUpperCase()];
-      }
+      // 3) Expand multiairports (LON→[LTN,LGW…])
+      const resolved = resolveAirport(origin);
+      const originCodes = resolved.flatMap(code => {
+        const key = code.toUpperCase();
+        return MULTI_AIRPORT_CITIES[key] || [key];
+      });
+  
       originCodes.forEach(code => {
-        const matchingRoutes = ROUTES.filter(r => {
-          const depCode = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
-          return depCode === code;
+        const matching = ROUTES.filter(r => {
+          const dep = typeof r.departureStation === "object"
+            ? r.departureStation.id
+            : r.departureStation;
+          return dep === code;
         });
-        if (matchingRoutes.length > 0) {
-          matchingRoutes.forEach(route => {
-            route.arrivalStations.forEach(arr => {
-              if (!suggestionsMap.has(arr.id)) {
-                suggestionsMap.set(arr.id, arr.name);
-              }
-            });
+  
+        if (matching.length) {
+          matching.forEach(route => {
+            // 4) Filtering arrivalStations by dates
+            (route.arrivalStations || [])
+              .filter(arr => 
+                !arr.flightDates
+                || selectedDates.some(d => arr.flightDates.includes(d))
+              )
+              .forEach(arr => {
+                const id   = typeof arr === "object" ? arr.id   : arr;
+                const name = typeof arr === "object"
+                  ? arr.name
+                  : airportLookup[id]?.name || id;
+                if (id && name && !suggestionsMap.has(id)) {
+                  suggestionsMap.set(id, name);
+                }
+              });
           });
         } else {
-          // Fallback: use static airport data.
-          const airport = AIRPORTS.find(a => a.code.toUpperCase() === code.toUpperCase());
-          if (airport) {
-            suggestionsMap.set(airport.code, airport.name);
+          // fallback by clean AIRPORTS
+          const found = AIRPORTS.find(a => a.code === code);
+          if (found && !suggestionsMap.has(found.code)) {
+            suggestionsMap.set(found.code, found.name);
           }
         }
       });
     });
-    
-    let suggestions = [];
-    suggestionsMap.forEach((name, id) => {
-      suggestions.push({ isCountry: false, code: id, name: name });
-    });
+  
+    // 5) Merge and sort
+    const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
+      isCountry: false,
+      code,
+      name
+    }));
     suggestions.sort((a, b) => a.name.localeCompare(b.name));
     return suggestions;
   }
   
-  // --- In getDirectSuggestionsForOrigin ---
   function getDirectSuggestionsForOrigin() {
+    // 1) Set dates (similar to getDirectSuggestionsForDestination)
+    const rawDates = document.getElementById("departure-date").value || "";
+    let selectedDates = rawDates
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (!selectedDates.length) {
+      const today = new Date();
+      selectedDates = Array.from({ length: 4 }, (_, i) =>
+        new Date(today.getTime() + i * 86400000)
+          .toISOString()
+          .slice(0, 10)
+      );
+    }
+  
+    // 2) Take destinations
     const destinations = getMultiAirportValues("destination-multi")
-      .filter(v => (v || "").toLowerCase() !== "anywhere" && (v || "").trim() !== "");
-    
-    let suggestionsMap = new Map();
-    destinations.forEach(destination => {
-      const resolvedCodes = resolveAirport(destination);
-      let destCodes = resolvedCodes;
-      if (destCodes.length === 1 && MULTI_AIRPORT_CITIES[destCodes[0].toUpperCase()]) {
-        destCodes = MULTI_AIRPORT_CITIES[destCodes[0].toUpperCase()];
-      }
+      .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
+  
+    const suggestionsMap = new Map();
+  
+    destinations.forEach(dest => {
+      // 3) Multiairport (LON→[LTN,LGW…])
+      const resolved = resolveAirport(dest);
+      const destCodes = resolved.flatMap(code => {
+        const key = code.toUpperCase();
+        return MULTI_AIRPORT_CITIES[key] || [key];
+      });
+  
       destCodes.forEach(code => {
-        const matchingRoutes = ROUTES.filter(r => {
-          return r.arrivalStations.some(arr => {
+        // 4) Search all routes where it is on arrivalStations
+        const matching = ROUTES.filter(route =>
+          (route.arrivalStations || []).some(arr => {
             const arrId = typeof arr === "object" ? arr.id : arr;
-            return arrId === code;
-          });
-        });
-        matchingRoutes.forEach(route => {
-          const dep = typeof route.departureStation === "object"
-            ? route.departureStation
-            : { id: route.departureStation, name: route.departureStation };
-          if (!suggestionsMap.has(dep.id)) {
-            suggestionsMap.set(dep.id, dep.name);
+            // considering flightDates
+            return arrId === code
+              && (
+                !arr.flightDates
+                || selectedDates.some(d => arr.flightDates.includes(d))
+              );
+          })
+        );
+  
+        matching.forEach(route => {
+          // 5) Take departureStation fromn matching routes
+          const depObj = route.departureStation;
+          const id   = typeof depObj === "object" ? depObj.id   : depObj;
+          const name = typeof depObj === "object"
+            ? depObj.name
+            : airportLookup[id]?.name || id;
+          if (id && name && !suggestionsMap.has(id)) {
+            suggestionsMap.set(id, name);
           }
         });
       });
     });
-    
-    let suggestions = [];
-    suggestionsMap.forEach((name, id) => {
-      suggestions.push({ isCountry: false, code: id, name: name });
-    });
+  
+    // 6) Merge and sort
+    const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
+      isCountry: false,
+      code,
+      name
+    }));
     suggestions.sort((a, b) => a.name.localeCompare(b.name));
     return suggestions;
   }
+  
 
   let previousQuery = "";
   let directAnimated = false;
@@ -2612,7 +2676,7 @@ function createSegmentRow(segment) {
     </div>
   `;
   const gridRow = `
-    <div class="grid grid-cols-3 grid-rows-2 gap-1 items-center w-full py-1">
+    <div class="grid grid-cols-3 grid-rows-2 gap-0 items-center w-full py-1">
       <div class="flex items-center gap-1 whitespace-normal">
         <span class="text-xl">${getCountryFlag(segment.departureStation)}</span>
         <span class="text-base font-medium break-words max-w-[calc(100%-2rem)">${segment.departureStationText}</span>
@@ -2644,7 +2708,7 @@ function createSegmentRow(segment) {
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
       </div>
-      <div class="flex flex-col items-center">
+      <div class="flex flex-col items-center -mt-4">
         <div class="text-sm font-medium">
           ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
         </div>
@@ -3043,7 +3107,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const dynamicUrl = await getDynamicUrl();
       const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
-      if (!subscriptionId) throw new Error("Нет subscription ID");
+      if (!subscriptionId) throw new Error("Lost subscription ID");
   
       chrome.tabs.create({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" }, newTab => {
         const listener = (tabId, changeInfo) => {
