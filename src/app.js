@@ -2676,7 +2676,7 @@ function createSegmentRow(segment) {
     </div>
   `;
   const gridRow = `
-    <div class="grid grid-cols-3 grid-rows-2 gap-1 items-center w-full py-1">
+    <div class="grid grid-cols-3 grid-rows-2 gap-0 items-center w-full py-1">
       <div class="flex items-center gap-1 whitespace-normal">
         <span class="text-xl">${getCountryFlag(segment.departureStation)}</span>
         <span class="text-base font-medium break-words max-w-[calc(100%-2rem)">${segment.departureStationText}</span>
@@ -2708,7 +2708,7 @@ function createSegmentRow(segment) {
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
       </div>
-      <div class="flex flex-col items-center">
+      <div class="flex flex-col items-center -mt-4">
         <div class="text-sm font-medium">
           ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
         </div>
