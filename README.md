@@ -10,15 +10,27 @@
 
 ## 🔥 What's New?
 
-Major update to version 2.0.0:
-1) Implemented support of mobile browsers (tested on iOS 18.3.2, Orion Browser by Kagi 1.3.19).
-2) Switched layout from sidePanel to newTab.
-3) Added built-in emoji-pack (Twemoji.js); now emojis render on all platforms.
-4) New UI for desktop / adjusted UI mobile screens.
-5) Redisgned the logic of "Continue to payment" button to make it work in Orion / mobile browsers
-6) Changed restriction for searching routes with "Anywhere" to allow searches up to 1 stops.
-7) Fixed bug for some cities (Bucharest (Any), Oslo (Any), Venice (Any) now recognise correctly)
-6) Fixed bugs and errors handling
+Updated to version 2.5.0:
+1) Updated routeData with flightDates schedule until 2025-10-31
+2) Changed UI of addReturnDate button
+3) Fixed progressUpdate counter for inbound flights and flights with Departure defined as ANY
+4) UI adjustements to improve usabilty on mobile screens
+5) Deleted recent entries from airport suggestions
+6) Added animation of dropdown airport suggestions, Options panel, Stops dropdown and Sorting dropdown
+7) Fixed sorting and initialisation of airport list for suggestions function
+8) Adjusted airport suggestions for direct routes, now it considers multiAirports, selected date and flightDates availability, showing the user only available direct routes on the selected date (or today + 3 next days, if the departure date hasn't defined)
+9) Adjusted search logic with ANY as origin or destination. While stops = 1, it will search all possible destinations with one stop
+10) Updated the message in Progress bar for 426/429 errors
+11) Updated throttle settings
+12) Replaced "Continue to payment" button with "Continue to customize" button
+13) Fixed totalCandidates counter, now it considers candidateHasValidFlight
+14) Fixed progress for displaying outbound and inbound flights
+15) Changed progress text color for rate limited error to red
+16) Adjusted fetchDestinations to use data from window.ROUTES instead of repeatedly request DexieDb
+17) Cleaned invalid and discontined routes.
+18) Manifest updated to version 2.5
+
+
 
 ## ✨ Features
 
