@@ -441,6 +441,7 @@ function setupAutocomplete(inputId, suggestionsId) {
       name
     }));
     suggestions.sort((a, b) => a.name.localeCompare(b.name));
+    if (debug) console.log (`Destination suggestions: ${suggestions}`);
     return suggestions;
   }
   
@@ -1226,7 +1227,15 @@ function setupAutocomplete(inputId, suggestionsId) {
 
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
-    return window.ROUTES || [];
+    const routes = await window.ROUTES;
+    return routes.map(route => ({
+      ...route,
+      arrivalStations: Array.isArray(route.arrivalStations)
+      ?
+       [...route.arrivalStations]
+       :
+        []
+    }));
   }
   
   async function sendMessageWithRetry(tabId, message, retries = 3, delay = 1000) {
@@ -1567,7 +1576,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     const graph = buildGraph(routesData);
     
     const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
-    const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 360;
+    const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 1440;
     const stopoverText = document.getElementById("selected-stopover").textContent;
     // For stopover options, assume "One stop or fewer (overnight)" is a special flag; otherwise, multi-stop searches use full window.
     const allowOvernight = stopoverText === "One stop or fewer (overnight)";
@@ -1639,7 +1648,7 @@ function setupAutocomplete(inputId, suggestionsId) {
       return valid;
     });
     if (debug) console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
-
+    if (debug) console.log(`Candidate routes: ${candidateRoutes}`)
     const totalCandidates = candidateRoutes.length;
     let processedCandidates = 0;
     if (!skipProgress) {
