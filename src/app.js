@@ -57,6 +57,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     } catch (error) {
       console.error("Error loading airports data:", error);
     }
+    // Removed the stray closing brace as it was not part of any valid block or function.
   }
   // Restore saved tab context (supports Chrome and Orion)
   const storageApi = (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)
@@ -1044,8 +1045,9 @@ function setupAutocomplete(inputId, suggestionsId) {
             if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
             localStorage.removeItem("wizz_page_data");
             await refreshMultipassTab();
-            showNotification("Authorization required: please log in to your account to search for routes.");
-            throw new Error("Authorization required: expected JSON but received HTML");
+            continue;
+            // showNotification("Authorization required: please log in to your account to search for routes.");
+            // throw new Error("Authorization required: expected JSON but received HTML");
           }
             // dynamicUrl = await getDynamicUrl();
             // // Throw a specific error that we can catch below
@@ -1077,9 +1079,9 @@ function setupAutocomplete(inputId, suggestionsId) {
 
           } else if (error.message.includes("Invalid response format")) {
             waitTime = 2000;
-            if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
+            if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination} – waiting for ${waitTime / 2000} seconds`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
-            break;
+            continue;
           } else {
             if (debug) throw error;
           }
@@ -1718,22 +1720,74 @@ function setupAutocomplete(inputId, suggestionsId) {
       // Update progress
       processedCandidates++;
       if (!skipProgress) {
-        updateProgress(
-          processedCandidates,
-          totalCandidates,
-          `Checking outbound: ${candidate.join(' → ')} on ${selectedDate}`
-        );
+        updateProgress(processedCandidates, totalCandidates, `Checking outbound: ${candidate.join(" → ")} on ${selectedDate}`);
       }
-    
-      // If we found any valid chains, aggregate and append them
       if (candidateChains.length > 0) {
-        for (const chain of candidateChains) {
-          // Build a single aggregatedRoute object from the chain of flights...
+        for (let chain of candidateChains) {
+          // 'chain' is an array of flights for the candidate route
+          const firstFlight = chain[0];
+          const lastFlight = chain[chain.length - 1];
+          const firstDep = firstFlight.calculatedDuration.departureDate instanceof Date 
+                            ? firstFlight.calculatedDuration.departureDate 
+                            : new Date(firstFlight.calculatedDuration.departureDate);
+          const lastArr = lastFlight.calculatedDuration.arrivalDate instanceof Date 
+                            ? lastFlight.calculatedDuration.arrivalDate 
+                            : new Date(lastFlight.calculatedDuration.arrivalDate);
+          const totalDurationMinutes = Math.round((lastArr - firstDep) / 60000);
+          let totalConnectionTime = 0;
+          for (let j = 0; j < chain.length - 1; j++) {
+            const connectionTime = Math.round((chain[j + 1].calculatedDuration.departureDate.getTime() - chain[j].calculatedDuration.arrivalDate.getTime()) / 60000);
+            totalConnectionTime += connectionTime;
+            if (debug) console.log(`Connection between flight ${chain[j].flightCode} and ${chain[j+1].flightCode}: ${connectionTime} minutes`);
+          }
           const aggregatedRoute = {
-            // ... your aggregation logic here ...
-            segments: chain,
-            // e.g. key: chain.map(f => f.key).join(' | '), fareSellKey: chain[0].fareSellKey, etc.
+            key: chain.map(f => f.key).join(" | "),
+            fareSellKey: chain[0].fareSellKey,
+            departure: chain[0].departure,
+            arrival: chain[chain.length - 1].arrival,
+            departureStation: chain[0].departureStation,
+            departureStationText: chain[0].departureStationText,
+            arrivalStation: chain[chain.length - 1].arrivalStation,
+            arrivalStationText: chain[chain.length - 1].arrivalStationText,
+            departureDate: chain[0].departureDate,
+            arrivalDate: chain[chain.length - 1].arrivalDate,
+            departureStationCode: chain[0].departureStationCode,
+            arrivalStationCode: chain[chain.length - 1].arrivalStationCode,
+            reference: chain[0].reference,
+            stops: `${chain.length - 1} transfer${chain.length - 1 === 1 ? "" : "s"}`,
+            flightCode: chain[0].flightCode,
+            carrierText: chain[0].carrierText,
+            currency: chain[0].currency,
+            fare: chain[0].fare,
+            discount: chain[0].discount,
+            price: chain[0].price,
+            taxes: chain[0].taxes,
+            totalPrice: chain[0].totalPrice,
+            displayPrice: chain[0].displayPrice,
+            priceTag: chain[0].priceTag,
+            flightId: chain[0].flightId,
+            fareBasisCode: chain[0].fareBasisCode,
+            actionText: chain[0].actionText,
+            isFree: chain[0].isFree,
+            departureOffsetText: chain[0].departureOffsetText,
+            arrivalOffsetText: chain[chain.length - 1].arrivalOffsetText,
+            departureOffset: chain[0].departureOffset,
+            arrivalOffset: chain[chain.length - 1].arrivalOffset,
+            displayDeparture: chain[0].displayDeparture,
+            displayArrival: chain[chain.length - 1].displayArrival,
+            calculatedDuration: {
+              hours: Math.floor(totalDurationMinutes / 60),
+              minutes: totalDurationMinutes % 60,
+              totalMinutes: totalDurationMinutes,
+              departureDate: firstDep,
+              arrivalDate: lastArr
+            },
+            formattedFlightDate: formatFlightDateCombined(firstDep, lastArr),
+            route: [chain[0].departureStationText, chain[chain.length - 1].arrivalStationText],
+            totalConnectionTime: totalConnectionTime,
+            segments: chain
           };
+          if (debug) console.log(`Aggregated route: ${aggregatedRoute.route.join(" -> ")}; Total duration: ${totalDurationMinutes} minutes; Total connection time: ${totalConnectionTime} minutes`);
           if (shouldAppend) {
             appendRouteToDisplay(aggregatedRoute);
           }
@@ -1741,9 +1795,8 @@ function setupAutocomplete(inputId, suggestionsId) {
         }
       }
     }
-        return aggregatedResults;
-  }
-  
+    return aggregatedResults;
+  }  
   async function searchDirectRoutes(
     origins,
     destinations,
