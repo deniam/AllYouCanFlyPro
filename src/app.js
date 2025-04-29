@@ -110,6 +110,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     airportLookup[a.code] = a;
   });
 
+
   function getCountryFlag(airport) {
     if (airport && typeof airport === "object") {
       // Prefer using the airport code if available.
@@ -134,7 +135,29 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     return "";
   }
   
-
+    // === Pre-index routesData for O(1) lookups ===
+    const routesByOrigin = new Map();               // origin → [route,…]
+    const routesByOriginAndDestination = {};        // origin → (destination → route)
+    
+    routesData.forEach(route => {
+      // normalize origin code
+      const origin = typeof route.departureStation === 'object'
+        ? route.departureStation.id
+        : route.departureStation;
+    
+      // fill routesByOrigin
+      if (!routesByOrigin.has(origin)) {
+        routesByOrigin.set(origin, []);
+      }
+      routesByOrigin.get(origin).push(route);
+    
+      // fill routesByOriginAndDestination
+      (route.arrivalStations || []).forEach(arr => {
+        const dest = typeof arr === 'object' ? arr.id : arr;
+        routesByOriginAndDestination[origin] ??= {};
+        routesByOriginAndDestination[origin][dest] = route;
+      });
+    });
   
   // ----------------------- DOM Elements -----------------------
   const progressContainer = document.getElementById('progress-container');
@@ -295,297 +318,291 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 //   - resolveAirport(input) resolves a given input string into an array of airport codes.
 //   - ROUTES is an array of route objects loaded from Dexie (instead of the old static routesData).
 
-function setupAutocomplete(inputId, suggestionsId) {
-  const inputEl = document.getElementById(inputId);
-  const suggestionsEl = document.getElementById(suggestionsId);
+  function setupAutocomplete(inputId, suggestionsId) {
+    const inputEl = document.getElementById(inputId);
+    const suggestionsEl = document.getElementById(suggestionsId);
 
-  const lowerInputId = inputId.toLowerCase();
-  
-  function getDirectSuggestionsForDestination() {
-    // 1) Read dates: Input field, or default to 4 days from now
-    const rawDates = document.getElementById("departure-date").value || "";
-    let selectedDates = rawDates
-      .split(",")
-      .map(s => s.trim())
-      .filter(Boolean);
-    if (!selectedDates.length) {
-      const today = new Date();
-      selectedDates = Array.from({ length: 4 }, (_, i) =>
-        new Date(today.getTime() + i * 86400000)
-          .toISOString()
-          .slice(0, 10)
-      );
-    }
-  
-    // 2) Take origins
-    const origins = getMultiAirportValues("origin-multi")
-      .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
-  
-    const suggestionsMap = new Map();
-  
-    origins.forEach(origin => {
-      // 3) Expand multiairports (LON→[LTN,LGW…])
-      const resolved = resolveAirport(origin);
-      const originCodes = resolved.flatMap(code => {
-        const key = code.toUpperCase();
-        return MULTI_AIRPORT_CITIES[key] || [key];
-      });
-  
-      originCodes.forEach(code => {
-        const matching = ROUTES.filter(r => {
-          const dep = typeof r.departureStation === "object"
-            ? r.departureStation.id
-            : r.departureStation;
-          return dep === code;
-        });
-  
-        if (matching.length) {
-          matching.forEach(route => {
-            // 4) Filtering arrivalStations by dates
-            (route.arrivalStations || [])
-              .filter(arr => 
-                !arr.flightDates
-                || selectedDates.some(d => arr.flightDates.includes(d))
-              )
-              .forEach(arr => {
-                const id   = typeof arr === "object" ? arr.id   : arr;
-                const name = typeof arr === "object"
-                  ? arr.name
-                  : airportLookup[id]?.name || id;
-                if (id && name && !suggestionsMap.has(id)) {
-                  suggestionsMap.set(id, name);
-                }
-              });
-          });
-        } else {
-          // fallback by clean AIRPORTS
-          const found = AIRPORTS.find(a => a.code === code);
-          if (found && !suggestionsMap.has(found.code)) {
-            suggestionsMap.set(found.code, found.name);
-          }
-        }
-      });
-    });
-  
-    // 5) Merge and sort
-    const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
-      isCountry: false,
-      code,
-      name
-    }));
-    suggestions.sort((a, b) => a.name.localeCompare(b.name));
-    return suggestions;
-  }
-  
-  function getDirectSuggestionsForOrigin() {
-    // 1) Set dates (similar to getDirectSuggestionsForDestination)
-    const rawDates = document.getElementById("departure-date").value || "";
-    let selectedDates = rawDates
-      .split(",")
-      .map(s => s.trim())
-      .filter(Boolean);
-    if (!selectedDates.length) {
-      const today = new Date();
-      selectedDates = Array.from({ length: 4 }, (_, i) =>
-        new Date(today.getTime() + i * 86400000)
-          .toISOString()
-          .slice(0, 10)
-      );
-    }
-  
-    // 2) Take destinations
-    const destinations = getMultiAirportValues("destination-multi")
-      .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
-  
-    const suggestionsMap = new Map();
-  
-    destinations.forEach(dest => {
-      // 3) Multiairport (LON→[LTN,LGW…])
-      const resolved = resolveAirport(dest);
-      const destCodes = resolved.flatMap(code => {
-        const key = code.toUpperCase();
-        return MULTI_AIRPORT_CITIES[key] || [key];
-      });
-  
-      destCodes.forEach(code => {
-        // 4) Search all routes where it is on arrivalStations
-        const matching = ROUTES.filter(route =>
-          (route.arrivalStations || []).some(arr => {
-            const arrId = typeof arr === "object" ? arr.id : arr;
-            // considering flightDates
-            return arrId === code
-              && (
-                !arr.flightDates
-                || selectedDates.some(d => arr.flightDates.includes(d))
-              );
-          })
+    const lowerInputId = inputId.toLowerCase();
+    
+    function getDirectSuggestionsForDestination() {
+      // 1) Read dates: Input field, or default to 4 days from now
+      const rawDates = document.getElementById("departure-date").value || "";
+      let selectedDates = rawDates
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (!selectedDates.length) {
+        const today = new Date();
+        selectedDates = Array.from({ length: 4 }, (_, i) =>
+          new Date(today.getTime() + i * 86400000)
+            .toISOString()
+            .slice(0, 10)
         );
-  
-        matching.forEach(route => {
-          // 5) Take departureStation fromn matching routes
-          const depObj = route.departureStation;
-          const id   = typeof depObj === "object" ? depObj.id   : depObj;
-          const name = typeof depObj === "object"
-            ? depObj.name
-            : airportLookup[id]?.name || id;
-          if (id && name && !suggestionsMap.has(id)) {
-            suggestionsMap.set(id, name);
+      }
+    
+      // 2) Take origins
+      const origins = getMultiAirportValues("origin-multi")
+        .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
+    
+      const suggestionsMap = new Map();
+    
+      origins.forEach(origin => {
+        // 3) Expand multiairports (LON→[LTN,LGW…])
+        const resolved = resolveAirport(origin);
+        const originCodes = resolved.flatMap(code => {
+          const key = code.toUpperCase();
+          return MULTI_AIRPORT_CITIES[key] || [key];
+        });
+    
+        originCodes.forEach(code => {
+          const matching = routesByOrigin.get(code) || [];
+          if (matching.length) {
+            matching.forEach(route => {
+              // 4) Filtering arrivalStations by dates
+              (route.arrivalStations || [])
+                .filter(arr => 
+                  !arr.flightDates
+                  || selectedDates.some(d => arr.flightDates.includes(d))
+                )
+                .forEach(arr => {
+                  const id   = typeof arr === "object" ? arr.id   : arr;
+                  const name = typeof arr === "object"
+                    ? arr.name
+                    : airportLookup[id]?.name || id;
+                  if (id && name && !suggestionsMap.has(id)) {
+                    suggestionsMap.set(id, name);
+                  }
+                });
+            });
+          } else {
+            // fallback by clean AIRPORTS
+            const found = AIRPORTS.find(a => a.code === code);
+            if (found && !suggestionsMap.has(found.code)) {
+              suggestionsMap.set(found.code, found.name);
+            }
           }
         });
       });
-    });
-  
-    // 6) Merge and sort
-    const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
-      isCountry: false,
-      code,
-      name
-    }));
-    suggestions.sort((a, b) => a.name.localeCompare(b.name));
-    if (debug) console.log (`Destination suggestions: ${suggestions}`);
-    return suggestions;
-  }
-  
-
-  let previousQuery = "";
-  let directAnimated = false;
-  function showSuggestions(query = "") {
-    // Guard: if suggestionsEl or inputEl are not defined, do nothing.
-    if (!inputEl || !suggestionsEl) return;
     
-    suggestionsEl.innerHTML = "";
-    
-    // When a query is entered: filter the full catalog
-    if (query) {     
-      const countryMatches = Object.keys(COUNTRY_AIRPORTS)
-        .filter(country => country.toLowerCase().includes(query))
-        .map(country => ({ isCountry: true, code: country, name: country }));
-      
-      const airportMatches = AIRPORTS.filter(a => {
-        const codeLower = a.code.toLowerCase();
-        const nameLower = a.name.toLowerCase();
-        return codeLower.includes(query) || nameLower.includes(query);
-      }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
-      
-      let matches = [...countryMatches, ...airportMatches];
-      matches.sort((a, b) => {
-        const aStarts = a.name.toLowerCase().startsWith(query);
-        const bStarts = b.name.toLowerCase().startsWith(query);
-        if (aStarts && !bStarts) return -1;
-        if (!aStarts && bStarts) return 1;
-        return a.name.localeCompare(b.name);
-      });
-      // Limit to six suggestions from filtering
-      matches = matches.slice(0, 6);
-      // For fields other than preferred-airport, always add "Anywhere" first.
-      if (inputId !== "preferred-airport") {
-        matches.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
-      }
-      
-      if (matches.length === 0) {
-        suggestionsEl.classList.add("hidden");
-        return;
-      }
-      
-      matches.forEach(match => {
-        const div = document.createElement("div");
-        div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
-        div.textContent = match.name;
-        div.addEventListener("click", () => {
-          inputEl.value = match.name;
-          suggestionsEl.classList.add("hidden");
-        });
-        suggestionsEl.appendChild(div);
-      });
-      const shouldAnimate = previousQuery.length === 0 && query.length > 0;
-      previousQuery = query;
-      suggestionsEl.style.maxHeight = "250px";
-      suggestionsEl.style.overflowY = "auto";
-      suggestionsEl.classList.remove("hidden");
-      if (shouldAnimate) {
-        suggestionsEl.classList.add("suggestions-enter");
-        setTimeout(() => {
-          suggestionsEl.classList.remove("suggestions-enter");
-        }, 300);
-      }
-      directAnimated = false;
-      return;
+      // 5) Merge and sort
+      const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
+        isCountry: false,
+        code,
+        name
+      }));
+      suggestions.sort((a, b) => a.name.localeCompare(b.name));
+      return suggestions;
     }
     
-    // When no query is entered.
-    if (!query) {
-      // For the preferred-airport field, do not include "Anywhere"
-      if (inputId === "preferred-airport") {
-        // Show full list without fixed height
-        suggestionsEl.style.maxHeight = "";
-        suggestionsEl.style.overflowY = "";
+    function getDirectSuggestionsForOrigin() {
+      // 1) Set dates (similar to getDirectSuggestionsForDestination)
+      const rawDates = document.getElementById("departure-date").value || "";
+      let selectedDates = rawDates
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (!selectedDates.length) {
+        const today = new Date();
+        selectedDates = Array.from({ length: 4 }, (_, i) =>
+          new Date(today.getTime() + i * 86400000)
+            .toISOString()
+            .slice(0, 10)
+        );
+      }
+    
+      // 2) Take destinations
+      const destinations = getMultiAirportValues("destination-multi")
+        .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
+    
+      const suggestionsMap = new Map();
+    
+      destinations.forEach(dest => {
+        // 3) Multiairport (LON→[LTN,LGW…])
+        const resolved = resolveAirport(dest);
+        const destCodes = resolved.flatMap(code => {
+          const key = code.toUpperCase();
+          return MULTI_AIRPORT_CITIES[key] || [key];
+        });
+    
+        destCodes.forEach(code => {
+          // 4) Search all routes where it is on arrivalStations
+          const matching = ROUTES.filter(route =>
+            (route.arrivalStations || []).some(arr => {
+              const arrId = typeof arr === "object" ? arr.id : arr;
+              // considering flightDates
+              return arrId === code
+                && (
+                  !arr.flightDates
+                  || selectedDates.some(d => arr.flightDates.includes(d))
+                );
+            })
+          );
+    
+          matching.forEach(route => {
+            // 5) Take departureStation fromn matching routes
+            const depObj = route.departureStation;
+            const id   = typeof depObj === "object" ? depObj.id   : depObj;
+            const name = typeof depObj === "object"
+              ? depObj.name
+              : airportLookup[id]?.name || id;
+            if (id && name && !suggestionsMap.has(id)) {
+              suggestionsMap.set(id, name);
+            }
+          });
+        });
+      });
+    
+      // 6) Merge and sort
+      const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
+        isCountry: false,
+        code,
+        name
+      }));
+      suggestions.sort((a, b) => a.name.localeCompare(b.name));
+      if (debug) console.log (`Destination suggestions: ${suggestions}`);
+      return suggestions;
+    }
+    
+
+    let previousQuery = "";
+    let directAnimated = false;
+    function showSuggestions(query = "") {
+      // Guard: if suggestionsEl or inputEl are not defined, do nothing.
+      if (!inputEl || !suggestionsEl) return;
+      
+      suggestionsEl.innerHTML = "";
+      
+      // When a query is entered: filter the full catalog
+      if (query) {     
+        const countryMatches = Object.keys(COUNTRY_AIRPORTS)
+          .filter(country => country.toLowerCase().includes(query))
+          .map(country => ({ isCountry: true, code: country, name: country }));
+        
+        const airportMatches = AIRPORTS.filter(a => {
+          const codeLower = a.code.toLowerCase();
+          const nameLower = a.name.toLowerCase();
+          return codeLower.includes(query) || nameLower.includes(query);
+        }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
+        
+        let matches = [...countryMatches, ...airportMatches];
+        matches.sort((a, b) => {
+          const aStarts = a.name.toLowerCase().startsWith(query);
+          const bStarts = b.name.toLowerCase().startsWith(query);
+          if (aStarts && !bStarts) return -1;
+          if (!aStarts && bStarts) return 1;
+          return a.name.localeCompare(b.name);
+        });
+        // Limit to six suggestions from filtering
+        matches = matches.slice(0, 6);
+        // For fields other than preferred-airport, always add "Anywhere" first.
+        if (inputId !== "preferred-airport") {
+          matches.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
+        }
+        
+        if (matches.length === 0) {
+          suggestionsEl.classList.add("hidden");
+          return;
+        }
+        
+        matches.forEach(match => {
+          const div = document.createElement("div");
+          div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
+          div.textContent = match.name;
+          div.addEventListener("click", () => {
+            inputEl.value = match.name;
+            suggestionsEl.classList.add("hidden");
+          });
+          suggestionsEl.appendChild(div);
+        });
+        const shouldAnimate = previousQuery.length === 0 && query.length > 0;
+        previousQuery = query;
+        suggestionsEl.style.maxHeight = "250px";
+        suggestionsEl.style.overflowY = "auto";
         suggestionsEl.classList.remove("hidden");
+        if (shouldAnimate) {
+          suggestionsEl.classList.add("suggestions-enter");
+          setTimeout(() => {
+            suggestionsEl.classList.remove("suggestions-enter");
+          }, 300);
+        }
+        directAnimated = false;
         return;
       }
       
-      // For origin/destination fields when nothing is entered:
-      let directSuggestions = [];
-      if (lowerInputId.includes("destination")) {
-        directSuggestions = getDirectSuggestionsForDestination();
-      } else if (lowerInputId.includes("origin")) {
-        directSuggestions = getDirectSuggestionsForOrigin();
-      }
-      // Always add "Anywhere" first.
-      directSuggestions.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
-      
-      directSuggestions.forEach(suggestion => {
-        const div = document.createElement("div");
-        div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
-        div.textContent = suggestion.name;
-        div.addEventListener("click", () => {
-          inputEl.value = suggestion.name;
-          suggestionsEl.classList.add("hidden");
+      // When no query is entered.
+      if (!query) {
+        // For the preferred-airport field, do not include "Anywhere"
+        if (inputId === "preferred-airport") {
+          // Show full list without fixed height
+          suggestionsEl.style.maxHeight = "";
+          suggestionsEl.style.overflowY = "";
+          suggestionsEl.classList.remove("hidden");
+          return;
+        }
+        
+        // For origin/destination fields when nothing is entered:
+        let directSuggestions = [];
+        if (lowerInputId.includes("destination")) {
+          directSuggestions = getDirectSuggestionsForDestination();
+        } else if (lowerInputId.includes("origin")) {
+          directSuggestions = getDirectSuggestionsForOrigin();
+        }
+        // Always add "Anywhere" first.
+        directSuggestions.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
+        
+        directSuggestions.forEach(suggestion => {
+          const div = document.createElement("div");
+          div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
+          div.textContent = suggestion.name;
+          div.addEventListener("click", () => {
+            inputEl.value = suggestion.name;
+            suggestionsEl.classList.add("hidden");
+          });
+          suggestionsEl.appendChild(div);
         });
-        suggestionsEl.appendChild(div);
-      });
-      const shouldAnimate = previousQuery.length === 0 && query.length > 0;
-      previousQuery = query;
-      suggestionsEl.style.maxHeight = "250px";
-      suggestionsEl.style.overflowY = "auto";
-      suggestionsEl.classList.remove("hidden");
-      if (!directAnimated) {
-        suggestionsEl.classList.add("suggestions-enter");
-        setTimeout(() => {
-          suggestionsEl.classList.remove("suggestions-enter");
-        }, 300);
-        directAnimated = true;
+        const shouldAnimate = previousQuery.length === 0 && query.length > 0;
+        previousQuery = query;
+        suggestionsEl.style.maxHeight = "250px";
+        suggestionsEl.style.overflowY = "auto";
+        suggestionsEl.classList.remove("hidden");
+        if (!directAnimated) {
+          suggestionsEl.classList.add("suggestions-enter");
+          setTimeout(() => {
+            suggestionsEl.classList.remove("suggestions-enter");
+          }, 300);
+          directAnimated = true;
+        }
+        previousQuery = "";
+        return;
       }
-      previousQuery = "";
-      return;
+      
+      suggestionsEl.style.maxHeight = "";
+      suggestionsEl.style.overflowY = "";
+      suggestionsEl.classList.remove("hidden");
     }
+              // Show suggestions when the input is focused and empty.
+    inputEl.addEventListener("focus", () => {
+      if (!inputEl.value.trim()) {
+        showSuggestions();
+      }
+    });
+
+    // Update suggestions as the user types.
+    inputEl.addEventListener("input", (e) => {
+      const query = e.target.value.trim().toLowerCase();
+      if (debug) console.log("Query:", query);
+      showSuggestions(query);
+    });
+
+
+    // Hide suggestions when clicking outside.
+    document.addEventListener("click", event => {
+      if (inputEl && suggestionsEl && !inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
+        suggestionsEl.classList.add("hidden");
+      }
+    });
     
-    suggestionsEl.style.maxHeight = "";
-    suggestionsEl.style.overflowY = "";
-    suggestionsEl.classList.remove("hidden");
   }
-            // Show suggestions when the input is focused and empty.
-  inputEl.addEventListener("focus", () => {
-    if (!inputEl.value.trim()) {
-      showSuggestions();
-    }
-  });
-
-  // Update suggestions as the user types.
-  inputEl.addEventListener("input", (e) => {
-    const query = e.target.value.trim().toLowerCase();
-    if (debug) console.log("Query:", query);
-    showSuggestions(query);
-  });
-
-
-  // Hide suggestions when clicking outside.
-  document.addEventListener("click", event => {
-    if (inputEl && suggestionsEl && !inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
-      suggestionsEl.classList.add("hidden");
-    }
-  });
-  
-}
   
   // Helper function to get values from all input fields within a container.
   function getMultiAirportValues(containerId) {
@@ -888,6 +905,7 @@ function setupAutocomplete(inputId, suggestionsId) {
   function getUnifiedCacheKey(origin, destination, date) {
     return `${origin}-${destination}-${date}`;
   }
+
   async function handleClearCache() {  
     try {
       // Clear all cached results in Dexie
@@ -971,12 +989,9 @@ function setupAutocomplete(inputId, suggestionsId) {
     });
   }
 
-  function isDateAvailableForSegment(origin, destination, dateStr, routesData) {
+  function isDateAvailableForSegment(origin, destination, dateStr) {
     // Find the route that starts at the given origin.
-    const route = routesData.find(r => {
-      const dep = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
-      return dep === origin;
-    });
+    const route = routesByOriginAndDestination[origin]?.[destination];
     if (!route) return false;
     // Find the arrival station object with the given destination.
     const arrivalStationObj = route.arrivalStations.find(st => {
@@ -1104,7 +1119,6 @@ function setupAutocomplete(inputId, suggestionsId) {
       }
       if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
     }
-    
 
   // ---------------- Graph Building and DFS Functions ----------------
   function buildGraph(routesData) {
@@ -1123,6 +1137,7 @@ function setupAutocomplete(inputId, suggestionsId) {
     });
     return graph;
   }
+  
   function findRoutesDFS(graph, current, destinationList, path, maxTransfers, routes, visited = new Set()) {
     // Limit route length: for maxTransfers, allowed nodes = maxTransfers + 2 (origin + transfers + destination)
     if (path.length > maxTransfers + 2) return;
@@ -1503,7 +1518,7 @@ function setupAutocomplete(inputId, suggestionsId) {
           }
         }
       }
-      if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr, routesData)) {
+      if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr)) {
         if (debug) console.log(`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
         continue;
       }
