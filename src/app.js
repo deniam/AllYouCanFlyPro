@@ -1538,7 +1538,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
           flights = [];
-          return
+          return [];
         }
       }
       // Convert flight dates if they are not already Date objects.
