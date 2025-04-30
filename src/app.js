@@ -3199,7 +3199,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const flights = await checkRouteSegment(origin, destination, dateStr);
       if (!Array.isArray(flights) || flights.length === 0) {
         console.warn(`No flights for ${origin}→${destination} on ${dateStr}`);
-        showNotification(`Oops! No available flights for ${origin} → ${destination} on ${dateStr}`);
+        showNotification(`Oops! The flight ${origin} → ${destination} on ${dateStr} is no longer available.`);
         return;
       }
 
