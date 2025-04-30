@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -2694,7 +2694,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
           Continue to customize
         </button>
       </div>
@@ -2723,7 +2723,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
           Continue to customize
         </button>
       </div>

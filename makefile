@@ -6,5 +6,6 @@ all:
 	rm -f $(ZIP_NAME)
 
 	find . -name ".DS_Store" -type f -delete
+	find . -name "screenshot.png" -type f -delete
 
 	zip -r $(ZIP_NAME) . -x $(IGNORE_FILES)
