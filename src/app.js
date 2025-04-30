@@ -3184,10 +3184,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.continueToPayment = async function(outboundKey) {
     try {
+      const keyParts = outboundKey.split(' ');
+      if (keyParts.length < 2) 
+        throw new Error('Invalid outboundKey format');
+      const segmentStr = keyParts.slice(1).join(' ');
+      const [origPart, destPart] = segmentStr.split('~');
+      const [origin, departDT] = origPart.split('#');
+      const [destination]    = destPart.split('#');
+      const dateStr = [
+        departDT.slice(0,4),
+        departDT.slice(4,6),
+        departDT.slice(6,8)
+      ].join('-');
+      const flights = await checkRouteSegment(origin, destination, dateStr);
+      if (!Array.isArray(flights) || flights.length === 0) {
+        console.warn(`No flights for ${origin}→${destination} on ${dateStr}`);
+        showNotification(`Oops! No available flights for ${origin} → ${destination} on ${dateStr}`);
+        return;
+      }
+
       const dynamicUrl = await getDynamicUrl();
       const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
       if (!subscriptionId) throw new Error("Lost subscription ID");
-  
+
       chrome.tabs.create({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" }, newTab => {
         const listener = (tabId, changeInfo) => {
           if (tabId === newTab.id && changeInfo.status === "complete") {
