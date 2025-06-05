@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -2585,8 +2585,8 @@ for (const outbound of outboundFlights) {
           const seenInbound = new Set();
           const dedupedInbound = [];
           for (const flight of matchedInbound) {
-            const depTime = flight.calculatedDuration.departureDate.getTime();
-            const dedupKey = flight.flightCode + "_" + depTime;
+            if (debug) console.log(`flight.key: ${flight.key}`);
+            const dedupKey = flight.key;
             if (!seenInbound.has(dedupKey)) {
               seenInbound.add(dedupKey);
               dedupedInbound.push(flight);
