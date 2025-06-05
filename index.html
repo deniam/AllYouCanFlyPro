@@ -255,6 +255,19 @@
                     </button>
                   </div>
                   </div>
+                  <div class="flex items-center gap-2 mb-2">
+                    <label class="inline-flex items-center gap-1 text-gray-700">
+                      <input type="checkbox" id="allow-change-airport" class="h-4 w-4">
+                      <span class="text-xs font-medium">Allow changing connection airport</span>
+                    </label>
+                    <input
+                      type="number"
+                      id="connection-radius"
+                      class="bg-gray-100 border border-gray-300 rounded px-1 py-1 w-20 text-right focus:ring-[#C90076] hidden"
+                      placeholder="Radius km"
+                      min="0"
+                    >
+                  </div>
                   <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-1 py-2 mb-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
                     SHOW EXPERT SETTINGS
                   </button>
