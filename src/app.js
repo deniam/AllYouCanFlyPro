@@ -168,6 +168,30 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   const totalResultsEl = document.getElementById("total-results");
   const sortSelect = document.getElementById("sort-select");
   let currentSortOption = "default";
+  const allowSwitch = document.getElementById('allow-change-airport');
+  const radiusInput = document.getElementById('connection-radius');
+  // Initialize from localStorage
+  const savedAllow  = localStorage.getItem('allowChangeAirport') === 'true';
+  const savedRadius = parseInt(localStorage.getItem('connectionRadius')) || 0;
+  allowSwitch.checked = savedAllow;
+  radiusInput.value  = savedRadius;
+  if (savedAllow) radiusInput.classList.remove('hidden');
+  // Show/hide radius when the checkbox is toggled
+  allowSwitch.addEventListener('change', () => {
+    localStorage.setItem('allowChangeAirport', allowSwitch.checked);
+    if (allowSwitch.checked) {
+      radiusInput.classList.remove('hidden');
+    } else {
+      radiusInput.classList.add('hidden');
+    }
+  });
+
+  // Persist the radius as soon as it’s changed
+  radiusInput.addEventListener('input', () => {
+    const v = parseInt(radiusInput.value) || 0;
+    localStorage.setItem('connectionRadius', v);
+  });
+
 
   sortSelect.addEventListener("change", () => {
     currentSortOption = sortSelect.value;
@@ -310,6 +334,22 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         element.classList.remove(animationClass);
       }, duration);
     }
+  }
+
+  /**
+   * Returns distance between two coordinates in kilometers.
+   */
+  function haversineDistance(lat1, lon1, lat2, lon2) {
+    const toRad = x => x * Math.PI / 180;
+    const R = 6371; // earth radius km
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
   }
   //===========Autocomplete Functions================
 // Assumptions:
@@ -1417,7 +1457,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
     const offsetMatch = offsetText ? offsetText.match(/UTC([+-]\d+)/) : null;
     const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
-    const localTime = date.getTime() + offsetHours * 3600000;
+    const localTime = date.getTime() - offsetHours * 3600000;
     const localDate = new Date(localTime);
     const yyyy = localDate.getUTCFullYear();
     const mm = String(localDate.getUTCMonth() + 1).padStart(2, '0');
@@ -1587,232 +1627,409 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     return validChains;
   }
 
-  async function searchConnectingRoutes(origins, destinations, selectedDate, maxTransfers, shouldAppend = true, skipProgress = false) {
-    if (debug) console.log("Starting searchConnectingRoutes");
-    const routesData = await fetchDestinations();
-    const graph = buildGraph(routesData);
-    
-    const minConnection = Number(localStorage.getItem("minConnectionTime")) || 90;
-    const maxConnection = Number(localStorage.getItem("maxConnectionTime")) || 1440;
-    const stopoverText = document.getElementById("selected-stopover").textContent;
-    // For stopover options, assume "One stop or fewer (overnight)" is a special flag; otherwise, multi-stop searches use full window.
-    const allowOvernight = stopoverText === "One stop or fewer (overnight)";
-    if (debug) console.log(`Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "not overnight, one stop or fewer"})`);
+/**
+ * One‐stop search with airport‐change within a radius.
+ *
+ * @param {string[]} origins           – list of origin IATA codes
+ * @param {string[]} destinations      – list of destination IATA codes
+ * @param {string}   selectedDate      – "YYYY-MM-DD" departure date
+ * @param {number}   minConnection     – min layover in minutes
+ * @param {number}   maxConnection     – max layover in minutes
+ * @param {number}   radiusKm          – airport-change radius in km
+ * @param {number[]} allowedOffsets    – day offsets, e.g. [0,1]
+ * @returns {Promise<Object[]>}        – aggregated route objects
+ */
+async function processOneStopWithAirportChange(
+  origins,
+  destinations,
+  selectedDate,
+  minConnection,
+  maxConnection,
+  radiusKm,
+  allowedOffsets
+) {
+  console.log("[DEBUG] airport-change search", {
+    origins, destinations, selectedDate,
+    minConnection, maxConnection, radiusKm, allowedOffsets
+  });
 
-    // Interpret the selected date as UTC (e.g. "2025-03-20" becomes 2025-03-20T00:00:00Z)
-    const baseDateUTC = new Date(selectedDate + "T00:00:00Z");
-    const todayUTC = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
-    const bookingHorizon = addDaysUTC(todayUTC, 3);
-    if (debug) console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
-    if (origins.length === 1 && origins[0] === "ANY") {
-        origins = Object.keys(graph);
-        if (debug) console.log("Expanded origins ANY →", origins);
-      }
-    let destinationList = [];
-    if (destinations.length === 1 && destinations[0] === "ANY") {
-      const allDestinations = new Set();
-      routesData.forEach(route => {
-        if (route.arrivalStations && Array.isArray(route.arrivalStations)) {
-          route.arrivalStations.forEach(station => {
-            const id = typeof station === "object" ? station.id : station;
-            allDestinations.add(id);
+  // fetch metadata
+  const routesData = await fetchDestinations();
+
+  // 1) collect all Bs: origin→B direct flights exist on any allowed offset
+  const firstLegMap = new Map(); // origin → Set of B codes
+  for (let org of origins) {
+    const bs = new Set();
+    for (let offset of allowedOffsets) {
+      const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), offset)
+                     .toISOString().slice(0,10);
+      routesData.forEach(r => {
+        const dep = typeof r.departureStation === "object"
+                    ? r.departureStation.id
+                    : r.departureStation;
+        if (dep === org) {
+          (r.arrivalStations || []).forEach(a => {
+            const arr = typeof a === "object" ? a.id : a;
+            if (isDateAvailableForSegment(org, arr, date)) {
+              bs.add(arr);
+            }
           });
         }
       });
-      destinations = Array.from(allDestinations);
-      destinationList = destinations;  
-      if (debug) console.log(`Expanded destination ANY to: ${destinationList.join(", ")}`);
+    }
+    firstLegMap.set(org, bs);
+    console.log(`[DEBUG] origins→B for ${org}:`, Array.from(bs));
+  }
+
+  // 2) collect all Ns: N→destination direct flights exist
+  const secondLegMap = new Map(); // dest → Set of N codes
+  for (let dst of destinations) {
+    const ns = new Set();
+    for (let offset of allowedOffsets) {
+      const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), offset)
+                     .toISOString().slice(0,10);
+      routesData.forEach(r => {
+        const dep = typeof r.departureStation === "object"
+                    ? r.departureStation.id
+                    : r.departureStation;
+        (r.arrivalStations || []).forEach(a => {
+          const arr = typeof a === "object" ? a.id : a;
+          if (arr === dst && isDateAvailableForSegment(dep, dst, date)) {
+            ns.add(dep);
+          }
+        });
+      });
+    }
+    secondLegMap.set(dst, ns);
+    console.log(`[DEBUG] N→dest for ${dst}:`, Array.from(ns));
+  }
+
+  const results = [];
+  let count = 0;
+  const totalChains = origins.length * destinations.length;
+  updateProgress(0, totalChains, "Combining B→N pairs…");
+
+  // 2.5) 
+  // after building firstLegMap and secondLegMap
+const prunedFirstLegMap = new Map();
+for (let [org, bs] of firstLegMap) {
+  const nsForAllDests = new Set();
+  for (let dst of destinations) {
+    (secondLegMap.get(dst) || []).forEach(n => nsForAllDests.add(n));
+  }
+  const pruned = Array.from(bs).filter(b => 
+    nsForAllDests.some(n => {
+      const apB = airportLookup[b], apN = airportLookup[n];
+      if (!apB || !apN) return false;
+      return haversineDistance(
+        apB.latitude, apB.longitude,
+        apN.latitude, apN.longitude
+      ) <= radiusKm;
+    })
+  );
+  prunedFirstLegMap.set(org, pruned);
+}
+firstLegMap = prunedFirstLegMap;
+
+  // 3) now for each origin & destination, combine every B with every N
+  for (let org of origins) {
+    const bs = Array.from(firstLegMap.get(org) || []);
+    for (let dst of destinations) {
+      const ns = Array.from(secondLegMap.get(dst) || []);
+      for (let b of bs) {
+        // load flights1 for each org→b on each offset
+        let flights1 = [];
+        for (let off of allowedOffsets) {
+          const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), off)
+                         .toISOString().slice(0,10);
+          const key = getUnifiedCacheKey(org, b, date);
+          let segs = await getCachedResults(key);
+          if (!segs) {
+            segs = (await checkRouteSegment(org, b, date)).map(unifyRawFlight);
+            await setCachedResults(key, segs);
+          }
+          segs = segs.map(unifyRawFlight)
+                     .filter(f => getLocalDateFromOffset(
+                       f.calculatedDuration.departureDate,
+                       f.departureOffsetText
+                     ) === date);
+          flights1.push(...segs);
+        }
+        if (!flights1.length) continue;
+
+        for (let n of ns) {
+          // compute Haversine once
+          const coordB = airportLookup[b], coordN = airportLookup[n];
+          const withinRadius = coordB && coordN &&
+            haversineDistance(
+              coordB.latitude, coordB.longitude,
+              coordN.latitude, coordN.longitude
+            ) <= radiusKm;
+
+          for (let off of allowedOffsets) {
+            // load flights2 for n→dst
+            const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), off)
+                           .toISOString().slice(0,10);
+            const key2 = getUnifiedCacheKey(n, dst, date);
+            let flights2 = await getCachedResults(key2);
+            if (!flights2) {
+              flights2 = (await checkRouteSegment(n, dst, date)).map(unifyRawFlight);
+              await setCachedResults(key2, flights2);
+            }
+            flights2 = flights2.map(unifyRawFlight)
+                               .filter(f => getLocalDateFromOffset(
+                                 f.calculatedDuration.departureDate,
+                                 f.departureOffsetText
+                               ) === date);
+            if (!flights2.length) continue;
+
+            // now combine each f1 + f2
+            for (let f1 of flights1) {
+              for (let f2 of flights2) {
+                const gapMin = Math.round(
+                  (f2.calculatedDuration.departureDate
+                   - f1.calculatedDuration.arrivalDate) / 60000
+                );
+                if (gapMin < minConnection || gapMin > maxConnection) continue;
+
+                const same = b === n;
+                if (!same && !withinRadius) continue;
+
+                // aggregate exactly like your UI expects:
+                const d1 = f1.calculatedDuration.departureDate;
+                const a2 = f2.calculatedDuration.arrivalDate;
+                const totalMin = Math.round((a2 - d1)/60000);
+
+                const agg = {
+                  key: `${f1.key} | ${f2.key}`,
+                  fareSellKey: f1.fareSellKey,
+                  departure: f1.departure,
+                  arrival: f2.arrival,
+                  departureStation: f1.departureStation,
+                  departureStationText: f1.departureStationText,
+                  arrivalStation: f2.arrivalStation,
+                  arrivalStationText: f2.arrivalStationText,
+                  departureDate: f1.departureDate,
+                  arrivalDate: f2.arrivalDate,
+                  stops: "1 transfer",
+                  totalConnectionTime: gapMin,
+                  segments: [f1, f2],
+                  calculatedDuration: {
+                    hours: Math.floor(totalMin/60),
+                    minutes: totalMin%60,
+                    totalMinutes: totalMin,
+                    departureDate: d1,
+                    arrivalDate: a2
+                  },
+                  formattedFlightDate: formatFlightDateCombined(d1, a2),
+                  currency: f1.currency,
+                  displayPrice: f1.displayPrice,
+                  priceTag: f1.priceTag,
+                  route: [f1.departureStationText, f2.arrivalStationText]
+                };
+                console.log(`   [FOUND] ${org}→${b} + ${n}→${dst}  gap=${gapMin} allow=${allow}`);
+                appendRouteToDisplay(agg);
+                results.push(agg);
+              }
+            }
+          }
+        }
+      }
+      count++;
+      updateProgress(count, totalChains, `Combined ${org}→${dst}`);
+    }
+  }
+
+  console.log(`[DEBUG] airport-change search found ${results.length} routes`);
+  return results;
+}
+    
+  async function searchConnectingRoutes(
+    origins,
+    destinations,
+    selectedDate,
+    maxTransfers,
+    shouldAppend = true,
+    skipProgress = false
+  ) {
+    if (debug) console.log("Starting searchConnectingRoutes");
+    const routesData = await fetchDestinations();
+    const graph = buildGraph(routesData);
+  
+    // 1) Load user settings
+    const minConnection      = Number(localStorage.getItem("minConnectionTime")) || 90;
+    const maxConnection      = Number(localStorage.getItem("maxConnectionTime")) || 1440;
+    const stopoverText       = document.getElementById("selected-stopover").textContent;
+    const connectionRadius   = parseInt(localStorage.getItem("connectionRadius"), 10) || 0;
+    const allowChangeAirport = localStorage.getItem("allowChangeAirport") === "true";
+  
+    console.log(
+      `[DEBUG] searchConnectingRoutes → stopover="${stopoverText}",`,
+      `allowChangeAirport=${allowChangeAirport},`,
+      `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`
+    );
+  
+    const allowOvernight = stopoverText === "One stop or fewer (overnight)";
+    if (debug) console.log(
+      `Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "day-only"})`
+    );
+  
+    // 2) Compute booking horizon (today + 3 days)
+    const baseDateUTC    = new Date(selectedDate + "T00:00:00Z");
+    const todayUTC       = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
+    const bookingHorizon = addDaysUTC(todayUTC, 3);
+    if (debug) console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
+  
+    // 3) Expand "ANY" destinations
+    let destinationList = [];
+    if (destinations.length === 1 && destinations[0] === "ANY") {
+      const allDest = new Set();
+      routesData.forEach(r => {
+        (r.arrivalStations || []).forEach(s => {
+          allDest.add(typeof s === "object" ? s.id : s);
+        });
+      });
+      destinations = Array.from(allDest);
+      destinationList = destinations;
+      if (debug) console.log(`Expanded ANY → ${destinationList.join(", ")}`);
     } else {
       destinationList = destinations;
     }
-    
-        // Determine allowed offsets based on maxConnection, stopover option, and maxTransfers.
-    // For multi-stop searches (maxTransfers > 1) we want to check all available days (up to booking horizon),
-    // while for a single transfer without overnight, only offset 0 is allowed.
-    let allowedOffsets;
+  
+    // 4) Build allowedOffsets
+    const maxDayOffset = Math.floor(maxConnection / (60*24)); // =1
+    let allowedOffsets = [];
     if (maxTransfers > 1) {
-      // For multi-stop, allow all days from selected date to booking horizon
-      const diffDays = Math.floor((bookingHorizon.getTime() - baseDateUTC.getTime()) / (24 * 60 * 60 * 1000));
-      allowedOffsets = [];
-      for (let i = 0; i <= diffDays; i++) {
-        allowedOffsets.push(i);
+      // multi-stop: from day 0 up to bookingHorizon
+      for (let d = 0; ; d++) {
+        const dDate = addDaysUTC(baseDateUTC, d);
+        if (dDate > bookingHorizon) break;
+        allowedOffsets.push(d);
       }
     } else {
+      // one-stop: day 0 always
+      allowedOffsets = [0];
       if (allowOvernight) {
-        if (maxConnection < 1440) {
-          allowedOffsets = [0, 1];
-        } else if (maxConnection <= 2880) {
-          allowedOffsets = [0, 1, 2];
-        } else {
-          allowedOffsets = [0, 1, 2, 3];
+        for (let d = 1; d <= maxDayOffset; d++) {
+          allowedOffsets.push(d);
         }
-      } else {
-        allowedOffsets = [0];
       }
     }
-    if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")} based on maxConnection = ${maxConnection} minutes, stopover option: ${stopoverText}, and maxTransfers = ${maxTransfers}`);
-
+    if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")}`);
+  
+    // 5) Airport-change shortcut?
+    const switchableForOneStop = (
+      maxTransfers === 1 &&
+      (stopoverText === "One stop or fewer"
+        || stopoverText === "One stop or fewer (overnight)"
+        || stopoverText === "Two stops or fewer (overnight)")
+      && allowChangeAirport
+      && connectionRadius > 0
+    );
+    if (switchableForOneStop) {
+      console.log("Airport-change mode ON: delegating to processOneStopWithAirportChange");
+      updateProgress(0, 1, "Searching one-stop with airport change…");
+  
+      // **Pass allowedOffsets** into your new function
+      const results = await processOneStopWithAirportChange(
+        origins,
+        destinations,
+        selectedDate,
+        minConnection,
+        maxConnection,
+        connectionRadius,
+        allowedOffsets
+      );
+  
+      console.log(`Found ${results.length} routes with airport change`);
+      return results;
+    }
+  
+    // 6) Build all candidate chains via DFS
     let candidateRoutes = [];
-    origins.forEach(origin => {
-      findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes);
-    });
-
-    // Preliminary check: filter candidate routes based on flightDates availability across the full allowed window.
-    candidateRoutes = candidateRoutes.filter(candidate => {
-      const valid = candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets);
-      if (!valid && debug) {
-        if (debug) console.log(`Candidate route ${candidate.join(" → ")} rejected: no flights on selected date(s).`);
-      }
-      return valid;
-    });
-    if (debug) console.log(`After preliminary check, ${candidateRoutes.length} candidate routes remain.`);
-    if (debug) console.log(`Candidate routes: ${candidateRoutes}`)
-    const totalCandidates = candidateRoutes.length;
-    let processedCandidates = 0;
-    if (!skipProgress) {
-      updateProgress(processedCandidates, totalCandidates, "Processing routes");
-    }
-    if (debug) console.log(`Total candidate routes found: ${totalCandidates}`);
-    
+    origins.forEach(origin =>
+      findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes)
+    );
+    if (debug) console.log(`Total candidate routes found: ${candidateRoutes.length}`);
+  
+    // 7) Preliminary flight-dates filter
+    candidateRoutes = candidateRoutes.filter(chain =>
+      candidateHasValidFlightDates(chain, routesData, selectedDate, bookingHorizon, allowedOffsets)
+    );
+    if (debug) console.log(`After date check, ${candidateRoutes.length} candidates remain`);
+  
+    // 8) Process each candidate with your existing processSegment
+    let processed = 0;
+    const total = candidateRoutes.length;
+    if (!skipProgress) updateProgress(0, total, "Processing routes");
+  
     const aggregatedResults = [];
     for (const candidate of candidateRoutes) {
-      // If the search was cancelled, stop processing further candidates
       if (searchCancelled) break;
-    
-      // === Cache-based skip: if every offset for any segment yields an empty cache entry, skip this candidate ===
-      let skipCandidate = false;
-      for (let i = 0; i < candidate.length - 1; i++) {
-        const dep = candidate[i];
-        const arr = candidate[i + 1];
-        const routeObj = routesData.find(r => {
-            const d = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
-            return d === dep;
-          });
-          const arrivalObj = routeObj?.arrivalStations.find(st => {
-            const id = typeof st === "object" ? st.id : st;
-            return id === arr;
-          });
-        const allEmpty = await Promise.all(
-          allowedOffsets.map(async offset => {
-            const date = addDaysUTC(baseDateUTC, offset).toISOString().slice(0, 10);
-            if (arrivalObj?.flightDates && !arrivalObj.flightDates.includes(date)) {
-                return true;
-              }
-            const key     = getUnifiedCacheKey(dep, arr, date);
-            const cached  = await getCachedResults(key);
-            return cached !== null && cached.length === 0;
-          })
-        ).then(results => results.every(Boolean));
-        if (allEmpty) {
-          skipCandidate = true;
-          if (debug) console.log(
-            `Skipping route ${candidate.join('→')}: for segment ${dep}→${arr} no flights in cache on ${allowedOffsets.join(", ")}`
-          );
-          break;
-        }
-      }
-      if (skipCandidate) {
-        continue;
-      }
-      if (debug) {
-        console.log(`Processing candidate route: ${candidate.join(' → ')}`);
-      }
-    
-      // === Recursively process the candidate route ===
-      const candidateChains = await processSegment(
+      processed++;
+      if (!skipProgress) updateProgress(processed, total, `Checking ${candidate.join("→")}`);
+  
+      const chains = await processSegment(
         candidate,
-        0,                        // start at first segment
+        0,
         baseDateUTC,
-        null,                     // no previous flight
+        null,                      // no previous flight
         bookingHorizon,
         minConnection,
         maxConnection,
-        allowedOffsets[allowedOffsets.length - 1], // max offset to pass down
+        allowedOffsets[allowedOffsets.length - 1], // max offset
         selectedDate,
         routesData
       );
-    
-      // Update progress
-      processedCandidates++;
-      if (!skipProgress) {
-        updateProgress(processedCandidates, totalCandidates, `Checking outbound: ${candidate.join(" → ")} on ${selectedDate}`);
-      }
-      if (candidateChains.length > 0) {
-        for (let chain of candidateChains) {
-          // 'chain' is an array of flights for the candidate route
-          const firstFlight = chain[0];
-          const lastFlight = chain[chain.length - 1];
-          const firstDep = firstFlight.calculatedDuration.departureDate instanceof Date 
-                            ? firstFlight.calculatedDuration.departureDate 
-                            : new Date(firstFlight.calculatedDuration.departureDate);
-          const lastArr = lastFlight.calculatedDuration.arrivalDate instanceof Date 
-                            ? lastFlight.calculatedDuration.arrivalDate 
-                            : new Date(lastFlight.calculatedDuration.arrivalDate);
-          const totalDurationMinutes = Math.round((lastArr - firstDep) / 60000);
-          let totalConnectionTime = 0;
-          for (let j = 0; j < chain.length - 1; j++) {
-            const connectionTime = Math.round((chain[j + 1].calculatedDuration.departureDate.getTime() - chain[j].calculatedDuration.arrivalDate.getTime()) / 60000);
-            totalConnectionTime += connectionTime;
-            if (debug) console.log(`Connection between flight ${chain[j].flightCode} and ${chain[j+1].flightCode}: ${connectionTime} minutes`);
-          }
-          const aggregatedRoute = {
-            key: chain.map(f => f.key).join(" | "),
-            fareSellKey: chain[0].fareSellKey,
-            departure: chain[0].departure,
-            arrival: chain[chain.length - 1].arrival,
-            departureStation: chain[0].departureStation,
-            departureStationText: chain[0].departureStationText,
-            arrivalStation: chain[chain.length - 1].arrivalStation,
-            arrivalStationText: chain[chain.length - 1].arrivalStationText,
-            departureDate: chain[0].departureDate,
-            arrivalDate: chain[chain.length - 1].arrivalDate,
-            departureStationCode: chain[0].departureStationCode,
-            arrivalStationCode: chain[chain.length - 1].arrivalStationCode,
-            reference: chain[0].reference,
-            stops: `${chain.length - 1} transfer${chain.length - 1 === 1 ? "" : "s"}`,
-            flightCode: chain[0].flightCode,
-            carrierText: chain[0].carrierText,
-            currency: chain[0].currency,
-            fare: chain[0].fare,
-            discount: chain[0].discount,
-            price: chain[0].price,
-            taxes: chain[0].taxes,
-            totalPrice: chain[0].totalPrice,
-            displayPrice: chain[0].displayPrice,
-            priceTag: chain[0].priceTag,
-            flightId: chain[0].flightId,
-            fareBasisCode: chain[0].fareBasisCode,
-            actionText: chain[0].actionText,
-            isFree: chain[0].isFree,
-            departureOffsetText: chain[0].departureOffsetText,
-            arrivalOffsetText: chain[chain.length - 1].arrivalOffsetText,
-            departureOffset: chain[0].departureOffset,
-            arrivalOffset: chain[chain.length - 1].arrivalOffset,
-            displayDeparture: chain[0].displayDeparture,
-            displayArrival: chain[chain.length - 1].displayArrival,
-            calculatedDuration: {
-              hours: Math.floor(totalDurationMinutes / 60),
-              minutes: totalDurationMinutes % 60,
-              totalMinutes: totalDurationMinutes,
-              departureDate: firstDep,
-              arrivalDate: lastArr
-            },
-            formattedFlightDate: formatFlightDateCombined(firstDep, lastArr),
-            route: [chain[0].departureStationText, chain[chain.length - 1].arrivalStationText],
-            totalConnectionTime: totalConnectionTime,
-            segments: chain
-          };
-          if (debug) console.log(`Aggregated route: ${aggregatedRoute.route.join(" -> ")}; Total duration: ${totalDurationMinutes} minutes; Total connection time: ${totalConnectionTime} minutes`);
-          if (shouldAppend) {
-            appendRouteToDisplay(aggregatedRoute);
-          }
-          aggregatedResults.push(aggregatedRoute);
-        }
+  
+      for (const chain of chains) {
+        // Build your aggregated route object exactly as before…
+        const firstDep = chain[0].calculatedDuration.departureDate;
+        const lastArr  = chain[chain.length-1].calculatedDuration.arrivalDate;
+        const totalMins = Math.round((lastArr - firstDep)/60000);
+        const totalConn = chain.slice(0,-1).reduce((sum, f, i) => {
+          const next = chain[i+1];
+          return sum + Math.round((next.calculatedDuration.departureDate - f.calculatedDuration.arrivalDate)/60000);
+        }, 0);
+  
+        const aggregatedRoute = {
+          // …copy over all fields…
+          key: chain.map(f => f.key).join(" | "),
+          fareSellKey: chain[0].fareSellKey,
+          departure: chain[0].departure,
+          arrival: chain[chain.length-1].arrival,
+          departureStation: chain[0].departureStation,
+          departureStationText: chain[0].departureStationText,
+          arrivalStation: chain[chain.length-1].arrivalStation,
+          arrivalStationText: chain[chain.length-1].arrivalStationText,
+          departureDate: chain[0].departureDate,
+          arrivalDate: chain[chain.length-1].arrivalDate,
+          stops: `${chain.length-1} transfer${chain.length-1===1?"":"s"}`,
+          totalConnectionTime: totalConn,
+          segments: chain,
+          calculatedDuration: {
+            hours: Math.floor(totalMins/60),
+            minutes: totalMins%60,
+            totalMinutes: totalMins,
+            departureDate: firstDep,
+            arrivalDate: lastArr
+          },
+          formattedFlightDate: formatFlightDateCombined(firstDep, lastArr),
+          currency: chain[0].currency,
+          displayPrice: chain[0].displayPrice,
+          priceTag: chain[0].priceTag,
+          route: [chain[0].departureStationText, chain[chain.length-1].arrivalStationText]
+        };
+  
+        if (shouldAppend) appendRouteToDisplay(aggregatedRoute);
+        aggregatedResults.push(aggregatedRoute);
       }
     }
+  
     return aggregatedResults;
-  }  
-  async function searchDirectRoutes(
+  }
+
+    async function searchDirectRoutes(
     origins,
     destinations,
     selectedDate,
@@ -2694,7 +2911,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${segment.currency} ${segment.displayPrice}
         </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
           Continue to customize
         </button>
       </div>
@@ -2709,7 +2926,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
           <div class="flex items-center my-2">
             <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
             <div class="px-3 text-sm ${isReturn ? "text-black" : "text-gray-500"} whitespace-nowrap">
-              Connection: ${ch}h ${cm}m
+              Self-connection: ${ch}h ${cm}m
             </div>
             <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
           </div>
@@ -2723,7 +2940,7 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         <div class="text-left text-sm font-semibold text-gray-800">
           ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
         </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:bg-[#A00065] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
           Continue to customize
         </button>
       </div>
@@ -3237,7 +3454,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("requests-frequency").value = localStorage.getItem("requestsFrequencyMs") || 1200;
     document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
     document.getElementById("cache-lifetime").value = localStorage.getItem("cacheLifetimeHours") || 4;
-  
+    
     // ========== 2. Toggle Expert Settings ==========
     document.getElementById("toggle-expert-settings").addEventListener("click", (event) => {
       const expertSettings = document.getElementById("expert-settings");
@@ -3505,6 +3722,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const outboundKey = btn.getAttribute("data-outbound-key");
         continueToPayment(outboundKey);
       }
-    });    
+    });
   });
   
