@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -1592,11 +1592,12 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         return f;
       });
       // Filter flights by "local" date (taking the target offset into account)
-      flights = flights.filter(f =>
-        getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === dateStr
-      );
-      if (debug) console.log(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
-      
+      // flights = flights.filter(f => {
+      //   f.departureDateIso === dateStr
+      //   if (debug) console.log(` Flight ${f.flightCode} rejected: departure date ${f.departureDateIso} does not match ${dateStr}`);
+      //   }
+      // );
+      // if (debug) console.log(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       if (previousFlight) {
         flights = flights.filter(f => {
           const connectionTime = (f.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime()) / 60000;
