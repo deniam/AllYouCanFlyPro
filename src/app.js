@@ -110,6 +110,23 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     airportLookup[a.code] = a;
   });
 
+  function getCountry(airport) {
+    if (airport && typeof airport === "object") {
+      // Prefer using the airport code if available.
+      if (airport.code && airportLookup[airport.code]) {
+        return airportLookup[airport.code].country || "";
+      }
+      // Fallback: use the country property.
+      if (airport.country) {
+        return airport.country;
+      }
+    } else if (typeof airport === "string") {
+      const found = airportLookup[airport];
+      if (found) {
+        return found.country || "";
+      }
+    }
+  }
 
   function getCountryFlag(airport) {
     if (airport && typeof airport === "object") {
@@ -1240,6 +1257,28 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     results.forEach(routeObj => {
       const routeHtml = renderRouteBlock(routeObj);
       resultsDiv.insertAdjacentHTML("beforeend", routeHtml);
+    });
+    bindTooltipListeners(resultsDiv);
+  }
+
+  function bindTooltipListeners(rootElement) {
+    const triggers = rootElement.querySelectorAll('.tooltip-trigger');
+
+    triggers.forEach(el => {
+      el.addEventListener('click', (event) => {
+        event.stopPropagation();
+
+        const tooltip = el.parentElement.querySelector('.tooltip');
+        if (!tooltip) return;
+
+        tooltip.classList.toggle('hidden');
+      });
+    });
+
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.tooltip').forEach(t => {
+        t.classList.add('hidden');
+      });
     });
   }
 
@@ -2976,12 +3015,16 @@ function createSegmentRow(segment) {
   const gridRow = `
     <div class="grid grid-cols-3 grid-rows-2 gap-0 items-center w-full py-1">
       <div class="flex items-center gap-1 whitespace-normal">
-        <div class="grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1">
-          <span class="text-xl items-center flex -mb-1">${getCountryFlag(departureStationCode)}</span>
+        <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
+          <span class="tooltip-trigger text-xl items-center flex -mb-1 cursor-pointer">${getCountryFlag(departureStationCode)}</span>
+          <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-xs px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+          ${getCountry(departureStationCode)}
+          </div>
           <span class="text-s justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
         </div>
-        <span class="text-base font-medium break-words max-w-[calc(100%-2rem)">${segment.departureStationText}</span>
+        <span class="text-base font-medium break-words max-w-[calc(100%-2rem)]">${segment.departureStationText}</span>
       </div>
+      <span class="-mb-8">
       <svg xmlns="http://www.w3.org/2000/svg"
           class="block m-0 p-0"
           width="100%" height="100%"
@@ -3000,31 +3043,46 @@ function createSegmentRow(segment) {
           <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D"/>
         </g>
       </svg>
+      </span>
+      <div class="flex justify-end items-center gap-1 mb-0 -mr-1">
+        <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">
+          ${segment.arrivalStationText}
+        </span>
 
-      <div class="flex justify-end items-center gap-1 mb-0">
-        <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">${segment.arrivalStationText}</span>
-          <div class="grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1">
-            <span class="text-xl items-center flex -mb-1">${getCountryFlag(arrivalStationCode)}</span>
-            <span class="text-s justify-between items-center font-bold text-gray-500 -mt-1">${arrivalStationCode}</span>
+        <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
+          <span class="text-xl items-center flex -mb-1 cursor-pointer tooltip-trigger">
+            ${getCountryFlag(arrivalStationCode)}
+          </span>
+
+          <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-xs px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+            ${getCountry(arrivalStationCode)}
           </div>
+
+          <span class="text-s justify-between items-center font-bold text-gray-500 -mt-1">
+            ${arrivalStationCode}
+          </span>
+        </div>
       </div>
-      <div class="flex items-center gap-1">
+    
+      <div class="flex items-center gap-1 mt-6">
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
       </div>
-      <div class="flex flex-col items-center -mt-4">
+      <div class="flex flex-col items-center -mt-10">
         <div class="text-sm font-medium">
           ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
         </div>
       </div>
-      <div class="flex items-center justify-end gap-1">
+      <div class="flex items-center justify-end gap-1 mt-6">
         <span class="text-2xl font-bold whitespace-nowrap mb-0">${segment.displayArrival}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.arrivalOffset)}</sup>
       </div>
     </div>
   `;
+  
   return `<div class=>${segmentHeader}${gridRow}</div>`;
 }
+
   /**
    * Formats a flight code by inserting a space after the first two characters.
    */
