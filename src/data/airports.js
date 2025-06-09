@@ -124,6 +124,8 @@ export async function loadAirportsData() {
         code: dep.id,
         name: `${dep.name} (${dep.id})`,
         country: dep.country,
+        longitude: dep.longitude,
+        latitude: dep.latitude,
         flag: getCountryFlag(dep.country)
       });
     }
