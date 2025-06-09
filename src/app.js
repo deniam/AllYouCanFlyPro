@@ -3016,14 +3016,14 @@ function createSegmentRow(segment) {
       <div class="flex items-center gap-1 whitespace-normal">
         <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
           <span class="tooltip-trigger text-xl items-center flex -mb-1 cursor-pointer">${getCountryFlag(departureStationCode)}</span>
-          <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-xs px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+          <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
           ${getCountry(departureStationCode)}
           </div>
-          <span class="text-s justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
+          <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
         </div>
         <span class="text-base font-medium break-words max-w-[calc(100%-2rem)]">${segment.departureStationText}</span>
       </div>
-      <span class="-mb-8">
+      <span class="-mb-6">
       <svg xmlns="http://www.w3.org/2000/svg"
           class="block m-0 p-0"
           width="100%" height="100%"
@@ -3053,26 +3053,26 @@ function createSegmentRow(segment) {
             ${getCountryFlag(arrivalStationCode)}
           </span>
 
-          <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-xs px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+          <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
             ${getCountry(arrivalStationCode)}
           </div>
 
-          <span class="text-s justify-between items-center font-bold text-gray-500 -mt-1">
+          <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">
             ${arrivalStationCode}
           </span>
         </div>
       </div>
     
-      <div class="flex items-center gap-1 mt-6">
+      <div class="flex items-center gap-1 mt-4">
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
       </div>
-      <div class="flex flex-col items-center -mt-10">
+      <div class="flex flex-col items-center -mt-8">
         <div class="text-sm font-medium">
           ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
         </div>
       </div>
-      <div class="flex items-center justify-end gap-1 mt-6">
+      <div class="flex items-center justify-end gap-1 mt-4">
         <span class="text-2xl font-bold whitespace-nowrap mb-0">${segment.displayArrival}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.arrivalOffset)}</sup>
       </div>
