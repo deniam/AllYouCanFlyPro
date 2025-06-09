@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -106,9 +106,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   initApp();
   // ---------------- Helper: Airport Flag ----------------
   const airportLookup = {};
-  AIRPORTS.forEach(a => {
-    airportLookup[a.code] = a;
-  });
 
   function getCountry(airport) {
     if (airport && typeof airport === "object") {
@@ -366,7 +363,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
       Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
+    const distance = R * c; // distance in km
+    return distance;
   }
   //===========Autocomplete Functions================
 // Assumptions:
@@ -1065,6 +1063,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   }
 
   async function checkRouteSegment(origin, destination, date) {
+    if (debug) console.log(`Checking route segment: ${origin} → ${destination} on ${date}`);
     let attempts = 0;
     while (attempts < MAX_RETRY_ATTEMPTS) {
       await throttleRequest();
@@ -1259,6 +1258,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       resultsDiv.insertAdjacentHTML("beforeend", routeHtml);
     });
     bindTooltipListeners(resultsDiv);
+
   }
 
   function bindTooltipListeners(rootElement) {
@@ -1286,39 +1286,84 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
    * Renders round-trip results.
    */
   function displayRoundTripResultsAll(outbounds) {
-    // Sort outbound flights using the updated logic.
     sortResultsArray(outbounds, currentSortOption);
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${outbounds.length}`;
-  
+
     const resultsDiv = document.querySelector(".route-list");
     resultsDiv.innerHTML = "";
-    outbounds.forEach(outbound => {
-      // For the inbound flights, sort by their departure time.
-      if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-        outbound.returnFlights.sort((x, y) => {
-          return new Date(x.calculatedDuration.departureDate).getTime() -
-                 new Date(y.calculatedDuration.departureDate).getTime();
-        });
-      }
+
+    outbounds.forEach((outbound, index) => {
       const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
-      resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
-  
+      const toggleId = `toggle-return-${index}`;
+      const returnId = `return-list-${index}`;
+
+      let returnHtml = "";
       if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-        outbound.returnFlights.forEach((ret, idx) => {
+        const returns = outbound.returnFlights.map((ret, idx) => {
           const outboundLastArrival = outbound.calculatedDuration.arrivalDate;
           const inboundFirstDeparture = ret.calculatedDuration.departureDate;
-          if (!outboundLastArrival || !inboundFirstDeparture) return;
           const stopoverMs = inboundFirstDeparture - outboundLastArrival;
           const stopoverMinutes = Math.max(0, Math.round(stopoverMs / 60000));
           const sh = Math.floor(stopoverMinutes / 60);
           const sm = stopoverMinutes % 60;
           const stopoverText = `Stopover: ${sh}h ${sm}m`;
-          const inboundHtml = renderRouteBlock(ret, `Inbound Flight ${idx + 1}`, stopoverText);
-          resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
-        });
+          return renderRouteBlock(ret, `Inbound Flight ${idx + 1}`, stopoverText);
+        }).join("");
+        
+        returnHtml = `
+          <div id="${returnId}" class="mt-2 hidden">
+            ${returns}
+          </div>
+        `;
+      }
+
+      const inboundCount = outbound.returnFlights?.length || 0;
+      const toggleButtonHtml = inboundCount > 0
+        ? `<div class="text-center mt-2">
+             <button
+               id="${toggleId}"
+               class="inline-flex items-center px-4 py-2 text-sm text-[#C90076] font-semibold hover:underline active:scale-95 cursor-pointer transition"
+               aria-expanded="false"
+               data-count="${inboundCount}"
+             >
+               <svg focusable="false" aria-hidden="true" width="24" height="24" viewBox="0 0 24 24"
+                    class="w-6 h-6 mr-1 transition-transform">
+                 <path fill="currentColor" d="M12 16.41l-6.71-6.7 1.42-1.42 5.29 5.3 5.29-5.3 1.42 1.42z"/>
+               </svg>
+               <span class="toggle-label">${inboundCount} inbound flight${inboundCount > 1 ? "s" : ""} found</span>
+             </button>
+           </div>`
+        : "";
+
+      resultsDiv.insertAdjacentHTML("beforeend", `
+        <div class="border rounded-lg p-2.5 mb-4">
+          ${outboundHtml}
+          ${toggleButtonHtml}
+          ${returnHtml}
+        </div>
+      `);
+
+      if (outbound.returnFlights?.length) {
+        setTimeout(() => {
+          const toggleBtn = document.getElementById(toggleId);
+          const returnBlock = document.getElementById(returnId);
+
+          toggleBtn.addEventListener("click", () => {
+            const count = Number(toggleBtn.dataset.count);
+            const expanded = toggleBtn.getAttribute("aria-expanded") === "true";
+            returnBlock.classList.toggle("hidden");
+            toggleBtn.setAttribute("aria-expanded", String(expanded));
+            toggleBtn.querySelector(".toggle-label").textContent = expanded
+              ? `Hide ${count} inbound flight${count > 1 ? "s" : ""}`
+              : `Show ${count} inbound flight${count > 1 ? "s" : ""}`;
+            toggleBtn.querySelector("svg").classList.toggle("rotate-180");
+          });
+        }, 0);
       }
     });
+
+    bindTooltipListeners(resultsDiv);
   }
 
   // ---------------- Data Fetching Functions ----------------
@@ -1666,18 +1711,19 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
     return validChains;
   }
-
+  
   /**
-   * One‐stop search with airport‐change within a radius.
+   * Searches all one-stop routes allowing an airport change.
    *
-   * @param {string[]} origins           – list of origin IATA codes
-   * @param {string[]} destinations      – list of destination IATA codes
-   * @param {string}   selectedDate      – "YYYY-MM-DD" departure date
-   * @param {number}   minConnection     – min layover in minutes
-   * @param {number}   maxConnection     – max layover in minutes
-   * @param {number}   radiusKm          – airport-change radius in km
-   * @param {number[]} allowedOffsets    – day offsets, e.g. [0,1]
-   * @returns {Promise<Object[]>}        – aggregated route objects
+   * @param {string[]} origins                – list of origin airport codes
+   * @param {string[]} destinations          – list of destination airport codes
+   * @param {string}   selectedDate           – YYYY-MM-DD of outbound date
+   * @param {number}   minConnection          – minimum layover in minutes
+   * @param {number}   maxConnection          – maximum layover in minutes
+   * @param {number}   connectionRadiusKm     – max distance between connection airports
+   * @param {number[]} allowedOffsets         – [0…n] day offsets for second leg
+   * @param {boolean}  shouldAppend           – whether to append results as they arrive
+   * @returns {Promise<Route[]>}              – all matching routes
    */
   async function processOneStopWithAirportChange(
     origins,
@@ -1685,205 +1731,245 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     selectedDate,
     minConnection,
     maxConnection,
-    radiusKm,
-    allowedOffsets
+    connectionRadiusKm,
+    allowedOffsets,
+    shouldAppend
   ) {
-    console.log("[DEBUG] airport-change search", {
-      origins, destinations, selectedDate,
-      minConnection, maxConnection, radiusKm, allowedOffsets
+    if (debug) console.log("[DEBUG] airport-change search start", {
+      origins,
+      destinations,
+      selectedDate,
+      minConnection,
+      maxConnection,
+      connectionRadiusKm,
+      allowedOffsets,
     });
 
-    // fetch metadata
+    // Fetch global flight network once
     const routesData = await fetchDestinations();
-
-    // 1) collect all Bs: origin→B direct flights exist on any allowed offset
-    const firstLegMap = new Map(); // origin → Set of B codes
-    for (let org of origins) {
-      const bs = new Set();
-      for (let offset of allowedOffsets) {
-        const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), offset)
-                      .toISOString().slice(0,10);
-        routesData.forEach(r => {
-          const dep = typeof r.departureStation === "object"
-                      ? r.departureStation.id
-                      : r.departureStation;
-          if (dep === org) {
-            (r.arrivalStations || []).forEach(a => {
-              const arr = typeof a === "object" ? a.id : a;
-              if (isDateAvailableForSegment(org, arr, date)) {
-                bs.add(arr);
-              }
-            });
-          }
-        });
-      }
-      firstLegMap.set(org, bs);
-      console.log(`[DEBUG] origins→B for ${org}:`, Array.from(bs));
-    }
-
-    // 2) collect all Ns: N→destination direct flights exist
-    const secondLegMap = new Map(); // dest → Set of N codes
-    for (let dst of destinations) {
-      const ns = new Set();
-      for (let offset of allowedOffsets) {
-        const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), offset)
-                      .toISOString().slice(0,10);
-        routesData.forEach(r => {
-          const dep = typeof r.departureStation === "object"
-                      ? r.departureStation.id
-                      : r.departureStation;
-          (r.arrivalStations || []).forEach(a => {
-            const arr = typeof a === "object" ? a.id : a;
-            if (arr === dst && isDateAvailableForSegment(dep, dst, date)) {
-              ns.add(dep);
-            }
-          });
-        });
-      }
-      secondLegMap.set(dst, ns);
-      console.log(`[DEBUG] N→dest for ${dst}:`, Array.from(ns));
-    }
-
     const results = [];
-    let count = 0;
-    const totalChains = origins.length * destinations.length;
-    updateProgress(0, totalChains, "Combining B→N pairs…");
 
-    // 2.5) 
-    // after building firstLegMap and secondLegMap
-  const prunedFirstLegMap = new Map();
-  for (let [org, bs] of firstLegMap) {
-    const nsForAllDests = new Set();
-    for (let dst of destinations) {
-      (secondLegMap.get(dst) || []).forEach(n => nsForAllDests.add(n));
-    }
-    const pruned = Array.from(bs).filter(b => 
-      nsForAllDests.some(n => {
-        const apB = airportLookup[b], apN = airportLookup[n];
-        if (!apB || !apN) return false;
-        return haversineDistance(
-          apB.latitude, apB.longitude,
-          apN.latitude, apN.longitude
-        ) <= radiusKm;
-      })
-    );
-    prunedFirstLegMap.set(org, pruned);
-  }
-  firstLegMap = prunedFirstLegMap;
+    //
+    // 1) Build a map: origin → Set of valid first-leg airports (B)
+    //
+    const firstLegMap = new Map();
+    for (const origin of origins) {
+      const bs = new Set();
+      // first leg must depart exactly on selectedDate
+      for (const route of routesData) {
+        const dep = typeof route.departureStation === "object"
+          ? route.departureStation.id
+          : route.departureStation;
+        if (dep !== origin) continue;
 
-    // 3) now for each origin & destination, combine every B with every N
-    for (let org of origins) {
-      const bs = Array.from(firstLegMap.get(org) || []);
-      for (let dst of destinations) {
-        const ns = Array.from(secondLegMap.get(dst) || []);
-        for (let b of bs) {
-          // load flights1 for each org→b on each offset
-          let flights1 = [];
-          for (let off of allowedOffsets) {
-            const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), off)
-                          .toISOString().slice(0,10);
-            const key = getUnifiedCacheKey(org, b, date);
-            let segs = await getCachedResults(key);
-            if (!segs) {
-              segs = (await checkRouteSegment(org, b, date)).map(unifyRawFlight);
-              await setCachedResults(key, segs);
-            }
-            segs = segs.map(unifyRawFlight)
-                      .filter(f => getLocalDateFromOffset(
-                        f.calculatedDuration.departureDate,
-                        f.departureOffsetText
-                      ) === date);
-            flights1.push(...segs);
+        for (const arrival of route.arrivalStations || []) {
+          const arr = typeof arrival === "object" ? arrival.id : arrival;
+          if (isDateAvailableForSegment(origin, arr, selectedDate)) {
+            bs.add(arr);
           }
-          if (!flights1.length) continue;
+        }
+      }
+      firstLegMap.set(origin, bs);
+      if (debug) console.log(`[DEBUG] first-leg options for ${origin}:`, Array.from(bs));
+    }
 
-          for (let n of ns) {
-            // compute Haversine once
-            const coordB = airportLookup[b], coordN = airportLookup[n];
-            const withinRadius = coordB && coordN &&
-              haversineDistance(
-                coordB.latitude, coordB.longitude,
-                coordN.latitude, coordN.longitude
-              ) <= radiusKm;
+    //
+    // 2) Build a map: destination → Set of valid second-leg airports (N)
+    //
+    const secondLegMap = new Map();
+    for (const destination of destinations) {
+      const ns = new Set();
+      for (const offset of allowedOffsets) {
+        const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), offset)
+          .toISOString()
+          .slice(0, 10);
 
-            for (let off of allowedOffsets) {
-              // load flights2 for n→dst
-              const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), off)
-                            .toISOString().slice(0,10);
-              const key2 = getUnifiedCacheKey(n, dst, date);
-              let flights2 = await getCachedResults(key2);
-              if (!flights2) {
-                flights2 = (await checkRouteSegment(n, dst, date)).map(unifyRawFlight);
-                await setCachedResults(key2, flights2);
-              }
-              flights2 = flights2.map(unifyRawFlight)
-                                .filter(f => getLocalDateFromOffset(
-                                  f.calculatedDuration.departureDate,
-                                  f.departureOffsetText
-                                ) === date);
-              if (!flights2.length) continue;
+        for (const route of routesData) {
+          const dep = typeof route.departureStation === "object"
+            ? route.departureStation.id
+            : route.departureStation;
 
-              // now combine each f1 + f2
-              for (let f1 of flights1) {
-                for (let f2 of flights2) {
-                  const gapMin = Math.round(
-                    (f2.calculatedDuration.departureDate
-                    - f1.calculatedDuration.arrivalDate) / 60000
-                  );
-                  if (gapMin < minConnection || gapMin > maxConnection) continue;
-
-                  const same = b === n;
-                  if (!same && !withinRadius) continue;
-
-                  // aggregate exactly like your UI expects:
-                  const d1 = f1.calculatedDuration.departureDate;
-                  const a2 = f2.calculatedDuration.arrivalDate;
-                  const totalMin = Math.round((a2 - d1)/60000);
-
-                  const agg = {
-                    key: `${f1.key} | ${f2.key}`,
-                    fareSellKey: f1.fareSellKey,
-                    departure: f1.departure,
-                    arrival: f2.arrival,
-                    departureStation: f1.departureStation,
-                    departureStationText: f1.departureStationText,
-                    arrivalStation: f2.arrivalStation,
-                    arrivalStationText: f2.arrivalStationText,
-                    departureDate: f1.departureDate,
-                    arrivalDate: f2.arrivalDate,
-                    stops: "1 transfer",
-                    totalConnectionTime: gapMin,
-                    segments: [f1, f2],
-                    calculatedDuration: {
-                      hours: Math.floor(totalMin/60),
-                      minutes: totalMin%60,
-                      totalMinutes: totalMin,
-                      departureDate: d1,
-                      arrivalDate: a2
-                    },
-                    formattedFlightDate: formatFlightDateCombined(d1, a2),
-                    currency: f1.currency,
-                    displayPrice: f1.displayPrice,
-                    priceTag: f1.priceTag,
-                    route: [f1.departureStationText, f2.arrivalStationText]
-                  };
-                  console.log(`   [FOUND] ${org}→${b} + ${n}→${dst}  gap=${gapMin} allow=${allow}`);
-                  appendRouteToDisplay(agg);
-                  results.push(agg);
-                }
-              }
+          for (const arrival of route.arrivalStations || []) {
+            const arr = typeof arrival === "object" ? arrival.id : arrival;
+            if (arr === destination && isDateAvailableForSegment(dep, arr, date)) {
+              ns.add(dep);
             }
           }
         }
-        count++;
-        updateProgress(count, totalChains, `Combined ${org}→${dst}`);
+      }
+      secondLegMap.set(destination, ns);
+      if (debug) console.log(`[DEBUG] second-leg options for ${destination}:`, Array.from(ns));
+    }
+
+    //
+    // 3) Build a flat list of all candidate chains {origin, B, N, destination}
+    //
+    const candidates = [];
+    for (const origin of origins) {
+      const Bs = Array.from(firstLegMap.get(origin) || []);
+      for (const destination of destinations) {
+        const Ns = Array.from(secondLegMap.get(destination) || []);
+        for (const B of Bs) {
+          // filter N by distance <= radius
+          const validNs = Ns.filter(N => {
+            if (B === N) return true;
+            const locB = airportLookup[B];
+            const locN = airportLookup[N];
+            return (
+              locB &&
+              locN &&
+              haversineDistance(
+                locB.latitude,
+                locB.longitude,
+                locN.latitude,
+                locN.longitude
+              ) <= connectionRadiusKm
+            );
+          });
+          for (const N of validNs) {
+            candidates.push({ origin, B, N, destination });
+          }
+        }
       }
     }
 
-    console.log(`[DEBUG] airport-change search found ${results.length} routes`);
+    const totalRoutes = candidates.length;
+    let routeCounter = 0;
+
+    //
+    // 4) Iterate each candidate, update progress, fetch two legs, combine if valid
+    //
+    for (const { origin, B, N, destination } of candidates) {
+      if (searchCancelled) break;
+
+      // update UI
+      routeCounter++;
+      updateProgress(
+        routeCounter,
+        totalRoutes,
+        `Checking route: ${origin} → ${B} → ${N} → ${destination}`
+      );
+
+      // first leg: exact selectedDate
+      const flights1 = await loadFlights(origin, B, selectedDate, [0]);
+      if (!flights1.length) continue;
+
+      // second leg: allow day-offsets per user settings
+      const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
+      if (!flights2.length) continue;
+
+      // combine and append to results or UI
+      combineAndAppend(
+        flights1,
+        flights2,
+        minConnection,
+        maxConnection,
+        results,
+        shouldAppend
+      );
+    }
+
+    if (debug) console.log(
+      `[DEBUG] airport-change search found ${results.length} routes:`,
+      results.map(r => r.key).join(", ")
+    );
     return results;
   }
-    
+
+  async function loadFlights(dep, arr, baseDate, offsets) {
+    const out = [];
+    for (const off of offsets) {
+      const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off)
+                    .toISOString().slice(0,10);
+      const key = getUnifiedCacheKey(dep, arr, date);
+      if (!isDateAvailableForSegment(dep, arr, date)) {
+        if (debug) console.log(`Skipping API request: ${dep} → ${arr} on ${date} (not in flightDates)`);
+        continue;
+      }
+      let segs = await getCachedResults(key);
+      if (!Array.isArray(segs)) { 
+        segs = (await checkRouteSegment(dep, arr, date)).map(unifyRawFlight);
+        await setCachedResults(key, segs);
+      }
+
+      out.push(
+        ...segs.filter(f =>
+          getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === date
+        )
+      );
+    }
+    return out;
+  }
+
+  /**
+ * Build a combined “one‑stop” route object from two unified flights.
+ *
+ * @param {Object} f1   – first‐leg unified flight
+ * @param {Object} f2   – second‐leg unified flight
+ * @param {number} gap  – layover time in minutes between f1 arrival and f2 departure
+ * @returns {Object}    – the aggregated route, ready for appendRouteToDisplay
+ */
+  function buildAggregatedRoute(f1, f2, gap) {
+    // departure of the first leg, arrival of the second leg
+    const depDate = f1.calculatedDuration.departureDate;
+    const arrDate = f2.calculatedDuration.arrivalDate;
+    const totalMin = Math.round((arrDate - depDate) / 60000);
+
+    const codeB = f1.arrivalStation;
+    const codeN = f2.departureStation;
+    const locB = airportLookup[codeB];
+    const locN = airportLookup[codeN];
+    const changeDistanceKm = locB && locN
+      ? Math.round(haversineDistance(locB.latitude, locB.longitude, locN.latitude, locN.longitude))
+      : null;
+
+    return {
+      key:        `${f1.key} | ${f2.key}`,
+      fareSellKey:f1.fareSellKey,
+      departure:  f1.departure,
+      arrival:    f2.arrival,
+      departureStation:     f1.departureStation,
+      departureStationText: f1.departureStationText,
+      arrivalStation:       f2.arrivalStation,
+      arrivalStationText:   f2.arrivalStationText,
+      departureDate: f1.departureDate,
+      arrivalDate:   f2.arrivalDate,
+      stops:       "1 transfer",
+      totalConnectionTime: gap,
+      airportChange: {
+        from: codeB,
+        to:   codeN,
+        distanceKm: changeDistanceKm
+      },
+      segments:    [f1, f2],
+      calculatedDuration: {
+        hours:       Math.floor(totalMin/60),
+        minutes:     totalMin % 60,
+        totalMinutes: totalMin,
+        departureDate: depDate,
+        arrivalDate:   arrDate
+      },
+      formattedFlightDate: formatFlightDateCombined(depDate, arrDate),
+      currency:    f1.currency,
+      displayPrice:f1.displayPrice,
+      priceTag:    f1.priceTag,
+      route:       [f1.departureStationText, f2.arrivalStationText]
+    };
+  }
+
+  function combineAndAppend(f1List, f2List, minC, maxC, resultsArr, appendFlag) {
+    for (const f1 of f1List) {
+      for (const f2 of f2List) {
+        const gap = Math.round((f2.calculatedDuration.departureDate - f1.calculatedDuration.arrivalDate)/60000);
+        if (gap < minC || gap > maxC) continue;
+        const agg = buildAggregatedRoute(f1, f2, gap);
+        if (appendFlag) appendRouteToDisplay(agg);
+        resultsArr.push(agg);
+      }
+    }
+  }
+
+
   async function searchConnectingRoutes(
     origins,
     destinations,
@@ -1903,7 +1989,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const connectionRadius   = parseInt(localStorage.getItem("connectionRadius"), 10) || 0;
     const allowChangeAirport = localStorage.getItem("allowChangeAirport") === "true";
   
-    console.log(
+    if (debug) console.log(
       `[DEBUG] searchConnectingRoutes → stopover="${stopoverText}",`,
       `allowChangeAirport=${allowChangeAirport},`,
       `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`
@@ -1967,8 +2053,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       && connectionRadius > 0
     );
     if (switchableForOneStop) {
-      console.log("Airport-change mode ON: delegating to processOneStopWithAirportChange");
-      updateProgress(0, 1, "Searching one-stop with airport change…");
+      if (debug) console.log("Airport-change mode ON: delegating to processOneStopWithAirportChange");
+      // updateProgress(0, 1, "Searching one-stop with airport change…");
   
       // **Pass allowedOffsets** into your new function
       const results = await processOneStopWithAirportChange(
@@ -1980,8 +2066,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         connectionRadius,
         allowedOffsets
       );
-  
-      console.log(`Found ${results.length} routes with airport change`);
+      if (shouldAppend) {
+        results.forEach(r => appendRouteToDisplay(r));
+      }
+      if (debug) console.log(`Found ${results.length} routes with airport change`);
       return results;
     }
   
@@ -2961,11 +3049,23 @@ function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
         const connectionMinutes = Math.max(0, Math.round(connectionMs / 60000));
         const ch = Math.floor(connectionMinutes / 60);
         const cm = connectionMinutes % 60;
+        let stopoverText = `Self-connection: ${ch}h ${cm}m`;
+
+        if (
+          unifiedFlight.airportChange &&
+          unifiedFlight.airportChange.from &&
+          unifiedFlight.airportChange.to &&
+          unifiedFlight.airportChange.distanceKm > 0 &&
+          unifiedFlight.airportChange.from !== unifiedFlight.airportChange.to
+        ) {
+          stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChange.from} ⇄ ${unifiedFlight.airportChange.to}, Distance: ${unifiedFlight.airportChange.distanceKm} km`;
+        }
+
         bodyHtml += `
           <div class="flex items-center my-2">
             <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
-            <div class="px-3 text-sm ${isReturn ? "text-black" : "text-gray-500"} whitespace-nowrap">
-              Self-connection: ${ch}h ${cm}m
+            <div class="px-3 text-sm ${isReturn ? "text-black" : "text-gray-500"} text-center whitespace-nowrap">
+              ${stopoverText}
             </div>
             <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
           </div>
@@ -3017,14 +3117,14 @@ function createSegmentRow(segment) {
       <div class="flex items-center gap-1 whitespace-normal">
         <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
           <span class="tooltip-trigger text-xl items-center flex -mb-1 cursor-pointer">${getCountryFlag(departureStationCode)}</span>
-          <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-xs px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+          <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
           ${getCountry(departureStationCode)}
           </div>
-          <span class="text-s justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
+          <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
         </div>
         <span class="text-base font-medium break-words max-w-[calc(100%-2rem)]">${segment.departureStationText}</span>
       </div>
-      <span class="-mb-8">
+      <span class="-mb-6">
       <svg xmlns="http://www.w3.org/2000/svg"
           class="block m-0 p-0"
           width="100%" height="100%"
@@ -3054,26 +3154,26 @@ function createSegmentRow(segment) {
             ${getCountryFlag(arrivalStationCode)}
           </span>
 
-          <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-xs px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+          <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
             ${getCountry(arrivalStationCode)}
           </div>
 
-          <span class="text-s justify-between items-center font-bold text-gray-500 -mt-1">
+          <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">
             ${arrivalStationCode}
           </span>
         </div>
       </div>
     
-      <div class="flex items-center gap-1 mt-6">
+      <div class="flex items-center gap-1 mt-4">
         <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
       </div>
-      <div class="flex flex-col items-center -mt-10">
+      <div class="flex flex-col items-center -mt-8">
         <div class="text-sm font-medium">
           ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
         </div>
       </div>
-      <div class="flex items-center justify-end gap-1 mt-6">
+      <div class="flex items-center justify-end gap-1 mt-4">
         <span class="text-2xl font-bold whitespace-nowrap mb-0">${segment.displayArrival}</span>
         <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.arrivalOffset)}</sup>
       </div>
@@ -3790,4 +3890,3 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
-  
