@@ -1748,7 +1748,30 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     // Fetch global flight network once
     const routesData = await fetchDestinations();
     const results = [];
+    let directCounter = 0;
+    
+    for (const origin of origins) {
+      for (const destination of destinations) {
+        if (origin === destination) continue;
 
+        if (isDateAvailableForSegment(origin, destination, selectedDate)) {
+          const cacheKey = getUnifiedCacheKey(origin, destination, selectedDate);
+          let flights = await getCachedResults(cacheKey);
+          if (!flights) {
+            flights = await checkRouteSegment(origin, destination, selectedDate);
+            await setCachedResults(cacheKey, flights);
+          }
+          flights = flights.map(unifyRawFlight);
+          for (const flight of flights) {
+            if (shouldAppend) appendRouteToDisplay(flight);
+            results.push(flight);
+
+            directCounter++;
+            updateProgress(directCounter, origins.length * destinations.length, `Direct routes`);
+          }
+        }
+      }
+    }
     //
     // 1) Build a map: origin → Set of valid first-leg airports (B)
     //
@@ -1922,7 +1945,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const changeDistanceKm = locB && locN
       ? Math.round(haversineDistance(locB.latitude, locB.longitude, locN.latitude, locN.longitude))
       : null;
-
+    if (!f1?.calculatedDuration?.arrivalDate || !f2?.calculatedDuration?.departureDate) {
+      console.warn("Missing duration data for aggregation:", f1, f2);
+      return null;
+    }
     return {
       key:        `${f1.key} | ${f2.key}`,
       fareSellKey:f1.fareSellKey,
@@ -1963,6 +1989,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         const gap = Math.round((f2.calculatedDuration.departureDate - f1.calculatedDuration.arrivalDate)/60000);
         if (gap < minC || gap > maxC) continue;
         const agg = buildAggregatedRoute(f1, f2, gap);
+        if (!agg) continue;
         if (appendFlag) appendRouteToDisplay(agg);
         resultsArr.push(agg);
       }
@@ -2054,7 +2081,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     );
     if (switchableForOneStop) {
       if (debug) console.log("Airport-change mode ON: delegating to processOneStopWithAirportChange");
-      // updateProgress(0, 1, "Searching one-stop with airport change…");
   
       // **Pass allowedOffsets** into your new function
       const results = await processOneStopWithAirportChange(
@@ -2064,11 +2090,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         minConnection,
         maxConnection,
         connectionRadius,
-        allowedOffsets
+        allowedOffsets,
+        shouldAppend
       );
-      if (shouldAppend) {
-        results.forEach(r => appendRouteToDisplay(r));
-      }
       if (debug) console.log(`Found ${results.length} routes with airport change`);
       return results;
     }
