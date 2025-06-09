@@ -1355,8 +1355,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             returnBlock.classList.toggle("hidden");
             toggleBtn.setAttribute("aria-expanded", String(expanded));
             toggleBtn.querySelector(".toggle-label").textContent = expanded
-              ? `Hide ${count} inbound flight${count > 1 ? "s" : ""}`
-              : `Show ${count} inbound flight${count > 1 ? "s" : ""}`;
+              ? `${count} inbound flight${count > 1 ? "s" : ""} found`
+              : `${count} inbound flight${count > 1 ? "s" : ""} found`;
             toggleBtn.querySelector("svg").classList.toggle("rotate-180");
           });
         }, 0);
