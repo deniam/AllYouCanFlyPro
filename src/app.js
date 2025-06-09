@@ -1286,40 +1286,84 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
    * Renders round-trip results.
    */
   function displayRoundTripResultsAll(outbounds) {
-    // Sort outbound flights using the updated logic.
     sortResultsArray(outbounds, currentSortOption);
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${outbounds.length}`;
-  
+
     const resultsDiv = document.querySelector(".route-list");
     resultsDiv.innerHTML = "";
-    outbounds.forEach(outbound => {
-      // For the inbound flights, sort by their departure time.
-      if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-        outbound.returnFlights.sort((x, y) => {
-          return new Date(x.calculatedDuration.departureDate).getTime() -
-                 new Date(y.calculatedDuration.departureDate).getTime();
-        });
-      }
+
+    outbounds.forEach((outbound, index) => {
       const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
-      resultsDiv.insertAdjacentHTML("beforeend", outboundHtml);
-  
+      const toggleId = `toggle-return-${index}`;
+      const returnId = `return-list-${index}`;
+
+      let returnHtml = "";
       if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-        outbound.returnFlights.forEach((ret, idx) => {
+        const returns = outbound.returnFlights.map((ret, idx) => {
           const outboundLastArrival = outbound.calculatedDuration.arrivalDate;
           const inboundFirstDeparture = ret.calculatedDuration.departureDate;
-          if (!outboundLastArrival || !inboundFirstDeparture) return;
           const stopoverMs = inboundFirstDeparture - outboundLastArrival;
           const stopoverMinutes = Math.max(0, Math.round(stopoverMs / 60000));
           const sh = Math.floor(stopoverMinutes / 60);
           const sm = stopoverMinutes % 60;
           const stopoverText = `Stopover: ${sh}h ${sm}m`;
-          const inboundHtml = renderRouteBlock(ret, `Inbound Flight ${idx + 1}`, stopoverText);
-          resultsDiv.insertAdjacentHTML("beforeend", inboundHtml);
-        });
+          return renderRouteBlock(ret, `Inbound Flight ${idx + 1}`, stopoverText);
+        }).join("");
+        
+        returnHtml = `
+          <div id="${returnId}" class="mt-2 hidden">
+            ${returns}
+          </div>
+        `;
+      }
+
+      const inboundCount = outbound.returnFlights?.length || 0;
+      const toggleButtonHtml = inboundCount > 0
+        ? `<div class="text-center mt-2">
+             <button
+               id="${toggleId}"
+               class="inline-flex items-center px-4 py-2 text-sm text-[#C90076] font-semibold hover:underline active:scale-95 cursor-pointer transition"
+               aria-expanded="false"
+               data-count="${inboundCount}"
+             >
+               <svg focusable="false" aria-hidden="true" width="24" height="24" viewBox="0 0 24 24"
+                    class="w-6 h-6 mr-1 transition-transform">
+                 <path fill="currentColor" d="M12 16.41l-6.71-6.7 1.42-1.42 5.29 5.3 5.29-5.3 1.42 1.42z"/>
+               </svg>
+               <span class="toggle-label">${inboundCount} inbound flight${inboundCount > 1 ? "s" : ""} found</span>
+             </button>
+           </div>`
+        : "";
+
+      resultsDiv.insertAdjacentHTML("beforeend", `
+        <div class="border rounded-lg p-2.5 mb-4">
+          ${outboundHtml}
+          ${toggleButtonHtml}
+          ${returnHtml}
+        </div>
+      `);
+
+      if (outbound.returnFlights?.length) {
+        setTimeout(() => {
+          const toggleBtn = document.getElementById(toggleId);
+          const returnBlock = document.getElementById(returnId);
+
+          toggleBtn.addEventListener("click", () => {
+            const count = Number(toggleBtn.dataset.count);
+            const expanded = toggleBtn.getAttribute("aria-expanded") === "true";
+            returnBlock.classList.toggle("hidden");
+            toggleBtn.setAttribute("aria-expanded", String(expanded));
+            toggleBtn.querySelector(".toggle-label").textContent = expanded
+              ? `Hide ${count} inbound flight${count > 1 ? "s" : ""}`
+              : `Show ${count} inbound flight${count > 1 ? "s" : ""}`;
+            toggleBtn.querySelector("svg").classList.toggle("rotate-180");
+          });
+        }, 0);
       }
     });
-    bindTooltipListeners(resultsDiv)
+
+    bindTooltipListeners(resultsDiv);
   }
 
   // ---------------- Data Fetching Functions ----------------
