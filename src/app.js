@@ -4006,7 +4006,7 @@ function downloadResultsAsCSV() {
     }
     // Show/hide radius when the checkbox is toggled
     allowSwitch.addEventListener('change', () => {
-      console.log('allowSwitch changed, checked=', allowSwitch.checked);
+      // console.log('allowSwitch changed, checked=', allowSwitch.checked);
       localStorage.setItem('allowChangeAirport', allowSwitch.checked);
       if (allowSwitch.checked) {
         radiusContainer.classList.remove('hidden');
