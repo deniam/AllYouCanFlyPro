@@ -28,16 +28,16 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
   function saveSettings() {
   const settings = {
-    minConnection: +document.getElementById('min-connection-time').value,
-    maxConnection: +document.getElementById('max-connection-time').value,
+    minConnection: document.getElementById('min-connection-time').value,
+    maxConnection: document.getElementById('max-connection-time').value,
     preferredAirport: document.getElementById('preferred-airport').value,
     allowChangeAirport: document.getElementById('allow-change-airport').checked,
-    connectionRadius: +document.getElementById('connection-radius').value,
+    connectionRadius: document.getElementById('connection-radius').value,
     expert: {
-      maxRequests: +document.getElementById('max-requests').value,
-      requestsFrequency: +document.getElementById('requests-frequency').value,
-      pauseDuration: +document.getElementById('pause-duration').value,
-      cacheLifetime: +document.getElementById('cache-lifetime').value,
+      maxRequests: document.getElementById('max-requests').value,
+      requestsFrequency: document.getElementById('requests-frequency').value,
+      pauseDuration: document.getElementById('pause-duration').value,
+      cacheLifetime: document.getElementById('cache-lifetime').value,
     }
   };
   localStorage.setItem('flightSearchSettings', JSON.stringify(settings));
@@ -200,29 +200,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   const totalResultsEl = document.getElementById("total-results");
   const sortSelect = document.getElementById("sort-select");
   let currentSortOption = "default";
-  const allowSwitch = document.getElementById('allow-change-airport');
-  const radiusInput = document.getElementById('connection-radius');
-  // Initialize from localStorage
-  const savedAllow  = localStorage.getItem('allowChangeAirport') === 'true';
-  const savedRadius = parseInt(localStorage.getItem('connectionRadius')) || 0;
-  allowSwitch.checked = savedAllow;
-  radiusInput.value  = savedRadius;
-  if (savedAllow) radiusInput.classList.remove('hidden');
-  // Show/hide radius when the checkbox is toggled
-  allowSwitch.addEventListener('change', () => {
-    localStorage.setItem('allowChangeAirport', allowSwitch.checked);
-    if (allowSwitch.checked) {
-      radiusInput.classList.remove('hidden');
-    } else {
-      radiusInput.classList.add('hidden');
-    }
-  });
-
-    // Persist the radius as soon as it’s changed
-    radiusInput.addEventListener('input', () => {
-      const v = parseInt(radiusInput.value) || 0;
-      localStorage.setItem('connectionRadius', v);
-    });
 
     const settingSelectors = [
     '#min-connection-time',
@@ -4018,4 +3995,31 @@ function downloadResultsAsCSV() {
     });
     // Also check visibility when the page loads
     updateCSVButtonVisibility();
+
+    // ========= 14. Changing airports raius =========
+    const allowSwitch = document.getElementById('allow-change-airport');
+    const radiusContainer = document.getElementById('connection-radius-container');
+    const radiusInput = document.getElementById('connection-radius');
+    // Initialize from localStorage
+    const savedAllow  = localStorage.getItem('allowChangeAirport') === 'true';
+    const savedRadius = parseInt(localStorage.getItem('connectionRadius')) || 0;
+    allowSwitch.checked = savedAllow;
+    radiusInput.value  = savedRadius;
+    if (savedAllow) radiusContainer.classList.remove('hidden');
+    // Show/hide radius when the checkbox is toggled
+    allowSwitch.addEventListener('change', () => {
+      console.log('allowSwitch changed, checked=', allowSwitch.checked);
+      localStorage.setItem('allowChangeAirport', allowSwitch.checked);
+      if (allowSwitch.checked) {
+        radiusContainer.classList.remove('hidden');
+      } else {
+        radiusContainer.classList.add('hidden');
+      }
+    });
+
+      // Persist the radius as soon as it’s changed
+      radiusInput.addEventListener('input', () => {
+        const v = parseInt(radiusInput.value) || 0;
+        localStorage.setItem('connectionRadius', v);
+      });
   });

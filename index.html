@@ -255,27 +255,26 @@
                     </button>
                   </div>
                   </div>
-                  <!-- Development: Allow changing connection airport -->
+                  <!-- Allow changing connection airport -->
                   <div class="flex items-center gap-2 mb-2">
                     <label class="inline-flex items-center gap-1 text-gray-700">
                       <input type="checkbox" id="allow-change-airport" class="h-4 w-4">
                       <span class="text-xs font-medium">Allow changing connecting airport (one-stop routes only)</span>
                     </label>
-                    <div class="relative inline-block">
-                    <input
-                      type="number"
-                      id="connection-radius"
-                      class="w-24 pr-8 bg-white border border-gray-300 rounded-lg px-2 py-1 text-right
-                            placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#C90076]
-                            focus:border-transparent transition"
-                      placeholder="Radius"
-                      min="0"
-                    />
-                    <span class="absolute inset-y-0 right-2 flex items-center text-gray-500 select-none">
-                      km
-                    </span>
-                  </div>
-
+                      <div id="connection-radius-container" class="relative inline-block hidden">
+                      <input
+                        type="number"
+                        id="connection-radius"
+                        class="w-24 pr-8 bg-white border border-gray-300 rounded-lg px-2 py-1 text-right
+                              placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#C90076]
+                              focus:border-transparent transition"
+                        placeholder="Radius"
+                        min="0"
+                      />
+                      <span class="absolute inset-y-0 right-2 flex items-center text-gray-500 select-none">
+                        km
+                      </span>
+                    </div>
                   </div>
                   <!-- Expert Settings -->
                   <button id="toggle-expert-settings" class="w-full bg-gray-200 text-gray-700 px-1 py-2 mb-2 rounded hover:bg-gray-300 focus:outline-none focus:ring-gray-400 cursor-pointer">
