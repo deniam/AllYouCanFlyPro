@@ -27,21 +27,37 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   let airportFlags = {};
 
   function saveSettings() {
-  const settings = {
-    minConnection: document.getElementById('min-connection-time').value,
-    maxConnection: document.getElementById('max-connection-time').value,
-    preferredAirport: document.getElementById('preferred-airport').value,
-    allowChangeAirport: document.getElementById('allow-change-airport').checked,
-    connectionRadius: document.getElementById('connection-radius').value,
-    expert: {
-      maxRequests: document.getElementById('max-requests').value,
-      requestsFrequency: document.getElementById('requests-frequency').value,
-      pauseDuration: document.getElementById('pause-duration').value,
-      cacheLifetime: document.getElementById('cache-lifetime').value,
-    }
-  };
-  localStorage.setItem('flightSearchSettings', JSON.stringify(settings));
-  if (debug) console.log('[DEBUG] Settings auto‑saved', settings);
+  const minConnection = document.getElementById('min-connection-time').value;
+  const maxConnection = document.getElementById('max-connection-time').value;
+  const preferredAirport = document.getElementById('preferred-airport').value;
+  const allowChange = document.getElementById('allow-change-airport').checked;
+  const connectionRadius = document.getElementById('connection-radius').value;
+  const maxReq = document.getElementById('max-requests').value;
+  const reqFrequency = document.getElementById('requests-frequency').value;
+  const pauseDur = document.getElementById('pause-duration').value;
+  const cacheLife = document.getElementById('cache-lifetime').value;
+  localStorage.setItem('minConnectionTime', minConnection);
+  localStorage.setItem('maxConnectionTime', maxConnection);
+  localStorage.setItem('preferredAirport', preferredAirport);
+  localStorage.setItem('allowChangeAirport', allowChange);
+  localStorage.setItem('connectionRadius', connectionRadius);
+  localStorage.setItem('maxRequestsInRow', maxReq);
+  localStorage.setItem('requestsFrequencyMs', reqFrequency);
+  localStorage.setItem('pauseDurationSeconds', pauseDur);
+  localStorage.setItem('cacheLifetimeHours', cacheLife);
+  if (debug) {
+    console.log('[DEBUG] Settings saved individually:', {
+      minConnectionTime: minConnection,
+      maxConnectionTime: maxConnection,
+      preferredAirport,
+      allowChangeAirport: allowChange,
+      connectionRadius,
+      maxRequestsInRow: maxReq,
+      requestsFrequencyMs: reqFrequency,
+      pauseDurationSeconds: pauseDur,
+      cacheLifetimeHours: cacheLife
+    });
+  }
 }
 
     //---------DixieDB Initialisation------------------
@@ -3695,10 +3711,11 @@ function downloadResultsAsCSV() {
   
   document.addEventListener("DOMContentLoaded", () => {
     // ========== 1. Load settings from localStorage ==========
-    const storedPreferredAirport = localStorage.getItem("preferredAirport") || "";
-    document.getElementById("preferred-airport").value = storedPreferredAirport;
+    document.getElementById("preferred-airport").value = localStorage.getItem("preferredAirport") || "";
     document.getElementById("min-connection-time").value = localStorage.getItem("minConnectionTime") || 90;
     document.getElementById("max-connection-time").value = localStorage.getItem("maxConnectionTime") || 1440;
+    document.getElementById("allow-change-airport").checked = localStorage.getItem("allowChangeAirport") === "true" || false;
+    document.getElementById("connection-radius").value = localStorage.getItem("connectionRadius") || "100";
     document.getElementById("max-requests").value = localStorage.getItem("maxRequestsInRow") || 25;
     document.getElementById("requests-frequency").value = localStorage.getItem("requestsFrequencyMs") || 1200;
     document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
@@ -3718,46 +3735,23 @@ function downloadResultsAsCSV() {
     });
   
     // ========== 3. Save settings ==========
-    const saved = JSON.parse(localStorage.getItem('flightSearchSettings') || '{}');
-    if (saved.minConnection != null) {
-      document.getElementById('min-connection-time').value = saved.minConnection;
-      document.getElementById('max-connection-time').value = saved.maxConnection;
-      document.getElementById('preferred-airport').value = saved.preferredAirport;
-      document.getElementById('allow-change-airport').checked = saved.allowChangeAirport;
-      document.getElementById('connection-radius').value = saved.connectionRadius;
-      if (saved.expert) {
-        document.getElementById('max-requests').value = saved.expert.maxRequests;
-        document.getElementById('requests-frequency').value = saved.expert.requestsFrequency;
-        document.getElementById('pause-duration').value = saved.expert.pauseDuration;
-        document.getElementById('cache-lifetime').value = saved.expert.cacheLifetime;
-      }
-    }
-        // const updateButton = document.getElementById("update-preferred-airport");
-    // updateButton.addEventListener("click", () => {
-    //   const preferredAirport = document.getElementById("preferred-airport").value.trim();
-    //   localStorage.setItem("preferredAirport", preferredAirport);
-    //   const originContainer = document.getElementById("origin-multi");
-    //   const firstInput = originContainer.querySelector("input");
-    //   if (firstInput) {
-    //     firstInput.value = preferredAirport;
-    //     updateAirportRows(originContainer);
-    //   }
-    //   // Save additional settings
-    //   localStorage.setItem("minConnectionTime", document.getElementById("min-connection-time").value);
-    //   localStorage.setItem("maxConnectionTime", document.getElementById("max-connection-time").value);
-    //   localStorage.setItem("maxRequestsInRow", document.getElementById("max-requests").value);
-    //   localStorage.setItem("requestsFrequencyMs", document.getElementById("requests-frequency").value);
-    //   localStorage.setItem("pauseDurationSeconds", document.getElementById("pause-duration").value);
-    //   localStorage.setItem("cacheLifetimeHours", document.getElementById("cache-lifetime").value);
-    //   showNotification("Settings updated successfully! ✅");
-    // });
+      localStorage.setItem("minConnectionTime", document.getElementById("min-connection-time").value);
+      localStorage.setItem("maxConnectionTime", document.getElementById("max-connection-time").value);
+      localStorage.setItem("preferredAirport", document.getElementById("preferred-airport").value.trim());
+      localStorage.setItem("allowChangeAirport", document.getElementById("allow-change-airport").checked);
+      localStorage.setItem("connectionRadius", document.getElementById("connection-radius").value);
+      localStorage.setItem("maxRequestsInRow", document.getElementById("max-requests").value);
+      localStorage.setItem("requestsFrequencyMs", document.getElementById("requests-frequency").value);
+      localStorage.setItem("pauseDurationSeconds", document.getElementById("pause-duration").value);
+      localStorage.setItem("cacheLifetimeHours", document.getElementById("cache-lifetime").value);
+  
     // ========== 4. Setup Autocomplete and Multi-Airport Fields ==========
     setupAutocomplete("preferred-airport", "airport-suggestions-preferred");
     initializeMultiAirportField("origin-multi", "origin");
     const originContainer = document.getElementById("origin-multi");
     const firstOriginInput = originContainer.querySelector("input");
     if (firstOriginInput) {
-      firstOriginInput.value = storedPreferredAirport;
+      firstOriginInput.value = localStorage.getItem("preferredAirport") || "";;
       updateAirportRows(originContainer);
     }
     initializeMultiAirportField("destination-multi", "destination");
@@ -4003,9 +3997,13 @@ function downloadResultsAsCSV() {
     // Initialize from localStorage
     const savedAllow  = localStorage.getItem('allowChangeAirport') === 'true';
     const savedRadius = parseInt(localStorage.getItem('connectionRadius')) || 0;
-    allowSwitch.checked = savedAllow;
     radiusInput.value  = savedRadius;
-    if (savedAllow) radiusContainer.classList.remove('hidden');
+    allowSwitch.checked = savedAllow;
+    if (savedAllow) {
+      radiusContainer.classList.remove('hidden');
+    } else {
+      radiusContainer.classList.add('hidden');
+    }
     // Show/hide radius when the checkbox is toggled
     allowSwitch.addEventListener('change', () => {
       console.log('allowSwitch changed, checked=', allowSwitch.checked);
