@@ -514,7 +514,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         name
       }));
       suggestions.sort((a, b) => a.name.localeCompare(b.name));
-      if (debug) console.log (`Destination suggestions: ${suggestions}`);
       return suggestions;
     }
     
@@ -645,7 +644,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     // Update suggestions as the user types.
     inputEl.addEventListener("input", (e) => {
       const query = e.target.value.trim().toLowerCase();
-      if (debug) console.log("Query:", query);
       showSuggestions(query);
     });
 
@@ -1745,6 +1743,15 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       allowedOffsets,
     });
 
+      // Compute booking horizon (today + 3 days)
+    const todayUTC = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
+    const bookingHorizon = addDaysUTC(todayUTC, 3);
+    // Filter allowedOffsets so that selectedDate + offset ≤ bookingHorizon
+    allowedOffsets = allowedOffsets.filter(offset => {
+      const candidateDate = addDaysUTC(new Date(selectedDate + "T00:00:00Z"), offset);
+      return candidateDate <= bookingHorizon;
+    });
+    if (debug) console.log(`Filtered allowedOffsets within booking horizon: ${allowedOffsets.join(", ")}`);
     // Fetch global flight network once
     const routesData = await fetchDestinations();
     const results = [];
@@ -1899,6 +1906,34 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     return results;
   }
 
+  async function processTwoStopsWithAirportChange(origins, destinations, selectedDate, minConnection, maxConnection, connectionRadius, allowedOffsets, shouldAppend = true) {
+  const results = [];
+
+  const firstLegOptions = await fetchFirstLegOptions(origins);
+
+  for (const firstStop of firstLegOptions) {
+    const secondLegOptions = await fetchConnectionOptions(firstStop, connectionRadius);
+
+    for (const secondStop of secondLegOptions) {
+      const leg1 = await fetchFlights(origins, firstStop, selectedDate, allowedOffsets);
+      if (!leg1.length) continue;
+
+      const leg2 = await fetchFlights([leg1.destination], secondStop, leg1.nextDate, allowedOffsets);
+      if (!leg2.length) continue;
+
+      const leg3 = await fetchFlights([leg2.destination], destinations, leg2.nextDate, allowedOffsets);
+      if (!leg3.length) continue;
+
+      const combinedRoute = [leg1, leg2, leg3];
+
+      if (shouldAppend) appendRouteToDisplay(combinedRoute);
+
+      results.push(combinedRoute);
+    }
+  }
+
+  return results;
+}
   async function loadFlights(dep, arr, baseDate, offsets) {
     const out = [];
     for (const off of offsets) {
@@ -2019,7 +2054,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (debug) console.log(
       `[DEBUG] searchConnectingRoutes → stopover="${stopoverText}",`,
       `allowChangeAirport=${allowChangeAirport},`,
-      `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`
+      `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`,
+      `minConnection=${minConnection} min, maxConnection=${maxConnection} min`
     );
   
     const allowOvernight = stopoverText === "One stop or fewer (overnight)";
@@ -2071,17 +2107,35 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")}`);
   
     // 5) Airport-change shortcut?
+    const switchableForTwoStops = (
+      maxTransfers === 2 &&
+      allowChangeAirport &&
+      connectionRadius > 0
+    );
+    if (switchableForTwoStops) {
+      if (debug) console.log("Airport-change mode ON: delegating to processTwoStopsWithAirportChange");
+      const results = await processTwoStopsWithAirportChange(
+        origins,
+        destinations,
+        selectedDate,
+        minConnection,
+        maxConnection,
+        connectionRadius,
+        allowedOffsets,
+        shouldAppend
+      );
+      if (debug) console.log(`Found ${results.length} two-stop routes with airport change`);
+      return results;
+    }
     const switchableForOneStop = (
       maxTransfers === 1 &&
       (stopoverText === "One stop or fewer"
-        || stopoverText === "One stop or fewer (overnight)"
-        || stopoverText === "Two stops or fewer (overnight)")
+        || stopoverText === "One stop or fewer (overnight)")
       && allowChangeAirport
       && connectionRadius > 0
     );
     if (switchableForOneStop) {
       if (debug) console.log("Airport-change mode ON: delegating to processOneStopWithAirportChange");
-  
       // **Pass allowedOffsets** into your new function
       const results = await processOneStopWithAirportChange(
         origins,
@@ -2091,7 +2145,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         maxConnection,
         connectionRadius,
         allowedOffsets,
-        shouldAppend
+        true
       );
       if (debug) console.log(`Found ${results.length} routes with airport change`);
       return results;
@@ -2744,7 +2798,7 @@ for (const outbound of outboundFlights) {
             }
           }
           outbound.returnFlights = dedupedInbound;
-          if (debug) console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
+          // if (debug) console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
         }
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
