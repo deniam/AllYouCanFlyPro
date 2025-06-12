@@ -26,6 +26,24 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   let COUNTRY_AIRPORTS = {};
   let airportFlags = {};
 
+  function saveSettings() {
+  const settings = {
+    minConnection: +document.getElementById('min-connection-time').value,
+    maxConnection: +document.getElementById('max-connection-time').value,
+    preferredAirport: document.getElementById('preferred-airport').value,
+    allowChangeAirport: document.getElementById('allow-change-airport').checked,
+    connectionRadius: +document.getElementById('connection-radius').value,
+    expert: {
+      maxRequests: +document.getElementById('max-requests').value,
+      requestsFrequency: +document.getElementById('requests-frequency').value,
+      pauseDuration: +document.getElementById('pause-duration').value,
+      cacheLifetime: +document.getElementById('cache-lifetime').value,
+    }
+  };
+  localStorage.setItem('flightSearchSettings', JSON.stringify(settings));
+  if (debug) console.log('[DEBUG] Settings auto‑saved', settings);
+}
+
     //---------DixieDB Initialisation------------------
     const db = new Dexie("FlightSearchCache");
     db.version(1).stores({
@@ -200,12 +218,31 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
   });
 
-  // Persist the radius as soon as it’s changed
-  radiusInput.addEventListener('input', () => {
-    const v = parseInt(radiusInput.value) || 0;
-    localStorage.setItem('connectionRadius', v);
-  });
+    // Persist the radius as soon as it’s changed
+    radiusInput.addEventListener('input', () => {
+      const v = parseInt(radiusInput.value) || 0;
+      localStorage.setItem('connectionRadius', v);
+    });
 
+    const settingSelectors = [
+    '#min-connection-time',
+    '#max-connection-time',
+    '#preferred-airport',
+    '#allow-change-airport',
+    '#connection-radius',
+    '#max-requests',
+    '#requests-frequency',
+    '#pause-duration',
+    '#cache-lifetime'
+  ];
+
+  settingSelectors.forEach(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    const isTextOrNumber = el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number');
+    const eventName = isTextOrNumber ? 'input' : 'change';
+    el.addEventListener(eventName, saveSettings);
+  });
 
   sortSelect.addEventListener("change", () => {
     currentSortOption = sortSelect.value;
@@ -565,6 +602,16 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           div.addEventListener("click", () => {
             inputEl.value = match.name;
             suggestionsEl.classList.add("hidden");
+            if (inputId === "preferred-airport") {
+            localStorage.setItem("preferredAirport", match.name);
+            const originContainer = document.getElementById("origin-multi");
+            const firstInput = originContainer.querySelector("input");
+            if (firstInput) {
+              firstInput.value = match.name;
+              updateAirportRows(originContainer);
+            }
+            saveSettings();
+          }
           });
           suggestionsEl.appendChild(div);
         });
@@ -3339,11 +3386,6 @@ function downloadResultsAsCSV() {
   document.body.removeChild(link);
 }
 
-// Ensure button is correctly registered for clicks
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("download-csv-button").addEventListener("click", downloadResultsAsCSV);
-});
-
   // Function to toggle CSV button visibility before search
   function updateCSVButtonVisibility() {
     const csvButton = document.getElementById("download-csv-button");
@@ -3367,20 +3409,6 @@ document.addEventListener("DOMContentLoaded", () => {
         csvButton.classList.add("hidden"); // Hide button if any flight has return flights or multiple segments
     }
 }
-
-  
-
-// Attach event listener to the Stopover dropdown selection
-document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
-    radio.addEventListener("change", () => {
-      updateCSVButtonVisibility(); // Update visibility when stopover selection changes
-    });
-  });
-
-  // Also check visibility when the page loads
-  updateCSVButtonVisibility();
-});
 
   
   // ---------------- Calendar ----------------
@@ -3712,27 +3740,40 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   
-    // ========== 3. Setup Update Preferred Airport Button ==========
-    const updateButton = document.getElementById("update-preferred-airport");
-    updateButton.addEventListener("click", () => {
-      const preferredAirport = document.getElementById("preferred-airport").value.trim();
-      localStorage.setItem("preferredAirport", preferredAirport);
-      const originContainer = document.getElementById("origin-multi");
-      const firstInput = originContainer.querySelector("input");
-      if (firstInput) {
-        firstInput.value = preferredAirport;
-        updateAirportRows(originContainer);
+    // ========== 3. Save settings ==========
+    const saved = JSON.parse(localStorage.getItem('flightSearchSettings') || '{}');
+    if (saved.minConnection != null) {
+      document.getElementById('min-connection-time').value = saved.minConnection;
+      document.getElementById('max-connection-time').value = saved.maxConnection;
+      document.getElementById('preferred-airport').value = saved.preferredAirport;
+      document.getElementById('allow-change-airport').checked = saved.allowChangeAirport;
+      document.getElementById('connection-radius').value = saved.connectionRadius;
+      if (saved.expert) {
+        document.getElementById('max-requests').value = saved.expert.maxRequests;
+        document.getElementById('requests-frequency').value = saved.expert.requestsFrequency;
+        document.getElementById('pause-duration').value = saved.expert.pauseDuration;
+        document.getElementById('cache-lifetime').value = saved.expert.cacheLifetime;
       }
-      // Save additional settings
-      localStorage.setItem("minConnectionTime", document.getElementById("min-connection-time").value);
-      localStorage.setItem("maxConnectionTime", document.getElementById("max-connection-time").value);
-      localStorage.setItem("maxRequestsInRow", document.getElementById("max-requests").value);
-      localStorage.setItem("requestsFrequencyMs", document.getElementById("requests-frequency").value);
-      localStorage.setItem("pauseDurationSeconds", document.getElementById("pause-duration").value);
-      localStorage.setItem("cacheLifetimeHours", document.getElementById("cache-lifetime").value);
-      showNotification("Settings updated successfully! ✅");
-    });
-  
+    }
+        // const updateButton = document.getElementById("update-preferred-airport");
+    // updateButton.addEventListener("click", () => {
+    //   const preferredAirport = document.getElementById("preferred-airport").value.trim();
+    //   localStorage.setItem("preferredAirport", preferredAirport);
+    //   const originContainer = document.getElementById("origin-multi");
+    //   const firstInput = originContainer.querySelector("input");
+    //   if (firstInput) {
+    //     firstInput.value = preferredAirport;
+    //     updateAirportRows(originContainer);
+    //   }
+    //   // Save additional settings
+    //   localStorage.setItem("minConnectionTime", document.getElementById("min-connection-time").value);
+    //   localStorage.setItem("maxConnectionTime", document.getElementById("max-connection-time").value);
+    //   localStorage.setItem("maxRequestsInRow", document.getElementById("max-requests").value);
+    //   localStorage.setItem("requestsFrequencyMs", document.getElementById("requests-frequency").value);
+    //   localStorage.setItem("pauseDurationSeconds", document.getElementById("pause-duration").value);
+    //   localStorage.setItem("cacheLifetimeHours", document.getElementById("cache-lifetime").value);
+    //   showNotification("Settings updated successfully! ✅");
+    // });
     // ========== 4. Setup Autocomplete and Multi-Airport Fields ==========
     setupAutocomplete("preferred-airport", "airport-suggestions-preferred");
     initializeMultiAirportField("origin-multi", "origin");
@@ -3951,7 +3992,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    // ========= 12. Version Number =========
+    // ========= 11. Version Number =========
     const manifest = chrome.runtime.getManifest();
     const versionEl = document.getElementById('version-display');
     if (versionEl) {
@@ -3967,4 +4008,14 @@ document.addEventListener("DOMContentLoaded", () => {
         continueToPayment(outboundKey);
       }
     });
+    // ========= 13. Download CSV Button =========
+    document.getElementById("download-csv-button").addEventListener("click", downloadResultsAsCSV);
+    // Attach event listener to the Stopover dropdown selection
+    document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
+      radio.addEventListener("change", () => {
+        updateCSVButtonVisibility(); // Update visibility when stopover selection changes
+      });
+    });
+    // Also check visibility when the page loads
+    updateCSVButtonVisibility();
   });
