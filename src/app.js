@@ -26,6 +26,40 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   let COUNTRY_AIRPORTS = {};
   let airportFlags = {};
 
+  function saveSettings() {
+  const minConnection = document.getElementById('min-connection-time').value;
+  const maxConnection = document.getElementById('max-connection-time').value;
+  const preferredAirport = document.getElementById('preferred-airport').value;
+  const allowChange = document.getElementById('allow-change-airport').checked;
+  const connectionRadius = document.getElementById('connection-radius').value;
+  const maxReq = document.getElementById('max-requests').value;
+  const reqFrequency = document.getElementById('requests-frequency').value;
+  const pauseDur = document.getElementById('pause-duration').value;
+  const cacheLife = document.getElementById('cache-lifetime').value;
+  localStorage.setItem('minConnectionTime', minConnection);
+  localStorage.setItem('maxConnectionTime', maxConnection);
+  localStorage.setItem('preferredAirport', preferredAirport);
+  localStorage.setItem('allowChangeAirport', allowChange);
+  localStorage.setItem('connectionRadius', connectionRadius);
+  localStorage.setItem('maxRequestsInRow', maxReq);
+  localStorage.setItem('requestsFrequencyMs', reqFrequency);
+  localStorage.setItem('pauseDurationSeconds', pauseDur);
+  localStorage.setItem('cacheLifetimeHours', cacheLife);
+  if (debug) {
+    console.log('[DEBUG] Settings saved individually:', {
+      minConnectionTime: minConnection,
+      maxConnectionTime: maxConnection,
+      preferredAirport,
+      allowChangeAirport: allowChange,
+      connectionRadius,
+      maxRequestsInRow: maxReq,
+      requestsFrequencyMs: reqFrequency,
+      pauseDurationSeconds: pauseDur,
+      cacheLifetimeHours: cacheLife
+    });
+  }
+}
+
     //---------DixieDB Initialisation------------------
     const db = new Dexie("FlightSearchCache");
     db.version(1).stores({
@@ -182,30 +216,26 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   const totalResultsEl = document.getElementById("total-results");
   const sortSelect = document.getElementById("sort-select");
   let currentSortOption = "default";
-  const allowSwitch = document.getElementById('allow-change-airport');
-  const radiusInput = document.getElementById('connection-radius');
-  // Initialize from localStorage
-  const savedAllow  = localStorage.getItem('allowChangeAirport') === 'true';
-  const savedRadius = parseInt(localStorage.getItem('connectionRadius')) || 0;
-  allowSwitch.checked = savedAllow;
-  radiusInput.value  = savedRadius;
-  if (savedAllow) radiusInput.classList.remove('hidden');
-  // Show/hide radius when the checkbox is toggled
-  allowSwitch.addEventListener('change', () => {
-    localStorage.setItem('allowChangeAirport', allowSwitch.checked);
-    if (allowSwitch.checked) {
-      radiusInput.classList.remove('hidden');
-    } else {
-      radiusInput.classList.add('hidden');
-    }
-  });
 
-  // Persist the radius as soon as it’s changed
-  radiusInput.addEventListener('input', () => {
-    const v = parseInt(radiusInput.value) || 0;
-    localStorage.setItem('connectionRadius', v);
-  });
+    const settingSelectors = [
+    '#min-connection-time',
+    '#max-connection-time',
+    '#preferred-airport',
+    '#allow-change-airport',
+    '#connection-radius',
+    '#max-requests',
+    '#requests-frequency',
+    '#pause-duration',
+    '#cache-lifetime'
+  ];
 
+  settingSelectors.forEach(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    const isTextOrNumber = el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number');
+    const eventName = isTextOrNumber ? 'input' : 'change';
+    el.addEventListener(eventName, saveSettings);
+  });
 
   sortSelect.addEventListener("change", () => {
     currentSortOption = sortSelect.value;
@@ -514,7 +544,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         name
       }));
       suggestions.sort((a, b) => a.name.localeCompare(b.name));
-      if (debug) console.log (`Destination suggestions: ${suggestions}`);
       return suggestions;
     }
     
@@ -566,6 +595,16 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           div.addEventListener("click", () => {
             inputEl.value = match.name;
             suggestionsEl.classList.add("hidden");
+            if (inputId === "preferred-airport") {
+            localStorage.setItem("preferredAirport", match.name);
+            const originContainer = document.getElementById("origin-multi");
+            const firstInput = originContainer.querySelector("input");
+            if (firstInput) {
+              firstInput.value = match.name;
+              updateAirportRows(originContainer);
+            }
+            saveSettings();
+          }
           });
           suggestionsEl.appendChild(div);
         });
@@ -645,7 +684,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     // Update suggestions as the user types.
     inputEl.addEventListener("input", (e) => {
       const query = e.target.value.trim().toLowerCase();
-      if (debug) console.log("Query:", query);
       showSuggestions(query);
     });
 
@@ -1355,8 +1393,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             returnBlock.classList.toggle("hidden");
             toggleBtn.setAttribute("aria-expanded", String(expanded));
             toggleBtn.querySelector(".toggle-label").textContent = expanded
-              ? `Hide ${count} inbound flight${count > 1 ? "s" : ""}`
-              : `Show ${count} inbound flight${count > 1 ? "s" : ""}`;
+              ? `${count} inbound flight${count > 1 ? "s" : ""} found`
+              : `${count} inbound flight${count > 1 ? "s" : ""} found`;
             toggleBtn.querySelector("svg").classList.toggle("rotate-180");
           });
         }, 0);
@@ -1745,10 +1783,42 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       allowedOffsets,
     });
 
+      // Compute booking horizon (today + 3 days)
+    const todayUTC = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
+    const bookingHorizon = addDaysUTC(todayUTC, 3);
+    // Filter allowedOffsets so that selectedDate + offset ≤ bookingHorizon
+    allowedOffsets = allowedOffsets.filter(offset => {
+      const candidateDate = addDaysUTC(new Date(selectedDate + "T00:00:00Z"), offset);
+      return candidateDate <= bookingHorizon;
+    });
+    if (debug) console.log(`Filtered allowedOffsets within booking horizon: ${allowedOffsets.join(", ")}`);
     // Fetch global flight network once
     const routesData = await fetchDestinations();
     const results = [];
+    let directCounter = 0;
+    
+    for (const origin of origins) {
+      for (const destination of destinations) {
+        if (origin === destination) continue;
 
+        if (isDateAvailableForSegment(origin, destination, selectedDate)) {
+          const cacheKey = getUnifiedCacheKey(origin, destination, selectedDate);
+          let flights = await getCachedResults(cacheKey);
+          if (!flights) {
+            flights = await checkRouteSegment(origin, destination, selectedDate);
+            await setCachedResults(cacheKey, flights);
+          }
+          flights = flights.map(unifyRawFlight);
+          for (const flight of flights) {
+            if (shouldAppend) appendRouteToDisplay(flight);
+            results.push(flight);
+
+            directCounter++;
+            updateProgress(directCounter, origins.length * destinations.length, `Direct routes`);
+          }
+        }
+      }
+    }
     //
     // 1) Build a map: origin → Set of valid first-leg airports (B)
     //
@@ -1876,6 +1946,34 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     return results;
   }
 
+  async function processTwoStopsWithAirportChange(origins, destinations, selectedDate, minConnection, maxConnection, connectionRadius, allowedOffsets, shouldAppend = true) {
+  const results = [];
+
+  const firstLegOptions = await fetchFirstLegOptions(origins);
+
+  for (const firstStop of firstLegOptions) {
+    const secondLegOptions = await fetchConnectionOptions(firstStop, connectionRadius);
+
+    for (const secondStop of secondLegOptions) {
+      const leg1 = await fetchFlights(origins, firstStop, selectedDate, allowedOffsets);
+      if (!leg1.length) continue;
+
+      const leg2 = await fetchFlights([leg1.destination], secondStop, leg1.nextDate, allowedOffsets);
+      if (!leg2.length) continue;
+
+      const leg3 = await fetchFlights([leg2.destination], destinations, leg2.nextDate, allowedOffsets);
+      if (!leg3.length) continue;
+
+      const combinedRoute = [leg1, leg2, leg3];
+
+      if (shouldAppend) appendRouteToDisplay(combinedRoute);
+
+      results.push(combinedRoute);
+    }
+  }
+
+  return results;
+}
   async function loadFlights(dep, arr, baseDate, offsets) {
     const out = [];
     for (const off of offsets) {
@@ -1922,7 +2020,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const changeDistanceKm = locB && locN
       ? Math.round(haversineDistance(locB.latitude, locB.longitude, locN.latitude, locN.longitude))
       : null;
-
+    if (!f1?.calculatedDuration?.arrivalDate || !f2?.calculatedDuration?.departureDate) {
+      console.warn("Missing duration data for aggregation:", f1, f2);
+      return null;
+    }
     return {
       key:        `${f1.key} | ${f2.key}`,
       fareSellKey:f1.fareSellKey,
@@ -1963,6 +2064,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         const gap = Math.round((f2.calculatedDuration.departureDate - f1.calculatedDuration.arrivalDate)/60000);
         if (gap < minC || gap > maxC) continue;
         const agg = buildAggregatedRoute(f1, f2, gap);
+        if (!agg) continue;
         if (appendFlag) appendRouteToDisplay(agg);
         resultsArr.push(agg);
       }
@@ -1992,7 +2094,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (debug) console.log(
       `[DEBUG] searchConnectingRoutes → stopover="${stopoverText}",`,
       `allowChangeAirport=${allowChangeAirport},`,
-      `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`
+      `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`,
+      `minConnection=${minConnection} min, maxConnection=${maxConnection} min`
     );
   
     const allowOvernight = stopoverText === "One stop or fewer (overnight)";
@@ -2044,18 +2147,35 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")}`);
   
     // 5) Airport-change shortcut?
+    const switchableForTwoStops = (
+      maxTransfers === 2 &&
+      allowChangeAirport &&
+      connectionRadius > 0
+    );
+    if (switchableForTwoStops) {
+      if (debug) console.log("Airport-change mode ON: delegating to processTwoStopsWithAirportChange");
+      const results = await processTwoStopsWithAirportChange(
+        origins,
+        destinations,
+        selectedDate,
+        minConnection,
+        maxConnection,
+        connectionRadius,
+        allowedOffsets,
+        shouldAppend
+      );
+      if (debug) console.log(`Found ${results.length} two-stop routes with airport change`);
+      return results;
+    }
     const switchableForOneStop = (
       maxTransfers === 1 &&
       (stopoverText === "One stop or fewer"
-        || stopoverText === "One stop or fewer (overnight)"
-        || stopoverText === "Two stops or fewer (overnight)")
+        || stopoverText === "One stop or fewer (overnight)")
       && allowChangeAirport
       && connectionRadius > 0
     );
     if (switchableForOneStop) {
       if (debug) console.log("Airport-change mode ON: delegating to processOneStopWithAirportChange");
-      // updateProgress(0, 1, "Searching one-stop with airport change…");
-  
       // **Pass allowedOffsets** into your new function
       const results = await processOneStopWithAirportChange(
         origins,
@@ -2064,11 +2184,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         minConnection,
         maxConnection,
         connectionRadius,
-        allowedOffsets
+        allowedOffsets,
+        true
       );
-      if (shouldAppend) {
-        results.forEach(r => appendRouteToDisplay(r));
-      }
       if (debug) console.log(`Found ${results.length} routes with airport change`);
       return results;
     }
@@ -2720,7 +2838,7 @@ for (const outbound of outboundFlights) {
             }
           }
           outbound.returnFlights = dedupedInbound;
-          if (debug) console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
+          // if (debug) console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
         }
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
@@ -3261,11 +3379,6 @@ function downloadResultsAsCSV() {
   document.body.removeChild(link);
 }
 
-// Ensure button is correctly registered for clicks
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("download-csv-button").addEventListener("click", downloadResultsAsCSV);
-});
-
   // Function to toggle CSV button visibility before search
   function updateCSVButtonVisibility() {
     const csvButton = document.getElementById("download-csv-button");
@@ -3289,20 +3402,6 @@ document.addEventListener("DOMContentLoaded", () => {
         csvButton.classList.add("hidden"); // Hide button if any flight has return flights or multiple segments
     }
 }
-
-  
-
-// Attach event listener to the Stopover dropdown selection
-document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
-    radio.addEventListener("change", () => {
-      updateCSVButtonVisibility(); // Update visibility when stopover selection changes
-    });
-  });
-
-  // Also check visibility when the page loads
-  updateCSVButtonVisibility();
-});
 
   
   // ---------------- Calendar ----------------
@@ -3612,10 +3711,11 @@ document.addEventListener("DOMContentLoaded", () => {
   
   document.addEventListener("DOMContentLoaded", () => {
     // ========== 1. Load settings from localStorage ==========
-    const storedPreferredAirport = localStorage.getItem("preferredAirport") || "";
-    document.getElementById("preferred-airport").value = storedPreferredAirport;
+    document.getElementById("preferred-airport").value = localStorage.getItem("preferredAirport") || "";
     document.getElementById("min-connection-time").value = localStorage.getItem("minConnectionTime") || 90;
     document.getElementById("max-connection-time").value = localStorage.getItem("maxConnectionTime") || 1440;
+    document.getElementById("allow-change-airport").checked = localStorage.getItem("allowChangeAirport") === "true" || false;
+    document.getElementById("connection-radius").value = localStorage.getItem("connectionRadius") || "100";
     document.getElementById("max-requests").value = localStorage.getItem("maxRequestsInRow") || 25;
     document.getElementById("requests-frequency").value = localStorage.getItem("requestsFrequencyMs") || 1200;
     document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
@@ -3634,26 +3734,16 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   
-    // ========== 3. Setup Update Preferred Airport Button ==========
-    const updateButton = document.getElementById("update-preferred-airport");
-    updateButton.addEventListener("click", () => {
-      const preferredAirport = document.getElementById("preferred-airport").value.trim();
-      localStorage.setItem("preferredAirport", preferredAirport);
-      const originContainer = document.getElementById("origin-multi");
-      const firstInput = originContainer.querySelector("input");
-      if (firstInput) {
-        firstInput.value = preferredAirport;
-        updateAirportRows(originContainer);
-      }
-      // Save additional settings
+    // ========== 3. Save settings ==========
       localStorage.setItem("minConnectionTime", document.getElementById("min-connection-time").value);
       localStorage.setItem("maxConnectionTime", document.getElementById("max-connection-time").value);
+      localStorage.setItem("preferredAirport", document.getElementById("preferred-airport").value.trim());
+      localStorage.setItem("allowChangeAirport", document.getElementById("allow-change-airport").checked);
+      localStorage.setItem("connectionRadius", document.getElementById("connection-radius").value);
       localStorage.setItem("maxRequestsInRow", document.getElementById("max-requests").value);
       localStorage.setItem("requestsFrequencyMs", document.getElementById("requests-frequency").value);
       localStorage.setItem("pauseDurationSeconds", document.getElementById("pause-duration").value);
       localStorage.setItem("cacheLifetimeHours", document.getElementById("cache-lifetime").value);
-      showNotification("Settings updated successfully! ✅");
-    });
   
     // ========== 4. Setup Autocomplete and Multi-Airport Fields ==========
     setupAutocomplete("preferred-airport", "airport-suggestions-preferred");
@@ -3661,7 +3751,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const originContainer = document.getElementById("origin-multi");
     const firstOriginInput = originContainer.querySelector("input");
     if (firstOriginInput) {
-      firstOriginInput.value = storedPreferredAirport;
+      firstOriginInput.value = localStorage.getItem("preferredAirport") || "";;
       updateAirportRows(originContainer);
     }
     initializeMultiAirportField("destination-multi", "destination");
@@ -3873,7 +3963,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    // ========= 12. Version Number =========
+    // ========= 11. Version Number =========
     const manifest = chrome.runtime.getManifest();
     const versionEl = document.getElementById('version-display');
     if (versionEl) {
@@ -3889,4 +3979,45 @@ document.addEventListener("DOMContentLoaded", () => {
         continueToPayment(outboundKey);
       }
     });
+    // ========= 13. Download CSV Button =========
+    document.getElementById("download-csv-button").addEventListener("click", downloadResultsAsCSV);
+    // Attach event listener to the Stopover dropdown selection
+    document.querySelectorAll("#stopover-dropdown input[name='stopover']").forEach(radio => {
+      radio.addEventListener("change", () => {
+        updateCSVButtonVisibility(); // Update visibility when stopover selection changes
+      });
+    });
+    // Also check visibility when the page loads
+    updateCSVButtonVisibility();
+
+    // ========= 14. Changing airports raius =========
+    const allowSwitch = document.getElementById('allow-change-airport');
+    const radiusContainer = document.getElementById('connection-radius-container');
+    const radiusInput = document.getElementById('connection-radius');
+    // Initialize from localStorage
+    const savedAllow  = localStorage.getItem('allowChangeAirport') === 'true';
+    const savedRadius = parseInt(localStorage.getItem('connectionRadius')) || 0;
+    radiusInput.value  = savedRadius;
+    allowSwitch.checked = savedAllow;
+    if (savedAllow) {
+      radiusContainer.classList.remove('hidden');
+    } else {
+      radiusContainer.classList.add('hidden');
+    }
+    // Show/hide radius when the checkbox is toggled
+    allowSwitch.addEventListener('change', () => {
+      // console.log('allowSwitch changed, checked=', allowSwitch.checked);
+      localStorage.setItem('allowChangeAirport', allowSwitch.checked);
+      if (allowSwitch.checked) {
+        radiusContainer.classList.remove('hidden');
+      } else {
+        radiusContainer.classList.add('hidden');
+      }
+    });
+
+      // Persist the radius as soon as it’s changed
+      radiusInput.addEventListener('input', () => {
+        const v = parseInt(radiusInput.value) || 0;
+        localStorage.setItem('connectionRadius', v);
+      });
   });
