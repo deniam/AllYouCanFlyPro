@@ -1084,6 +1084,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
   function isDateAvailableForSegment(origin, destination, dateStr) {
     // Find the route that starts at the given origin.
+    console.log(`Checking availability: ${origin}→${destination} on ${dateStr}`);
     const route = routesByOriginAndDestination[origin]?.[destination];
     if (!route) return false;
     // Find the arrival station object with the given destination.
@@ -1094,9 +1095,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (!arrivalStationObj) return false;
     // If flightDates is defined, check that dateStr is included.
     if (arrivalStationObj.flightDates) {
+      console.log(`  Flight dates: ${arrivalStationObj.flightDates.join(', ')}`);
       return arrivalStationObj.flightDates.includes(dateStr);
     }
     // If no flightDates provided, assume available.
+    console.log(`  No flight dates restriction`);
     return true;
   }
 
@@ -2024,15 +2027,28 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const directDestMap = new Map(); // D → [B₁, B₂,…] where B→D exists
     const midDestMap    = new Map(); // D → [ {code: B, via: B}, {code: N, via: B}, … ]
     for (let D of destinations) {
+      console.log(`[DEBUG] Building midDestMap for ${D}`);
       const Bs = routesData
         .filter(r => {
           const dep = typeof r.departureStation==='object'
             ? r.departureStation.id
             : r.departureStation;
+            // console.log(`  Checking route from ${dep} to ${D}`);
+
           return dep !== D
             && (r.arrivalStations || []).some(st => {
                 const id = typeof st==='object' ? st.id : st;
-                return id === D && isDateAvailableForSegment(dep, D, selectedDate);
+                if (id !== D) return false;
+                return allowedOffsets.some(offset => {
+                  const date = addDaysUTC(
+                    new Date(`${selectedDate}T00:00:00Z`),
+                    offset
+                  )
+                    .toISOString()
+                    .slice(0, 10);
+                    console.log(`Checking date ${date} for segment ${dep} -> ${D}`);
+                  return isDateAvailableForSegment(dep, D, date);
+                });
               });
         })
         .map(r => typeof r.departureStation==='object' ? r.departureStation.id : r.departureStation)
@@ -2056,23 +2072,47 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       for (let D of destinations) {
         const midsO = midMap.get(O)    || [];
         const midsD = midDestMap.get(D) || [];
+        console.log(`[DEBUG] Origin: ${O}, Destination: ${D}`);
+        console.log(`  midsO (${midsO.length}):`, midsO.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
+        console.log(`  midsD (${midsD.length}):`, midsD.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
+        
+        let pairCount = 0;
         for (let { code: X, via: A } of midsO) {
           for (let { code: Y, via: B } of midsD) {
             // require that X→Y is either a real flight or within radius foot‑transfer
             const routeXY   = routesByOriginAndDestination[X]?.[Y];
             const locX      = airportLookup[X];
             const locY      = airportLookup[Y];
-            const withinRad = locX && locY
-              && haversineDistance(
+
+            const coordsValid = locX && locY && 
+                                locX.latitude !== undefined && locX.longitude !== undefined &&
+                                locY.latitude !== undefined && locY.longitude !== undefined;
+                          
+            let withinRad = false;
+            let distance = 0;
+              if (coordsValid) {
+                distance = haversineDistance(
                   locX.latitude, locX.longitude,
                   locY.latitude, locY.longitude
-                ) <= connectionRadiusKm;
+                );
+                withinRad = distance <= connectionRadiusKm;
+              }
 
-            if (X !== Y && !routeXY && !withinRad) continue;
+            const condition1 = X === Y;
+            const condition2 = !!routeXY;
+            const condition3 = withinRad;
 
+            if (X !== Y && !routeXY && !withinRad) {
+            console.log(`  Skip: ${X}->${Y} | same:${condition1} route:${condition2} radius:${condition3} ${coordsValid ? `dist:km` : 'no-coords'}`);
+            
+            continue;
+            }
             candidates.push({ O, A, X, B, Y, D });
+            pairCount++;
+            console.log(`  Keep: ${X}->${Y} (${A}->${B}) | same:${condition1} route:${condition2} radius:${condition3}`);
           }
         }
+        console.log(`  Generated ${pairCount} candidates for ${O}->${D}`);
       }
     }
 
