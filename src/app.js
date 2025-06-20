@@ -2068,6 +2068,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         let pairCount = 0;
         for (let { code: X, via: A } of midsO) {
           for (let { code: Y, via: B } of midsD) {
+            if (origins.includes(Y) || origins.includes(B) || destinations.includes(X) || destinations.includes(A)) {
+              continue;
+            }
             // require that X→Y is either a real flight or within radius foot‑transfer
             const routeXY   = routesByOriginAndDestination[X]?.[Y];
             const locX      = airportLookup[X];
