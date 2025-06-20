@@ -259,19 +259,21 @@
                   <div class="flex items-center gap-2 mb-2">
                     <label class="inline-flex items-center gap-1 text-gray-700">
                       <input type="checkbox" id="allow-change-airport" class="h-4 w-4">
-                      <span class="text-xs font-medium">Allow changing connecting airport (one-stop routes only)</span>
+                      <span class="text-xs font-medium">Allow changing connecting airport</span>
                     </label>
-                      <div id="connection-radius-container" class="relative inline-block hidden">
+                    <div id="connection-radius-container" class="relative inline-block hidden">
                       <input
                         type="number"
                         id="connection-radius"
-                        class="w-20 pr-5 bg-white border border-gray-300 rounded-lg px-2 py-1 text-right
+                        class="w-20 pr-7 sm:pr-6 bg-white border border-gray-300 rounded-lg px-2 py-1 text-right
                               placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#C90076]
                               focus:border-transparent transition"
                         placeholder="Radius"
                         min="0"
+                        max="9999"
+                        maxlength="4"
                       />
-                      <span class="absolute inset-y-0 right-2 flex items-center text-gray-500 select-none">
+                      <span class="absolute inset-y-0 right-2.5 sm:right-2 flex items-center text-gray-500 select-none pointer-events-none">
                         km
                       </span>
                     </div>
