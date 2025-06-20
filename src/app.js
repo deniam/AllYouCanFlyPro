@@ -2136,9 +2136,17 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
 
     // ─── 4) load & stitch only the survivors ───
+    const totalCandidates = candidates.length;
+    let processedCandidates = 0;
+
     for (let { O, A, X, B, Y, D } of candidates) {
       if (searchCancelled) break;
       console.log(`Checking chain: ${O}→${A}→(foot)→${X}→${Y}→(foot)→${D}`);
+
+      // Progress update
+      processedCandidates++;
+        const progressMessage = `Checking route: ${O}→${A}, ${X}→${Y}, ${B}→${D}`;
+        updateProgress(processedCandidates, totalCandidates, progressMessage);
 
       // leg 1: real flight O→A
       const f1 = await loadFlights(O, A, selectedDate, [0]);
