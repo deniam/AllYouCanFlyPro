@@ -1095,7 +1095,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (!arrivalStationObj) return false;
     // If flightDates is defined, check that dateStr is included.
     if (arrivalStationObj.flightDates) {
-      console.log(`  Flight dates: ${arrivalStationObj.flightDates.join(', ')}`);
+      // console.log(`  Flight dates: ${arrivalStationObj.flightDates.join(', ')}`);
       return arrivalStationObj.flightDates.includes(dateStr);
     }
     // If no flightDates provided, assume available.
@@ -1574,22 +1574,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     return new Date(isoString);
   }
 
-  // Updated function to get the date in the target time zone (ignoring the client's local time)
-  function getLocalDateFromOffset(date, offsetText) {
-    if (!date || !(date instanceof Date)) {
-      console.error("Invalid date passed to getLocalDateFromOffset:", date);
-      return "";
-    }
-    const offsetMatch = offsetText ? offsetText.match(/UTC([+-]\d+)/) : null;
-    const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
-    const localTime = date.getTime() - offsetHours * 3600000;
-    const localDate = new Date(localTime);
-    const yyyy = localDate.getUTCFullYear();
-    const mm = String(localDate.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(localDate.getUTCDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-
   /**
    * Preliminary check for a candidate route.
    * For each segment (departure -> arrival), this function retrieves the arrival object's flightDates array
@@ -1803,6 +1787,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     for (const origin of origins) {
       for (const destination of destinations) {
         if (origin === destination) continue;
+        if (searchCancelled) break;
 
         if (isDateAvailableForSegment(origin, destination, selectedDate)) {
           const cacheKey = getUnifiedCacheKey(origin, destination, selectedDate);
@@ -1828,7 +1813,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const firstLegMap = new Map();
     for (const origin of origins) {
       const bs = new Set();
-      // first leg must depart exactly on selectedDate
+      // first leg must depart on selectedDate
       for (const route of routesData) {
         const dep = typeof route.departureStation === "object"
           ? route.departureStation.id
@@ -1995,6 +1980,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const directMap = new Map(); // O → [A₁, A₂, …] (only where O→A exists)
     const midMap    = new Map(); // O → [ {code: A, via: A}, {code: N, via: A}, … ]
     for (let O of origins) {
+      if (searchCancelled) break;
       // find A's where O→A on selectedDate
       const As = routesData
         .filter(r => {
@@ -2027,6 +2013,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const directDestMap = new Map(); // D → [B₁, B₂,…] where B→D exists
     const midDestMap    = new Map(); // D → [ {code: B, via: B}, {code: N, via: B}, … ]
     for (let D of destinations) {
+      if (searchCancelled) break;
       console.log(`[DEBUG] Building midDestMap for ${D}`);
       const Bs = routesData
         .filter(r => {
@@ -2046,7 +2033,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
                   )
                     .toISOString()
                     .slice(0, 10);
-                    console.log(`Checking date ${date} for segment ${dep} -> ${D}`);
+                    console.log(`Checking date ${addDaysUTC(new Date(`${selectedDate}T00:00:00Z`),offset).toISOString().slice(0, 10)} for segment ${dep} -> ${D}, isDateAvailable:`, isDateAvailableForSegment(dep, D, date));
                   return isDateAvailableForSegment(dep, D, date);
                 });
               });
@@ -2058,6 +2045,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
       const mids = [];
       for (let B of Bs) {
+        if (searchCancelled) break;
         mids.push({ code: B, via: B });
         for (let neigh of findNearbyAirports(B, connectionRadiusKm, allCodes)) {
           mids.push({ code: neigh, via: B });
@@ -2070,11 +2058,12 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     let candidates = [];
     for (let O of origins) {
       for (let D of destinations) {
+        if (searchCancelled) break;
         const midsO = midMap.get(O)    || [];
         const midsD = midDestMap.get(D) || [];
-        console.log(`[DEBUG] Origin: ${O}, Destination: ${D}`);
-        console.log(`  midsO (${midsO.length}):`, midsO.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
-        console.log(`  midsD (${midsD.length}):`, midsD.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
+        // console.log(`[DEBUG] Origin: ${O}, Destination: ${D}`);
+        // console.log(`  midsO (${midsO.length}):`, midsO.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
+        // console.log(`  midsD (${midsD.length}):`, midsD.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
         
         let pairCount = 0;
         for (let { code: X, via: A } of midsO) {
@@ -2098,18 +2087,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
                 withinRad = distance <= connectionRadiusKm;
               }
 
-            const condition1 = X === Y;
-            const condition2 = !!routeXY;
-            const condition3 = withinRad;
-
             if (X !== Y && !routeXY && !withinRad) {
-            console.log(`  Skip: ${X}->${Y} | same:${condition1} route:${condition2} radius:${condition3} ${coordsValid ? `dist:km` : 'no-coords'}`);
+            // console.log(`  Skip: ${X}->${Y} | same:${condition1} route:${condition2} radius:${condition3} ${coordsValid ? `dist:km` : 'no-coords'}`);
             
             continue;
             }
             candidates.push({ O, A, X, B, Y, D });
             pairCount++;
-            console.log(`  Keep: ${X}->${Y} (${A}->${B}) | same:${condition1} route:${condition2} radius:${condition3}`);
+            // console.log(`  Keep: ${X}->${Y} (${A}->${B}) | same:${condition1} route:${condition2} radius:${condition3}`);
           }
         }
         console.log(`  Generated ${pairCount} candidates for ${O}->${D}`);
@@ -2152,6 +2137,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
     // ─── 4) load & stitch only the survivors ───
     for (let { O, A, X, B, Y, D } of candidates) {
+      if (searchCancelled) break;
       console.log(`Checking chain: ${O}→${A}→(foot)→${X}→${Y}→(foot)→${D}`);
 
       // leg 1: real flight O→A
@@ -2166,7 +2152,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
       // leg 3: real flight B→D
       const f3 = await loadFlights(B, D, selectedDate, allowedOffsets);
-      console.log(`  flights ${B}->${D}:`, f3.length);
+      console.log(`  flights ${B}->${D}:`, f3.length, `on SelectedDate ${selectedDate}`, `allowedOffsets: ${allowedOffsets.join(", ")}`);
       if (!f3.length) continue;
 
       // now combine them with layover checks:
@@ -2204,10 +2190,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             const changeDistanceKmOne = locA && locB
               ? Math.round(haversineDistance(locA.latitude, locA.longitude, locB.latitude, locB.longitude))
               : null;
-            console.log(`airportLookup[flight1.arrivalStation]: ${locA}`)
-            console.log(`airportLookup[flight2.departureStation]: ${locB}`)
-            console.log(`airportLookup[flight2.arrivalStation]: ${locC}`)
-            console.log(`airportLookup[flight3.departureStation]: ${locD}`)
 
             const changeDistanceKmTwo = locC && locD
             ? Math.round(haversineDistance(locC.latitude, locC.longitude, locD.latitude, locD.longitude))
@@ -2427,9 +2409,26 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       allowChangeAirport &&
       connectionRadius > 0
     );
+    
     if (switchableForTwoStops) {
+      const results = [];
+        if (debug) console.log("Searching one-stop flights");
+        const oneStopResults = await processOneStopWithAirportChange(
+        origins,
+        destinations,
+        selectedDate,
+        minConnection,
+        maxConnection,
+        connectionRadius,
+        allowedOffsets,
+        shouldAppend,
+        true // skipProgress
+      );
+      results.push(...oneStopResults || []);
+      if (searchCancelled) return results;
+
       if (debug) console.log("Airport-change mode ON: delegating to processTwoStopsWithAirportChange");
-      const results = await processTwoStopsWithAirportChange(
+      const twoStopResults = await processTwoStopsWithAirportChange(
         origins,
         destinations,
         selectedDate,
@@ -2439,6 +2438,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         allowedOffsets,
         shouldAppend
       );
+      results.push(...twoStopResults || []);
       if (debug) console.log(`Found ${results.length} two-stop routes with airport change`);
       return results;
     }
