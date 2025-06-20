@@ -4309,14 +4309,14 @@ for (const outbound of outboundFlights) {
     }
     // Show/hide radius when the checkbox is toggled
     allowSwitch.addEventListener('change', () => {
-      // console.log('allowSwitch changed, checked=', allowSwitch.checked);
-      localStorage.setItem('allowChangeAirport', allowSwitch.checked);
-      if (allowSwitch.checked) {
-        radiusContainer.classList.remove('hidden');
+      const isChecked = allowSwitch.checked;
+      localStorage.setItem('allowChangeAirport', isChecked);
+      if (isChecked) {
+          radiusContainer.classList.remove('hidden');
       } else {
-        radiusContainer.classList.add('hidden');
+          radiusContainer.classList.add('hidden');
       }
-    });
+  });
 
       // Persist the radius as soon as it’s changed
       radiusInput.addEventListener('input', () => {
