@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -2015,13 +2015,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const midDestMap    = new Map(); // D → [ {code: B, via: B}, {code: N, via: B}, … ]
     for (let D of destinations) {
       if (searchCancelled) break;
-      if (debug) console.log(`[DEBUG] Building midDestMap for ${D}`);
       const Bs = routesData
         .filter(r => {
           const dep = typeof r.departureStation==='object'
             ? r.departureStation.id
             : r.departureStation;
-            // console.log(`  Checking route from ${dep} to ${D}`);
 
           return dep !== D
             && (r.arrivalStations || []).some(st => {
@@ -2034,7 +2032,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
                   )
                     .toISOString()
                     .slice(0, 10);
-                    if (debug) console.log(`Checking date ${addDaysUTC(new Date(`${selectedDate}T00:00:00Z`),offset).toISOString().slice(0, 10)} for segment ${dep} -> ${D}, isDateAvailable:`, isDateAvailableForSegment(dep, D, date));
                   return isDateAvailableForSegment(dep, D, date);
                 });
               });
@@ -2062,9 +2059,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         if (searchCancelled) break;
         const midsO = midMap.get(O)    || [];
         const midsD = midDestMap.get(D) || [];
-        // console.log(`[DEBUG] Origin: ${O}, Destination: ${D}`);
-        // console.log(`  midsO (${midsO.length}):`, midsO.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
-        // console.log(`  midsD (${midsD.length}):`, midsD.map(m => `${m.code} via ${m.via}`).join(", ") || "None");
         
         let pairCount = 0;
         for (let { code: X, via: A } of midsO) {
@@ -2092,20 +2086,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
               }
 
             if (X !== Y && !routeXY && !withinRad) {
-            // console.log(`  Skip: ${X}->${Y} | same:${condition1} route:${condition2} radius:${condition3} ${coordsValid ? `dist:km` : 'no-coords'}`);
-            
             continue;
             }
             candidates.push({ O, A, X, B, Y, D });
             pairCount++;
-            // console.log(`  Keep: ${X}->${Y} (${A}->${B}) | same:${condition1} route:${condition2} radius:${condition3}`);
           }
         }
-        if (debug) console.log(`  Generated ${pairCount} candidates for ${O}->${D}`);
       }
     }
-
-    if (debug) console.log(`[DEBUG] Built ${candidates.length} raw candidates:`);
     console.table(candidates);
 
     // ─── 3.1) preliminary flight‑dates filter ───
@@ -2145,8 +2133,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
     for (let { O, A, X, B, Y, D } of candidates) {
       if (searchCancelled) break;
-      if (debug) console.log(`Checking chain: ${O}→${A}→(foot)→${X}→${Y}→(foot)→${D}`);
-
       // Progress update
       processedCandidates++;
       const progressMessage = 
@@ -2158,17 +2144,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
       // leg 1: real flight O→A
       const f1 = await loadFlights(O, A, selectedDate, [0]);
-      if (debug) console.log(`  flights ${O}->${A}:`, f1.length);
       if (!f1.length) continue;
 
       // leg 2: real flight X→Y
       const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets);
-      if (debug) console.log(`  flights ${X}->${Y}:`, f2.length);
       if (!f2.length) continue;
 
       // leg 3: real flight B→D
       const f3 = await loadFlights(B, D, selectedDate, allowedOffsets);
-      if (debug) console.log(`  flights ${B}->${D}:`, f3.length, `on SelectedDate ${selectedDate}`, `allowedOffsets: ${allowedOffsets.join(", ")}`);
       if (!f3.length) continue;
 
       // now combine them with layover checks:
@@ -2177,14 +2160,12 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           const gap1 = (flight2.calculatedDuration.departureDate
                       - flight1.calculatedDuration.arrivalDate) / 60000;
           if (gap1 < minConnection || gap1 > maxConnection) {
-            if (debug) console.log(`    skip gap1=${gap1}m`);
             continue;
           }
           for (let flight3 of f3) {
             const gap2 = (flight3.calculatedDuration.departureDate
                         - flight2.calculatedDuration.arrivalDate) / 60000;
             if (gap2 < minConnection || gap2 > maxConnection) {
-              if (debug) console.log(`    skip gap2=${gap2}m`);
               continue;
             }
 
@@ -2192,7 +2173,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
               `    ✓ valid: [${flight1.key}]→[${flight2.key}]→[${flight3.key}]`
             );
 
-            // build your aggregated object exactly like before:
+            // build your aggregated object:
             const dep  = flight1.calculatedDuration.departureDate;
             const arr  = flight3.calculatedDuration.arrivalDate;
             const totM = Math.round((arr - dep)/60000);
@@ -2201,8 +2182,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             const locC = airportLookup[flight2.arrivalStation];
             const locD = airportLookup[flight3.departureStation];
             const conn = Math.round(gap1 + gap2);
-            if (debug) console.log(`airportChangeOne: ${flight1.arrivalStation} → ${flight2.departureStation}`);
-            if (debug) console.log(`airportChangeTwo: ${flight2.arrivalStation} → ${flight3.departureStation}`);
             const changeDistanceKmOne = locA && locB
               ? Math.round(haversineDistance(locA.latitude, locA.longitude, locB.latitude, locB.longitude))
               : null;
@@ -2246,9 +2225,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       }
     }
 
-    if (debug) console.log(
-      `[DEBUG] processTwoStopsWithAirportChange → returning ${results.length} routes`
-    );
     return results;
   }
 
