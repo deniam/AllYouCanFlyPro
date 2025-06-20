@@ -1905,7 +1905,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       updateProgress(
         routeCounter,
         totalRoutes,
-        `Checking route: ${origin} → ${B} → ${N} → ${destination}`
+        B !== N ? `Checking route: ${origin} → ${B} | ${N} → ${destination}` : `Checking route: ${origin} → ${B} → ${destination}`
       );
 
       // first leg: exact selectedDate
@@ -2145,7 +2145,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
       // Progress update
       processedCandidates++;
-        const progressMessage = `Checking route: ${O}→${A}, ${X}→${Y}, ${B}→${D}`;
+      const progressMessage = 
+        A === X && B === Y ? `Checking route: ${O} → ${A} → ${B} → ${D}` :
+        A !== X && B === Y ? `Checking route: ${O} → ${A} | ${X} → ${B} → ${D}` :
+        A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} | ${B} → ${D}` :
+        `Checking route: ${O} → ${A} | ${X} → ${Y} | ${B} → ${D}`;
         updateProgress(processedCandidates, totalCandidates, progressMessage);
 
       // leg 1: real flight O→A
