@@ -68,10 +68,6 @@
         position: absolute;
         z-index: 1000;
       }
-
-      #connection-radius-container.hidden {
-          display: none !important;
-      }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -246,7 +242,7 @@
                     <div class="relative flex-shrink min-w-0 basis-20 mb-2">
                       <label class="block text-gray-700 font-xs mb-1">Preferred Airport</label>
                       <input type="text" id="preferred-airport"
-                             class="w-full bg-gray-100 border border-gray-300 rounded mr-1 py-1 focus:ring-[#C90076]"
+                             class="w-full bg-gray-100 border border-gray-300 rounded px-1 py-1 focus:ring-[#C90076]"
                              placeholder="Enter preferred airport">
                       <div id="airport-suggestions-preferred"
                            class="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg hidden"></div>
@@ -263,21 +259,21 @@
                   <div class="flex items-center gap-2 mb-2">
                     <label class="inline-flex items-center gap-1 text-gray-700">
                       <input type="checkbox" id="allow-change-airport" class="h-4 w-4">
-                      <span class="text-xs font-medium">Allow changing connecting airport</span>
+                      <span class="text-xs font-medium">Allow changing connecting airport (one-stop routes only)</span>
                     </label>
-                    <div id="connection-radius-container" class="relative inline-flex items-center">
+                      <div id="connection-radius-container" class="relative inline-block hidden">
                       <input
                         type="number"
                         id="connection-radius"
-                        class="w-20 pr-8 bg-white border border-gray-300 rounded-lg px-2 py-1 text-right
+                        class="w-20 pr-5 bg-white border border-gray-300 rounded-lg px-2 py-1 text-right
                               placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#C90076]
                               focus:border-transparent transition"
                         placeholder="Radius"
                         min="0"
-                        max="9999"
-                        maxlength="4"
                       />
-                      <span class="-ml-6 text-gray-500 select-none whitespace-nowrap">km</span>
+                      <span class="absolute inset-y-0 right-2 flex items-center text-gray-500 select-none">
+                        km
+                      </span>
                     </div>
                   </div>
                   <!-- Expert Settings -->
