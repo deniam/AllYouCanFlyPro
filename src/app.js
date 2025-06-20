@@ -46,7 +46,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   localStorage.setItem('pauseDurationSeconds', pauseDur);
   localStorage.setItem('cacheLifetimeHours', cacheLife);
   if (debug) {
-    console.log('[DEBUG] Settings saved individually:', {
+    if (debug) console.log('[DEBUG] Settings saved individually:', {
       minConnectionTime: minConnection,
       maxConnectionTime: maxConnection,
       preferredAirport,
@@ -1084,7 +1084,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
   function isDateAvailableForSegment(origin, destination, dateStr) {
     // Find the route that starts at the given origin.
-    console.log(`Checking availability: ${origin}→${destination} on ${dateStr}`);
+    if (debug) console.log(`Checking availability: ${origin}→${destination} on ${dateStr}`);
     const route = routesByOriginAndDestination[origin]?.[destination];
     if (!route) return false;
     // Find the arrival station object with the given destination.
@@ -1099,7 +1099,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       return arrivalStationObj.flightDates.includes(dateStr);
     }
     // If no flightDates provided, assume available.
-    console.log(`  No flight dates restriction`);
+    if (debug) console.log(`  No flight dates restriction`);
     return true;
   }
 
@@ -1175,7 +1175,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           if (searchCancelled) {
             if (debug) console.log("Search was cancelled. Stopping execution in checkRouteSegment.");
             resetCountdownTimers();
-            return;
+            return [];
           }
       
           let waitTime = 0;
@@ -1215,6 +1215,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         }
       }
       if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
+      return [];
     }
 
   // ---------------- Graph Building and DFS Functions ----------------
@@ -2014,7 +2015,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const midDestMap    = new Map(); // D → [ {code: B, via: B}, {code: N, via: B}, … ]
     for (let D of destinations) {
       if (searchCancelled) break;
-      console.log(`[DEBUG] Building midDestMap for ${D}`);
+      if (debug) console.log(`[DEBUG] Building midDestMap for ${D}`);
       const Bs = routesData
         .filter(r => {
           const dep = typeof r.departureStation==='object'
@@ -2033,7 +2034,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
                   )
                     .toISOString()
                     .slice(0, 10);
-                    console.log(`Checking date ${addDaysUTC(new Date(`${selectedDate}T00:00:00Z`),offset).toISOString().slice(0, 10)} for segment ${dep} -> ${D}, isDateAvailable:`, isDateAvailableForSegment(dep, D, date));
+                    if (debug) console.log(`Checking date ${addDaysUTC(new Date(`${selectedDate}T00:00:00Z`),offset).toISOString().slice(0, 10)} for segment ${dep} -> ${D}, isDateAvailable:`, isDateAvailableForSegment(dep, D, date));
                   return isDateAvailableForSegment(dep, D, date);
                 });
               });
@@ -2100,11 +2101,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             // console.log(`  Keep: ${X}->${Y} (${A}->${B}) | same:${condition1} route:${condition2} radius:${condition3}`);
           }
         }
-        console.log(`  Generated ${pairCount} candidates for ${O}->${D}`);
+        if (debug) console.log(`  Generated ${pairCount} candidates for ${O}->${D}`);
       }
     }
 
-    console.log(`[DEBUG] Built ${candidates.length} raw candidates:`);
+    if (debug) console.log(`[DEBUG] Built ${candidates.length} raw candidates:`);
     console.table(candidates);
 
     // ─── 3.1) preliminary flight‑dates filter ───
@@ -2132,7 +2133,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       );
     });
 
-    console.log(
+    if (debug) console.log(
       `[DEBUG] After real‑flight date‑filter: ${candidates.length} of ${totalCands} remain`
     );
     console.table(candidates);
@@ -2144,7 +2145,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
     for (let { O, A, X, B, Y, D } of candidates) {
       if (searchCancelled) break;
-      console.log(`Checking chain: ${O}→${A}→(foot)→${X}→${Y}→(foot)→${D}`);
+      if (debug) console.log(`Checking chain: ${O}→${A}→(foot)→${X}→${Y}→(foot)→${D}`);
 
       // Progress update
       processedCandidates++;
@@ -2157,17 +2158,17 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
       // leg 1: real flight O→A
       const f1 = await loadFlights(O, A, selectedDate, [0]);
-      console.log(`  flights ${O}->${A}:`, f1.length);
+      if (debug) console.log(`  flights ${O}->${A}:`, f1.length);
       if (!f1.length) continue;
 
       // leg 2: real flight X→Y
       const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets);
-      console.log(`  flights ${X}->${Y}:`, f2.length);
+      if (debug) console.log(`  flights ${X}->${Y}:`, f2.length);
       if (!f2.length) continue;
 
       // leg 3: real flight B→D
       const f3 = await loadFlights(B, D, selectedDate, allowedOffsets);
-      console.log(`  flights ${B}->${D}:`, f3.length, `on SelectedDate ${selectedDate}`, `allowedOffsets: ${allowedOffsets.join(", ")}`);
+      if (debug) console.log(`  flights ${B}->${D}:`, f3.length, `on SelectedDate ${selectedDate}`, `allowedOffsets: ${allowedOffsets.join(", ")}`);
       if (!f3.length) continue;
 
       // now combine them with layover checks:
@@ -2176,18 +2177,18 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           const gap1 = (flight2.calculatedDuration.departureDate
                       - flight1.calculatedDuration.arrivalDate) / 60000;
           if (gap1 < minConnection || gap1 > maxConnection) {
-            console.log(`    skip gap1=${gap1}m`);
+            if (debug) console.log(`    skip gap1=${gap1}m`);
             continue;
           }
           for (let flight3 of f3) {
             const gap2 = (flight3.calculatedDuration.departureDate
                         - flight2.calculatedDuration.arrivalDate) / 60000;
             if (gap2 < minConnection || gap2 > maxConnection) {
-              console.log(`    skip gap2=${gap2}m`);
+              if (debug) console.log(`    skip gap2=${gap2}m`);
               continue;
             }
 
-            console.log(
+            if (debug) console.log(
               `    ✓ valid: [${flight1.key}]→[${flight2.key}]→[${flight3.key}]`
             );
 
@@ -2200,8 +2201,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             const locC = airportLookup[flight2.arrivalStation];
             const locD = airportLookup[flight3.departureStation];
             const conn = Math.round(gap1 + gap2);
-            console.log(`airportChangeOne: ${flight1.arrivalStation} → ${flight2.departureStation}`);
-            console.log(`airportChangeTwo: ${flight2.arrivalStation} → ${flight3.departureStation}`);
+            if (debug) console.log(`airportChangeOne: ${flight1.arrivalStation} → ${flight2.departureStation}`);
+            if (debug) console.log(`airportChangeTwo: ${flight2.arrivalStation} → ${flight3.departureStation}`);
             const changeDistanceKmOne = locA && locB
               ? Math.round(haversineDistance(locA.latitude, locA.longitude, locB.latitude, locB.longitude))
               : null;
@@ -2245,7 +2246,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       }
     }
 
-    console.log(
+    if (debug) console.log(
       `[DEBUG] processTwoStopsWithAirportChange → returning ${results.length} routes`
     );
     return results;
@@ -2261,11 +2262,20 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         continue;
       }
       let segs = await getCachedResults(`${dep}-${arr}-${date}`);
+
       if (!Array.isArray(segs)) {
-        segs = (await checkRouteSegment(dep, arr, date)).map(unifyRawFlight);
-        await setCachedResults(`${dep}-${arr}-${date}`, segs);
+        try {
+          const result = await checkRouteSegment(dep, arr, date);
+          segs = Array.isArray(result) 
+            ? result.map(unifyRawFlight) 
+            : [];
+          await setCachedResults(`${dep}-${arr}-${date}`, segs);
+        } catch (error) {
+          console.error(`Error loading flights: ${error.message}`);
+          segs = [];
+        }
       }
-      out.push(...segs);  // return all flights for this segment
+      out.push(...segs);
     }
     return out;
   }
@@ -2671,15 +2681,19 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
       try {
         let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
+        if (!Array.isArray(flights)) {
+          if (debug) console.warn(`No valid flights array for ${origin}→${arrivalCode}`, flights);
+          flights = [];
+        }
         flights = flights.map(unifyRawFlight);
         if (shouldAppend) flights.forEach(appendRouteToDisplay);
         validDirectFlights.push(...flights);
         await setCachedResults(cacheKey, flights);
       } catch (err) {
-        console.error(`Error checking ${origin}→${arrivalCode}:`, err);
-        showNotification(
-          `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
-        );
+          console.error(`Error checking ${origin}→${arrivalCode}:`, err);
+          showNotification(
+            `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
+          );
         return;
       }
     }
@@ -3438,7 +3452,7 @@ for (const outbound of outboundFlights) {
       </div>` : "";
     
     let bodyHtml = "";
-    console.log("Unified flight", unifiedFlight);
+    if (debug) console.log("Unified flight", unifiedFlight);
     if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
       unifiedFlight.segments.forEach((segment, idx) => {
         bodyHtml += createSegmentRow(segment);
