@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -46,7 +46,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   localStorage.setItem('pauseDurationSeconds', pauseDur);
   localStorage.setItem('cacheLifetimeHours', cacheLife);
   if (debug) {
-    console.log('[DEBUG] Settings saved individually:', {
+    if (debug) console.log('[DEBUG] Settings saved individually:', {
       minConnectionTime: minConnection,
       maxConnectionTime: maxConnection,
       preferredAirport,
@@ -1084,6 +1084,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
   function isDateAvailableForSegment(origin, destination, dateStr) {
     // Find the route that starts at the given origin.
+    if (debug) console.log(`Checking availability: ${origin}→${destination} on ${dateStr}`);
     const route = routesByOriginAndDestination[origin]?.[destination];
     if (!route) return false;
     // Find the arrival station object with the given destination.
@@ -1094,9 +1095,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (!arrivalStationObj) return false;
     // If flightDates is defined, check that dateStr is included.
     if (arrivalStationObj.flightDates) {
+      // console.log(`  Flight dates: ${arrivalStationObj.flightDates.join(', ')}`);
       return arrivalStationObj.flightDates.includes(dateStr);
     }
     // If no flightDates provided, assume available.
+    if (debug) console.log(`  No flight dates restriction`);
     return true;
   }
 
@@ -1172,7 +1175,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           if (searchCancelled) {
             if (debug) console.log("Search was cancelled. Stopping execution in checkRouteSegment.");
             resetCountdownTimers();
-            return;
+            return [];
           }
       
           let waitTime = 0;
@@ -1212,6 +1215,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         }
       }
       if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
+      return [];
     }
 
   // ---------------- Graph Building and DFS Functions ----------------
@@ -1571,22 +1575,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     return new Date(isoString);
   }
 
-  // Updated function to get the date in the target time zone (ignoring the client's local time)
-  function getLocalDateFromOffset(date, offsetText) {
-    if (!date || !(date instanceof Date)) {
-      console.error("Invalid date passed to getLocalDateFromOffset:", date);
-      return "";
-    }
-    const offsetMatch = offsetText ? offsetText.match(/UTC([+-]\d+)/) : null;
-    const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : 0;
-    const localTime = date.getTime() - offsetHours * 3600000;
-    const localDate = new Date(localTime);
-    const yyyy = localDate.getUTCFullYear();
-    const mm = String(localDate.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(localDate.getUTCDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-
   /**
    * Preliminary check for a candidate route.
    * For each segment (departure -> arrival), this function retrieves the arrival object's flightDates array
@@ -1800,6 +1788,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     for (const origin of origins) {
       for (const destination of destinations) {
         if (origin === destination) continue;
+        if (searchCancelled) break;
 
         if (isDateAvailableForSegment(origin, destination, selectedDate)) {
           const cacheKey = getUnifiedCacheKey(origin, destination, selectedDate);
@@ -1825,7 +1814,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     const firstLegMap = new Map();
     for (const origin of origins) {
       const bs = new Set();
-      // first leg must depart exactly on selectedDate
+      // first leg must depart on selectedDate
       for (const route of routesData) {
         const dep = typeof route.departureStation === "object"
           ? route.departureStation.id
@@ -1917,7 +1906,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       updateProgress(
         routeCounter,
         totalRoutes,
-        `Checking route: ${origin} → ${B} → ${N} → ${destination}`
+        B !== N ? `Checking route: ${origin} → ${B} | ${N} → ${destination}` : `Checking route: ${origin} → ${B} → ${destination}`
       );
 
       // first leg: exact selectedDate
@@ -1946,58 +1935,327 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     return results;
   }
 
-  async function processTwoStopsWithAirportChange(origins, destinations, selectedDate, minConnection, maxConnection, connectionRadius, allowedOffsets, shouldAppend = true) {
-  const results = [];
-
-  const firstLegOptions = await fetchFirstLegOptions(origins);
-
-  for (const firstStop of firstLegOptions) {
-    const secondLegOptions = await fetchConnectionOptions(firstStop, connectionRadius);
-
-    for (const secondStop of secondLegOptions) {
-      const leg1 = await fetchFlights(origins, firstStop, selectedDate, allowedOffsets);
-      if (!leg1.length) continue;
-
-      const leg2 = await fetchFlights([leg1.destination], secondStop, leg1.nextDate, allowedOffsets);
-      if (!leg2.length) continue;
-
-      const leg3 = await fetchFlights([leg2.destination], destinations, leg2.nextDate, allowedOffsets);
-      if (!leg3.length) continue;
-
-      const combinedRoute = [leg1, leg2, leg3];
-
-      if (shouldAppend) appendRouteToDisplay(combinedRoute);
-
-      results.push(combinedRoute);
-    }
+// ──────────────── 1) Helper: nearby‑airport lookup ────────────────
+/**
+ * Returns every airport code (from allCodes) within radiusKm of baseCode.
+ */
+  function findNearbyAirports(baseCode, radiusKm, allCodes) {
+    const base = airportLookup[baseCode];
+    if (!base) return [];
+    return allCodes.filter(code => {
+      if (code === baseCode) return false;
+      const loc = airportLookup[code];
+      if (!loc) return false;
+      const d = haversineDistance(
+        base.latitude, base.longitude,
+        loc.latitude,  loc.longitude
+      );
+      return d <= radiusKm;
+    });
   }
 
-  return results;
-}
+  // ────────── 2) processTwoStopsWithAirportChange ──────────
+  async function processTwoStopsWithAirportChange(
+    origins,
+    destinations,
+    selectedDate,
+    minConnection,
+    maxConnection,
+    connectionRadiusKm,
+    allowedOffsets,
+    shouldAppend = true
+  ) {
+    const results    = [];
+    const routesData = await fetchDestinations();
+
+    // ─── collect every code in the network ───
+    const allCodes = Array.from(new Set(
+      routesData.map(r => (
+        typeof r.departureStation === 'object'
+          ? r.departureStation.id
+          : r.departureStation
+      ))
+    ));
+
+    // ─── 2a) build direct‑map & mid‑map for origins ───
+    const directMap = new Map(); // O → [A₁, A₂, …] (only where O→A exists)
+    const midMap    = new Map(); // O → [ {code: A, via: A}, {code: N, via: A}, … ]
+    for (let O of origins) {
+      if (searchCancelled) break;
+      // find A's where O→A on selectedDate
+      const As = routesData
+        .filter(r => {
+          const dep = typeof r.departureStation==='object'
+            ? r.departureStation.id
+            : r.departureStation;
+          return dep === O
+            && (r.arrivalStations || []).some(st => {
+                const id = typeof st==='object' ? st.id : st;
+                return isDateAvailableForSegment(O, id, selectedDate);
+              });
+        })
+        .flatMap(r => (r.arrivalStations || []).map(st => typeof st==='object' ? st.id : st))
+        .filter((v,i,a)=>a.indexOf(v)===i);
+
+      directMap.set(O, As);
+
+      // now build mids = each A itself + its neighbors within radius
+      const mids = [];
+      for (let A of As) {
+        mids.push({ code: A, via: A });
+        for (let neigh of findNearbyAirports(A, connectionRadiusKm, allCodes)) {
+          mids.push({ code: neigh, via: A });
+        }
+      }
+      midMap.set(O, mids);
+    }
+
+    // ─── 2b) build direct‑map & mid‑map for destinations ───
+    const directDestMap = new Map(); // D → [B₁, B₂,…] where B→D exists
+    const midDestMap    = new Map(); // D → [ {code: B, via: B}, {code: N, via: B}, … ]
+    for (let D of destinations) {
+      if (searchCancelled) break;
+      const Bs = routesData
+        .filter(r => {
+          const dep = typeof r.departureStation==='object'
+            ? r.departureStation.id
+            : r.departureStation;
+
+          return dep !== D
+            && (r.arrivalStations || []).some(st => {
+                const id = typeof st==='object' ? st.id : st;
+                if (id !== D) return false;
+                return allowedOffsets.some(offset => {
+                  const date = addDaysUTC(
+                    new Date(`${selectedDate}T00:00:00Z`),
+                    offset
+                  )
+                    .toISOString()
+                    .slice(0, 10);
+                  return isDateAvailableForSegment(dep, D, date);
+                });
+              });
+        })
+        .map(r => typeof r.departureStation==='object' ? r.departureStation.id : r.departureStation)
+        .filter((v,i,a)=>a.indexOf(v)===i);
+
+      directDestMap.set(D, Bs);
+
+      const mids = [];
+      for (let B of Bs) {
+        if (searchCancelled) break;
+        mids.push({ code: B, via: B });
+        for (let neigh of findNearbyAirports(B, connectionRadiusKm, allCodes)) {
+          mids.push({ code: neigh, via: B });
+        }
+      }
+      midDestMap.set(D, mids);
+    }
+
+    // ─── 3) build all {O,A,X,B,D} candidates ───
+    let candidates = [];
+    for (let O of origins) {
+      for (let D of destinations) {
+        if (searchCancelled) break;
+        const midsO = midMap.get(O)    || [];
+        const midsD = midDestMap.get(D) || [];
+        
+        let pairCount = 0;
+        for (let { code: X, via: A } of midsO) {
+          for (let { code: Y, via: B } of midsD) {
+            if (origins.includes(Y) || origins.includes(B) || destinations.includes(X) || destinations.includes(A)) {
+              continue;
+            }
+            // require that X→Y is either a real flight or within radius foot‑transfer
+            const routeXY   = routesByOriginAndDestination[X]?.[Y];
+            const locX      = airportLookup[X];
+            const locY      = airportLookup[Y];
+
+            const coordsValid = locX && locY && 
+                                locX.latitude !== undefined && locX.longitude !== undefined &&
+                                locY.latitude !== undefined && locY.longitude !== undefined;
+                          
+            let withinRad = false;
+            let distance = 0;
+              if (coordsValid) {
+                distance = haversineDistance(
+                  locX.latitude, locX.longitude,
+                  locY.latitude, locY.longitude
+                );
+                withinRad = distance <= connectionRadiusKm;
+              }
+
+            if (X !== Y && !routeXY && !withinRad) {
+            continue;
+            }
+            candidates.push({ O, A, X, B, Y, D });
+            pairCount++;
+          }
+        }
+      }
+    }
+    console.table(candidates);
+
+    // ─── 3.1) preliminary flight‑dates filter ───
+    const todayUTC      = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
+    const bookingHorizon= addDaysUTC(todayUTC, 3);
+    const totalCands    = candidates.length;
+    // keep only those where each *real* flight leg has at least one flightDate
+    candidates = candidates.filter(({ O, A, X, B, Y, D }) => {
+      // leg1, leg2, leg3 chains
+      const legs = [
+        [O, A],  // first real flight
+        [X, Y],  // second real flight (after transfer)
+        [B, D],  // third real flight
+      ];
+
+      // every leg must pass candidateHasValidFlightDates
+      return legs.every(pair => 
+        candidateHasValidFlightDates(
+          pair,
+          routesData,
+          selectedDate,
+          bookingHorizon,
+          allowedOffsets
+        )
+      );
+    });
+
+    if (debug) console.log(
+      `[DEBUG] After real‑flight date‑filter: ${candidates.length} of ${totalCands} remain`
+    );
+    console.table(candidates);
+
+
+    // ─── 4) load & stitch only the survivors ───
+    const totalCandidates = candidates.length;
+    let processedCandidates = 0;
+
+    for (let { O, A, X, B, Y, D } of candidates) {
+      if (searchCancelled) break;
+      // Progress update
+      processedCandidates++;
+      const progressMessage = 
+        A === X && B === Y ? `Checking route: ${O} → ${A} → ${B} → ${D}` :
+        A !== X && B === Y ? `Checking route: ${O} → ${A} | ${X} → ${B} → ${D}` :
+        A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} | ${B} → ${D}` :
+        `Checking route: ${O} → ${A} | ${X} → ${Y} | ${B} → ${D}`;
+        updateProgress(processedCandidates, totalCandidates, progressMessage);
+
+      // leg 1: real flight O→A
+      const f1 = await loadFlights(O, A, selectedDate, [0]);
+      if (!f1.length) continue;
+
+      // leg 2: real flight X→Y
+      const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets);
+      if (!f2.length) continue;
+
+      // leg 3: real flight B→D
+      const f3 = await loadFlights(B, D, selectedDate, allowedOffsets);
+      if (!f3.length) continue;
+
+      // now combine them with layover checks:
+      for (let flight1 of f1) {
+        for (let flight2 of f2) {
+          const gap1 = (flight2.calculatedDuration.departureDate
+                      - flight1.calculatedDuration.arrivalDate) / 60000;
+          if (gap1 < minConnection || gap1 > maxConnection) {
+            continue;
+          }
+          for (let flight3 of f3) {
+            const gap2 = (flight3.calculatedDuration.departureDate
+                        - flight2.calculatedDuration.arrivalDate) / 60000;
+            if (gap2 < minConnection || gap2 > maxConnection) {
+              continue;
+            }
+
+            if (debug) console.log(
+              `    ✓ valid: [${flight1.key}]→[${flight2.key}]→[${flight3.key}]`
+            );
+
+            // build your aggregated object:
+            const dep  = flight1.calculatedDuration.departureDate;
+            const arr  = flight3.calculatedDuration.arrivalDate;
+            const totM = Math.round((arr - dep)/60000);
+            const locA = airportLookup[flight1.arrivalStation];
+            const locB = airportLookup[flight2.departureStation];
+            const locC = airportLookup[flight2.arrivalStation];
+            const locD = airportLookup[flight3.departureStation];
+            const conn = Math.round(gap1 + gap2);
+            const changeDistanceKmOne = locA && locB
+              ? Math.round(haversineDistance(locA.latitude, locA.longitude, locB.latitude, locB.longitude))
+              : null;
+
+            const changeDistanceKmTwo = locC && locD
+            ? Math.round(haversineDistance(locC.latitude, locC.longitude, locD.latitude, locD.longitude))
+            : null;
+            const agg = {
+              key: flight1.key + " | " + flight2.key + " | " + flight3.key,
+              stops: "2 transfers",
+              totalConnectionTime: conn,
+              segments: [flight1, flight2, flight3],
+              airportChangeOne: {
+                from: flight1.arrivalStation,
+                to: flight2.departureStation,
+                distanceKm: changeDistanceKmOne
+              },
+              airportChangeTwo: {
+                from: flight2.arrivalStation,
+                to: flight3.departureStation,
+                distanceKm: changeDistanceKmTwo
+              },
+              calculatedDuration: {
+                hours: Math.floor(totM/60),
+                minutes: totM % 60,
+                totalMinutes: totM,
+                departureDate: dep,
+                arrivalDate:   arr
+              },
+              formattedFlightDate: formatFlightDateCombined(dep, arr),
+              currency: flight1.currency,
+              displayPrice: flight1.displayPrice,
+              priceTag: flight1.priceTag,
+              route: [flight1.departureStationText, flight3.arrivalStationText]
+            };
+            
+            if (shouldAppend) appendRouteToDisplay(agg);
+            results.push(agg);
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
+
   async function loadFlights(dep, arr, baseDate, offsets) {
     const out = [];
     for (const off of offsets) {
-      const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off)
-                    .toISOString().slice(0,10);
-      const key = getUnifiedCacheKey(dep, arr, date);
-      if (!isDateAvailableForSegment(dep, arr, date)) {
-        if (debug) console.log(`Skipping API request: ${dep} → ${arr} on ${date} (not in flightDates)`);
+      const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off).toISOString().slice(0,10);
+      if (arr == null) {
+        if (debug) console.log(`Bad params to loadFlights(): ${dep}→${arr}`);
         continue;
       }
-      let segs = await getCachedResults(key);
-      if (!Array.isArray(segs)) { 
-        segs = (await checkRouteSegment(dep, arr, date)).map(unifyRawFlight);
-        await setCachedResults(key, segs);
-      }
+      let segs = await getCachedResults(`${dep}-${arr}-${date}`);
 
-      out.push(
-        ...segs.filter(f =>
-          getLocalDateFromOffset(f.calculatedDuration.departureDate, f.departureOffsetText) === date
-        )
-      );
+      if (!Array.isArray(segs)) {
+        try {
+          const result = await checkRouteSegment(dep, arr, date);
+          segs = Array.isArray(result) 
+            ? result.map(unifyRawFlight) 
+            : [];
+          await setCachedResults(`${dep}-${arr}-${date}`, segs);
+        } catch (error) {
+          console.error(`Error loading flights: ${error.message}`);
+          segs = [];
+        }
+      }
+      out.push(...segs);
     }
     return out;
   }
+
 
   /**
  * Build a combined “one‑stop” route object from two unified flights.
@@ -2152,9 +2410,26 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       allowChangeAirport &&
       connectionRadius > 0
     );
+    
     if (switchableForTwoStops) {
+      const results = [];
+        if (debug) console.log("Searching one-stop flights");
+        const oneStopResults = await processOneStopWithAirportChange(
+        origins,
+        destinations,
+        selectedDate,
+        minConnection,
+        maxConnection,
+        connectionRadius,
+        allowedOffsets,
+        shouldAppend,
+        true // skipProgress
+      );
+      results.push(...oneStopResults || []);
+      if (searchCancelled) return results;
+
       if (debug) console.log("Airport-change mode ON: delegating to processTwoStopsWithAirportChange");
-      const results = await processTwoStopsWithAirportChange(
+      const twoStopResults = await processTwoStopsWithAirportChange(
         origins,
         destinations,
         selectedDate,
@@ -2164,6 +2439,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         allowedOffsets,
         shouldAppend
       );
+      results.push(...twoStopResults || []);
       if (debug) console.log(`Found ${results.length} two-stop routes with airport change`);
       return results;
     }
@@ -2381,15 +2657,19 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
       try {
         let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
+        if (!Array.isArray(flights)) {
+          if (debug) console.warn(`No valid flights array for ${origin}→${arrivalCode}`, flights);
+          flights = [];
+        }
         flights = flights.map(unifyRawFlight);
         if (shouldAppend) flights.forEach(appendRouteToDisplay);
         validDirectFlights.push(...flights);
         await setCachedResults(cacheKey, flights);
       } catch (err) {
-        console.error(`Error checking ${origin}→${arrivalCode}:`, err);
-        showNotification(
-          `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
-        );
+          console.error(`Error checking ${origin}→${arrivalCode}:`, err);
+          showNotification(
+            `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
+          );
         return;
       }
     }
@@ -3122,184 +3402,207 @@ for (const outbound of outboundFlights) {
     // Add any additional sort options as needed.
   }
   
-//-------------------Rendeting results-----------------------------
-function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
-  const isReturn = label && label.toLowerCase().includes("inbound flight");
-  const isOutbound = label && label.toLowerCase().includes("outbound flight");
-  const isDirectFlight = !unifiedFlight.segments || unifiedFlight.segments.length === 1; 
-  const header = isOutbound && isDirectFlight || isDirectFlight ? "" :  `
-    <div class="flex flex-col">
-      <div class="flex justify-between items-center mb-0.5 space-x-2">
-        <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
-          ${unifiedFlight.formattedFlightDate}
+  //-------------------Rendeting results-----------------------------
+  function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
+    const isReturn = label && label.toLowerCase().includes("inbound flight");
+    const isOutbound = label && label.toLowerCase().includes("outbound flight");
+    const isDirectFlight = !unifiedFlight.segments || unifiedFlight.segments.length === 1; 
+    const header = isOutbound && isDirectFlight || isDirectFlight ? "" :  `
+      <div class="flex flex-col">
+        <div class="flex justify-between items-center mb-0.5 space-x-2">
+          <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
+            ${unifiedFlight.formattedFlightDate}
+          </div>
+          <div class="text-xs font-semibold text-gray-800 text-right px-2 py-1 mb-1 rounded">
+            Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
+          </div>
         </div>
-        <div class="text-xs font-semibold text-gray-800 text-right px-2 py-1 mb-1 rounded">
-          Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
-        </div>
-      </div>
-      <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1 my-2" : "border-[#20006D] border-2 mt-1 my-2"}">
-    </div>
-  `;
-  
-  const labelExtraHtml = (label || extraInfo) ? `
-    <div class="flex justify-between items-center mb-2">
-      ${ label ? `<div class="inline-block text-xs font-semibold ${isReturn ? "bg-[#20006D] text-white" : "bg-[#C90076] text-white"} px-2 py-1 rounded">${label}</div>` : "" }
-      ${ extraInfo ? `<div class="text-xs font-semibold ${isReturn ? "bg-white text-gray-800" : "bg-gray-200 text-gray-700"} px-2 py-1 rounded">${extraInfo}</div>` : "" }
-    </div>` : "";
-  
-  let bodyHtml = "";
-  if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
-    unifiedFlight.segments.forEach((segment, idx) => {
-      bodyHtml += createSegmentRow(segment);
-      bodyHtml += `
-      <div class="flex justify-between items-center mt-2">
-        <div class="text-left text-sm font-semibold text-gray-800">
-          ${segment.currency} ${segment.displayPrice}
-        </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
-          Continue to customize
-        </button>
+        <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1 my-2" : "border-[#20006D] border-2 mt-1 my-2"}">
       </div>
     `;
-      if (idx < unifiedFlight.segments.length - 1) {
-        const nextSegment = unifiedFlight.segments[idx + 1];
-        const connectionMs = nextSegment.calculatedDuration.departureDate - segment.calculatedDuration.arrivalDate;
-        const connectionMinutes = Math.max(0, Math.round(connectionMs / 60000));
-        const ch = Math.floor(connectionMinutes / 60);
-        const cm = connectionMinutes % 60;
-        let stopoverText = `Self-connection: ${ch}h ${cm}m`;
-
-        if (
-          unifiedFlight.airportChange &&
-          unifiedFlight.airportChange.from &&
-          unifiedFlight.airportChange.to &&
-          unifiedFlight.airportChange.distanceKm > 0 &&
-          unifiedFlight.airportChange.from !== unifiedFlight.airportChange.to
-        ) {
-          stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChange.from} ⇄ ${unifiedFlight.airportChange.to}, Distance: ${unifiedFlight.airportChange.distanceKm} km`;
-        }
-
+    
+    const labelExtraHtml = (label || extraInfo) ? `
+      <div class="flex justify-between items-center mb-2">
+        ${ label ? `<div class="inline-block text-xs font-semibold ${isReturn ? "bg-[#20006D] text-white" : "bg-[#C90076] text-white"} px-2 py-1 rounded">${label}</div>` : "" }
+        ${ extraInfo ? `<div class="text-xs font-semibold ${isReturn ? "bg-white text-gray-800" : "bg-gray-200 text-gray-700"} px-2 py-1 rounded">${extraInfo}</div>` : "" }
+      </div>` : "";
+    
+    let bodyHtml = "";
+    if (debug) console.log("Unified flight", unifiedFlight);
+    if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
+      unifiedFlight.segments.forEach((segment, idx) => {
+        bodyHtml += createSegmentRow(segment);
         bodyHtml += `
-          <div class="flex items-center my-2">
-            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
-            <div class="px-3 text-sm ${isReturn ? "text-black" : "text-gray-500"} text-center whitespace-nowrap">
-              ${stopoverText}
-            </div>
-            <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
+        <div class="flex justify-between items-center mt-2">
+          <div class="text-left text-sm font-semibold text-gray-800">
+            ${segment.currency} ${segment.displayPrice}
           </div>
-        `;
-      }
-    });
-  } else {
-    bodyHtml = createSegmentRow(unifiedFlight);
-    bodyHtml += `
-      <div class="flex justify-between items-center mt-0">
-        <div class="text-left text-sm font-semibold text-gray-800">
-          ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
+          <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
+            Continue to customize
+          </button>
         </div>
-        <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
-          Continue to customize
-        </button>
+      `;
+        if (idx < unifiedFlight.segments.length - 1) {
+          const nextSegment = unifiedFlight.segments[idx + 1];
+          const connectionMs = nextSegment.calculatedDuration.departureDate - segment.calculatedDuration.arrivalDate;
+          const connectionMinutes = Math.max(0, Math.round(connectionMs / 60000));
+          const ch = Math.floor(connectionMinutes / 60);
+          const cm = connectionMinutes % 60;
+          let stopoverText = `Self-connection: ${ch}h ${cm}m`;
+
+          if (
+            unifiedFlight.airportChange &&
+            unifiedFlight.airportChange.from &&
+            unifiedFlight.airportChange.to &&
+            unifiedFlight.airportChange.distanceKm > 0 &&
+            unifiedFlight.airportChange.from !== unifiedFlight.airportChange.to
+          ) {
+            stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChange.from} ⇄ ${unifiedFlight.airportChange.to}, Distance: ${unifiedFlight.airportChange.distanceKm} km`;
+          }
+
+          if (
+            idx === 0 &&
+            unifiedFlight.airportChangeOne &&
+            unifiedFlight.airportChangeOne.from &&
+            unifiedFlight.airportChangeOne.to &&
+            unifiedFlight.airportChangeOne.distanceKm > 1 &&
+            unifiedFlight.airportChangeOne.from !== unifiedFlight.airportChangeOne.to
+          ) {
+            stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChangeOne.from} ⇄ ${unifiedFlight.airportChangeOne.to}, Distance: ${unifiedFlight.airportChangeOne.distanceKm} km`;
+          }
+
+          if (
+            idx === 1 &&
+            unifiedFlight.airportChangeTwo &&
+            unifiedFlight.airportChangeTwo.from &&
+            unifiedFlight.airportChangeTwo.to &&
+            unifiedFlight.airportChangeTwo.distanceKm > 0 &&
+            unifiedFlight.airportChangeTwo.from !== unifiedFlight.airportChangeTwo.to
+          ) {
+            stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChangeTwo.from} ⇄ ${unifiedFlight.airportChangeTwo.to}, Distance: ${unifiedFlight.airportChangeTwo.distanceKm} km`;
+          }
+
+          bodyHtml += `
+            <div class="flex items-center my-2">
+              <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
+              <div class="px-3 text-sm ${isReturn ? "text-black" : "text-gray-500"} text-center whitespace-nowrap">
+                ${stopoverText}
+              </div>
+              <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
+            </div>
+          `;
+        }
+      });
+    } else {
+      bodyHtml = createSegmentRow(unifiedFlight);
+      bodyHtml += `
+        <div class="flex justify-between items-center mt-0">
+          <div class="text-left text-sm font-semibold text-gray-800">
+            ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
+          </div>
+          <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
+            Continue to customize
+          </button>
+        </div>
+      `;
+    }
+    
+    // Always include the header regardless of return flight type.
+    const containerClasses = isReturn ? "border rounded-lg p-2.5 mb-2 bg-gray-300" : "border rounded-lg p-2.5 mb-2";
+    return `
+      <div class="${containerClasses}">
+        ${labelExtraHtml}
+        ${header}
+        ${bodyHtml}
       </div>
     `;
   }
-  
-  // Always include the header regardless of return flight type.
-  const containerClasses = isReturn ? "border rounded-lg p-2.5 mb-2 bg-gray-300" : "border rounded-lg p-2.5 mb-2";
-  return `
-    <div class="${containerClasses}">
-      ${labelExtraHtml}
-      ${header}
-      ${bodyHtml}
-    </div>
-  `;
-}
 
-function createSegmentRow(segment) {
-  const segmentDate = segment.formattedFlightDate;
-  const flightCode = formatFlightCode(segment.flightCode);
-  const departureStationCode = segment.departureStationCode || segment.departureStation;
-  const arrivalStationCode = segment.arrivalStationCode || segment.arrivalStation;
-  const segmentHeader = `
-    <div class="flex justify-between items-center mb-0">
-      <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
-        ${segmentDate}
-      </div>
-      <div class="text-xs font-semibold bg-white border border-[#20006D] text-[#20006D] px-1 py-1 rounded">
-        ${flightCode}
-      </div>
-    </div>
-  `;
-  const gridRow = `
-    <div class="grid grid-cols-3 grid-rows-2 gap-0 items-center w-full py-1">
-      <div class="flex items-center gap-1 whitespace-normal">
-        <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
-          <span class="tooltip-trigger text-xl items-center flex -mb-1 cursor-pointer">${getCountryFlag(departureStationCode)}</span>
-          <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
-          ${getCountry(departureStationCode)}
-          </div>
-          <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
+  function createSegmentRow(segment) {
+    const segmentDate = segment.formattedFlightDate;
+    const flightCode = formatFlightCode(segment.flightCode);
+    const departureStationCode = segment.departureStationCode || segment.departureStation;
+    const arrivalStationCode = segment.arrivalStationCode || segment.arrivalStation;
+    const segmentHeader = `
+      <div class="flex justify-between items-center mb-0">
+        <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
+          ${segmentDate}
         </div>
-        <span class="text-base font-medium break-words max-w-[calc(100%-2rem)]">${segment.departureStationText}</span>
+        <div class="text-xs font-semibold bg-white border border-[#20006D] text-[#20006D] px-1 py-1 rounded">
+          ${flightCode}
+        </div>
       </div>
-      <span class="-mb-6">
-      <svg xmlns="http://www.w3.org/2000/svg"
-          class="block m-0 p-0"
-          width="100%" height="100%"
-          viewBox="0 40 300 40"
-          preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
-            <stop offset="0" stop-color="#20006D"/>
-            <stop offset="1" stop-color="#C90076"/>
-          </linearGradient>
-        </defs>
-        <g transform="translate(20,20)">
-          <line x1="0" y1="40" x2="260" y2="40" stroke="url(#lineGradient)" stroke-width="4" stroke-linecap="round"/>
-          <circle cx="0" cy="40" r="6" fill="#20006D"/>
-          <circle cx="260" cy="40" r="6" fill="#C90076"/>
-          <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D"/>
-        </g>
-      </svg>
-      </span>
-      <div class="flex justify-end items-center gap-1 mb-0 -mr-1">
-        <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">
-          ${segment.arrivalStationText}
+    `;
+    const gridRow = `
+      <div class="grid grid-cols-3 grid-rows-2 gap-0 items-center w-full py-1">
+        <div class="flex items-center gap-1 whitespace-normal">
+          <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
+            <span class="tooltip-trigger text-xl items-center flex -mb-1 cursor-pointer">${getCountryFlag(departureStationCode)}</span>
+            <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+            ${getCountry(departureStationCode)}
+            </div>
+            <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
+          </div>
+          <span class="text-base font-medium break-words max-w-[calc(100%-2rem)]">${segment.departureStationText}</span>
+        </div>
+        <span class="-mb-6">
+        <svg xmlns="http://www.w3.org/2000/svg"
+            class="block m-0 p-0"
+            width="100%" height="100%"
+            viewBox="0 40 300 40"
+            preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
+              <stop offset="0" stop-color="#20006D"/>
+              <stop offset="1" stop-color="#C90076"/>
+            </linearGradient>
+          </defs>
+          <g transform="translate(20,20)">
+            <line x1="0" y1="40" x2="260" y2="40" stroke="url(#lineGradient)" stroke-width="4" stroke-linecap="round"/>
+            <circle cx="0" cy="40" r="6" fill="#20006D"/>
+            <circle cx="260" cy="40" r="6" fill="#C90076"/>
+            <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D"/>
+          </g>
+        </svg>
         </span>
-
-        <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
-          <span class="text-xl items-center flex -mb-1 cursor-pointer tooltip-trigger">
-            ${getCountryFlag(arrivalStationCode)}
+        <div class="flex justify-end items-center gap-1 mb-0 -mr-1">
+          <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">
+            ${segment.arrivalStationText}
           </span>
 
-          <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
-            ${getCountry(arrivalStationCode)}
+          <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
+            <span class="text-xl items-center flex -mb-1 cursor-pointer tooltip-trigger">
+              ${getCountryFlag(arrivalStationCode)}
+            </span>
+
+            <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
+              ${getCountry(arrivalStationCode)}
+            </div>
+
+            <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">
+              ${arrivalStationCode}
+            </span>
           </div>
-
-          <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">
-            ${arrivalStationCode}
-          </span>
+        </div>
+      
+        <div class="flex items-center gap-1 mt-4">
+          <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
+          <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
+        </div>
+        <div class="flex flex-col items-center -mt-8">
+          <div class="text-sm font-medium">
+            ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-1 mt-4">
+          <span class="text-2xl font-bold whitespace-nowrap mb-0">${segment.displayArrival}</span>
+          <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.arrivalOffset)}</sup>
         </div>
       </div>
+    `;
     
-      <div class="flex items-center gap-1 mt-4">
-        <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
-        <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
-      </div>
-      <div class="flex flex-col items-center -mt-8">
-        <div class="text-sm font-medium">
-          ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
-        </div>
-      </div>
-      <div class="flex items-center justify-end gap-1 mt-4">
-        <span class="text-2xl font-bold whitespace-nowrap mb-0">${segment.displayArrival}</span>
-        <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.arrivalOffset)}</sup>
-      </div>
-    </div>
-  `;
-  
-  return `<div class=>${segmentHeader}${gridRow}</div>`;
-}
+    return `<div class=>${segmentHeader}${gridRow}</div>`;
+  }
 
   /**
    * Formats a flight code by inserting a space after the first two characters.
@@ -3308,76 +3611,76 @@ function createSegmentRow(segment) {
     if (!code || code.length < 3) return code;
     return code.slice(0, 2) + ' ' + code.slice(2);
   }
-// --------CSV export-------------
-function downloadResultsAsCSV() {
-  if (!globalResults || globalResults.length === 0) {
-    showNotification("No search results to export.");
-    return;
+  // --------CSV export-------------
+  function downloadResultsAsCSV() {
+    if (!globalResults || globalResults.length === 0) {
+      showNotification("No search results to export.");
+      return;
+    }
+
+    // Extracting origin, destination, and dates from the input fields
+    const origin = document.getElementById("origin-multi").querySelector("input")?.value.trim() || "unknown";
+    const destination = document.getElementById("destination-multi").querySelector("input")?.value.trim() || "unknown";
+    const departureDate = document.getElementById("departure-date").value.trim() || "no-date";
+    const returnDate = document.getElementById("return-date").value.trim() || "oneway";
+
+    // Formatting filename: origin-destination-departureDate-returnDate.csv
+    const fileName = `${origin}-${destination}-${departureDate}-${returnDate}.csv`
+      .replace(/\s+/g, "_")
+      .replace(/[^\w.-]/g, "");
+
+    const headers = [
+      "Departure Airport",       
+      "DCode",       
+      "Arrival Airport",         
+      "ACode",            
+      "Departure Date",          
+      "DTime",          
+      "DOffset",        
+      "Arrival Date",            
+      "ATime",            
+      "AOffset",          
+      "Duration",        
+      "Fare",                    
+      "Currency",                
+      "Carrier",                 
+      "Flight ID"                
+    ];
+
+    const csvRows = [headers.join("\t")];
+
+    // Iterate through globalResults and extract relevant flight data
+    globalResults.forEach(flight => {
+      const row = [
+        `"${flight.departureStationText}"`,
+        `"${flight.departureStationCode}"`,
+        `"${flight.arrivalStationText}"`,
+        `"${flight.arrivalStationCode}"`,
+        `"${flight.departureDate}"`,
+        `"${flight.displayDeparture}"`,
+        `"${flight.departureOffsetText}"`,
+        `"${flight.arrivalDate}"`,
+        `"${flight.displayArrival}"`,
+        `"${flight.arrivalOffsetText}"`,
+        `${Math.floor(flight.calculatedDuration.totalMinutes / 60)}:${String(flight.calculatedDuration.totalMinutes % 60).padStart(2, '0')}`, // hh:mm format
+        `="${parseFloat(flight.fare).toFixed(2)}"`, 
+        `"${flight.currency}"`,
+        `"${flight.carrierText}"`,
+        flight.flightId
+      ].join("\t");
+
+      csvRows.push(row);
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
-
-  // Extracting origin, destination, and dates from the input fields
-  const origin = document.getElementById("origin-multi").querySelector("input")?.value.trim() || "unknown";
-  const destination = document.getElementById("destination-multi").querySelector("input")?.value.trim() || "unknown";
-  const departureDate = document.getElementById("departure-date").value.trim() || "no-date";
-  const returnDate = document.getElementById("return-date").value.trim() || "oneway";
-
-  // Formatting filename: origin-destination-departureDate-returnDate.csv
-  const fileName = `${origin}-${destination}-${departureDate}-${returnDate}.csv`
-    .replace(/\s+/g, "_")
-    .replace(/[^\w.-]/g, "");
-
-  const headers = [
-    "Departure Airport",       
-    "DCode",       
-    "Arrival Airport",         
-    "ACode",            
-    "Departure Date",          
-    "DTime",          
-    "DOffset",        
-    "Arrival Date",            
-    "ATime",            
-    "AOffset",          
-    "Duration",        
-    "Fare",                    
-    "Currency",                
-    "Carrier",                 
-    "Flight ID"                
-  ];
-
-  const csvRows = [headers.join("\t")];
-
-  // Iterate through globalResults and extract relevant flight data
-  globalResults.forEach(flight => {
-    const row = [
-      `"${flight.departureStationText}"`,
-      `"${flight.departureStationCode}"`,
-      `"${flight.arrivalStationText}"`,
-      `"${flight.arrivalStationCode}"`,
-      `"${flight.departureDate}"`,
-      `"${flight.displayDeparture}"`,
-      `"${flight.departureOffsetText}"`,
-      `"${flight.arrivalDate}"`,
-      `"${flight.displayArrival}"`,
-      `"${flight.arrivalOffsetText}"`,
-      `${Math.floor(flight.calculatedDuration.totalMinutes / 60)}:${String(flight.calculatedDuration.totalMinutes % 60).padStart(2, '0')}`, // hh:mm format
-      `="${parseFloat(flight.fare).toFixed(2)}"`, 
-      `"${flight.currency}"`,
-      `"${flight.carrierText}"`,
-      flight.flightId
-    ].join("\t");
-
-    csvRows.push(row);
-  });
-
-  const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
-  const encodedUri = encodeURI(csvContent);
-  const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", fileName);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-}
 
   // Function to toggle CSV button visibility before search
   function updateCSVButtonVisibility() {
@@ -3401,7 +3704,7 @@ function downloadResultsAsCSV() {
     } else {
         csvButton.classList.add("hidden"); // Hide button if any flight has return flights or multiple segments
     }
-}
+  }
 
   
   // ---------------- Calendar ----------------
