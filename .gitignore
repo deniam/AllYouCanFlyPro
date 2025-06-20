@@ -3,3 +3,4 @@ Thumbs.db
 .vscode/*
 .continue/*
 makefile
+temp_backup/*
