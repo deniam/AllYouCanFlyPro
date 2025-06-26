@@ -29,7 +29,8 @@ export const MULTI_AIRPORT_CITIES = {
   "SAR": ["AHO", "OLB"],
   "BLS": ["VAR", "BOJ"],
   "CRE": ["HER", "CHQ"],
-  "GRI": ["CFU", "HER", "CHQ", "JMK", "JSI", "JTR", "RHO", "SKG", "ZTH"]
+  "GRI": ["CFU", "HER", "CHQ", "JMK", "JSI", "JTR", "RHO", "SKG", "ZTH"],
+  "CNA": ["SKD", "TAS", "FRU", "ALA", "HSA", "NQZ"]
 };
 
 // Country flag mapping.
@@ -112,7 +113,8 @@ export function cityNameLookup(cityCode) {
     "SAR": "Sardinia (Any)",
     "BLS": "Black Sea (Any)",
     "CRE": "Crete (Any)",
-    "GRI": "Greek Islands (Any)"
+    "GRI": "Greek Islands (Any)",
+    "CNA": "Central Asia (Stan Countries)"
   };
   return mapping[cityCode] || cityCode;
 }
