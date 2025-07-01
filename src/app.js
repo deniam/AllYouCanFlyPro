@@ -907,8 +907,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       localArrival = new Date(localArrival.getTime() + 24 * 3600000);
     }
     
-    const adjustedUtcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
-    const totalMinutes = Math.round((adjustedUtcArrival - utcDeparture) / 60000);
+    const totalMinutes = Math.round((utcArrival - utcDeparture) / 60000);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     
@@ -927,7 +926,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       arrivalStation: rawFlight.arrivalStation,
       arrivalStationText: rawFlight.arrivalStationText,
       departureDate: rawFlight.departureDate,
+      departureDateUtc: utcDeparture,
       arrivalDate: rawFlight.arrivalDate,
+      arrivalDateUtc: utcArrival,
       departureStationCode: rawFlight.departureStationCode,
       arrivalStationCode: rawFlight.arrivalStationCode,
       reference: rawFlight.reference,
@@ -2201,7 +2202,9 @@ async function refreshMultipassTab() {
             // build your aggregated object:
             const dep  = flight1.calculatedDuration.departureDate;
             const arr  = flight3.calculatedDuration.arrivalDate;
-            const totM = Math.round((arr - dep)/60000);
+            const depUtc = flight1.departureDateUtc;
+            const arrUtc = flight3.arrivalDateUtc;
+            const totalDuration = Math.round((arrUtc - depUtc)/60000); // need to consider offsets
             const locA = airportLookup[flight1.arrivalStation];
             const locB = airportLookup[flight2.departureStation];
             const locC = airportLookup[flight2.arrivalStation];
@@ -2230,9 +2233,9 @@ async function refreshMultipassTab() {
                 distanceKm: changeDistanceKmTwo
               },
               calculatedDuration: {
-                hours: Math.floor(totM/60),
-                minutes: totM % 60,
-                totalMinutes: totM,
+                hours: Math.floor(totalDuration/60),
+                minutes: totalDuration % 60,
+                totalMinutes: totalDuration,
                 departureDate: dep,
                 arrivalDate:   arr
               },
@@ -2293,8 +2296,10 @@ async function refreshMultipassTab() {
   function buildAggregatedRoute(f1, f2, gap) {
     // departure of the first leg, arrival of the second leg
     const depDate = f1.calculatedDuration.departureDate;
+    const depDateUtc = f1.departureDateUtc;
     const arrDate = f2.calculatedDuration.arrivalDate;
-    const totalMin = Math.round((arrDate - depDate) / 60000);
+    const arrDateUtc = f2.arrivalDateUtc;
+    const totalMin = Math.round((arrDateUtc - depDateUtc) / 60000);
 
     const codeB = f1.arrivalStation;
     const codeN = f2.departureStation;
@@ -2532,15 +2537,16 @@ async function refreshMultipassTab() {
       for (const chain of chains) {
         // Build your aggregated route object exactly as before…
         const firstDep = chain[0].calculatedDuration.departureDate;
+        const firstDepUtc = chain[0].departureDateUtc;
         const lastArr  = chain[chain.length-1].calculatedDuration.arrivalDate;
-        const totalMins = Math.round((lastArr - firstDep)/60000);
+        const lastArrUtc  = chain[chain.length-1].arrivalDateUtc;
+        const totalMins = Math.round((lastArrUtc - firstDepUtc)/60000);
         const totalConn = chain.slice(0,-1).reduce((sum, f, i) => {
           const next = chain[i+1];
-          return sum + Math.round((next.calculatedDuration.departureDate - f.calculatedDuration.arrivalDate)/60000);
+          return sum + Math.round((next.calculatedDuration.departureDateUtc - f.calculatedDuration.arrivalDateUtc)/60000);
         }, 0);
   
         const aggregatedRoute = {
-          // …copy over all fields…
           key: chain.map(f => f.key).join(" | "),
           fareSellKey: chain[0].fareSellKey,
           departure: chain[0].departure,
