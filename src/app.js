@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = false;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -2761,18 +2761,18 @@ async function refreshMultipassTab() {
       }
     }
   
-    let originInputs = getMultiAirportValues("origin-multi");
+    const originInputs = getMultiAirportValues("origin-multi");
     if (originInputs.length === 0) {
       showNotification("Please select a departure airport first.");
       searchButton.innerHTML = "SEARCH";
       searchActive = false;
       return;
     }
-    let origins = originInputs.map(s => resolveAirport(s)).flat();
+    const origins = originInputs.map(s => resolveAirport(s)).flat();
     if (debug) console.log("Resolved origins:", origins);
   
-    let destinationInputs = getMultiAirportValues("destination-multi");
-    let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
+    const destinationInputs = getMultiAirportValues("destination-multi");
+    const destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
       ? ["ANY"]
       : destinationInputs.map(s => resolveAirport(s)).flat();
     if (debug) console.log("Resolved destinations:", destinations);
@@ -2963,8 +2963,8 @@ async function refreshMultipassTab() {
         if (debug) console.log(`Deduplicated outbound flights: ${outboundFlights.length}`);
         let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
         let inboundQueries = {};
-        window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
-        const originalOrigins = resolveAirport(window.originalOriginInput);
+        const originInputs = window.originalOriginInput = getMultiAirportValues("origin-multi");
+        const originalOrigins = originInputs.map(s => resolveAirport(s)).flat();
         if (debug) console.log("Original origins for round-trip:", originalOrigins);
   
         // If the original origin value is "ANY", search for inbound flights so that:
@@ -3012,49 +3012,61 @@ async function refreshMultipassTab() {
             }
           }
         } else {
-// Standard logic when origin is explicitly defined – ensure skipProgress is true
-for (const outbound of outboundFlights) {
-  let outboundDestination = outbound.arrivalStation;
-  for (const rDate of returnDates) {
-    for (const origin of originalOrigins) {
-      const key = `${outboundDestination}-${origin}-${rDate}`;
-      if (!inboundQueries[key]) {
-        if (maxTransfers > 0) {
-          inboundQueries[key] = async () => {
-            const connectingResults = await searchConnectingRoutes(
-              [outbound.arrivalStation],
-              [origin],
-              rDate,
-              maxTransfers,
-              false,
-              true  // pass skipProgress = true
-            );
-            const directResults = await searchDirectRoutes(
-              [outbound.arrivalStation],
-              [origin],
-              rDate,
-              false,
-              false,
-              true  // pass skipProgress = true
-            );
-            return [...connectingResults, ...directResults];
-          };
-        } else {
-          inboundQueries[key] = async () => {
-            return await searchDirectRoutes(
-              [outbound.arrivalStation],
-              [origin],
-              rDate,
-              false,
-              false,
-              true  // pass skipProgress = true
-            );
-          };
-        }
-      }
-    }
-  }
-}
+          // Standard logic when origin is explicitly defined
+          for (const outbound of outboundFlights) {
+            let outboundDestination = outbound.arrivalStation 
+            ?? (outbound.segments.length > 0 
+                ? outbound.segments[outbound.segments.length - 1].arrivalStation 
+                : undefined);
+            console.log("Outbound flight arrival station:", outboundDestination);
+            if (!outboundDestination) {
+                console.warn("Skipping outbound flight without arrival station:", outbound);
+                continue;
+            }
+            for (const rDate of returnDates) {
+              for (const origin of origins) {
+                const key = `${outboundDestination}-${origin}-${rDate}`;
+                console.log(`Procesing inbound query key: ${key}`);
+                console.log(`outboundDestination: `, [outboundDestination]);
+                console.log(`origin: `, [origin]);
+                console.log(`originalOrigins: `, origins);
+                if (!inboundQueries[key]) {
+                  if (maxTransfers > 0) {
+                    inboundQueries[key] = async () => {
+                      const connectingResults = await searchConnectingRoutes(
+                        [outboundDestination],
+                        [origin],
+                        rDate,
+                        maxTransfers,
+                        false,
+                        true  // pass skipProgress = true
+                      );
+                      const directResults = await searchDirectRoutes(
+                        [outbound.arrivalStation],
+                        [origin],
+                        rDate,
+                        false,
+                        false,
+                        true  // pass skipProgress = true
+                      );
+                      return [...connectingResults, ...directResults];
+                    };
+                  } else {
+                    inboundQueries[key] = async () => {
+                      return await searchDirectRoutes(
+                        [outbound.arrivalStation],
+                        [origin],
+                        rDate,
+                        false,
+                        false,
+                        true  // pass skipProgress = true
+                      );
+                    };
+                  }
+                }
+              }
+            }
+          }
         }
         // Process each inbound query and update overall progress accordingly.
         const inboundResults = {};
@@ -3083,6 +3095,7 @@ for (const outbound of outboundFlights) {
             flights = [];
           }
           inboundResults[key] = flights;
+          if (debug) console.log(`Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`);
           updateProgress(
             inboundProcessed,
             totalInbound,
@@ -3128,6 +3141,7 @@ for (const outbound of outboundFlights) {
                 let inboundForKey = inboundResults[key] || [];
                 const filteredInbound = inboundForKey.filter(inbound => {
                   const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
+                  if (debug) console.log(`Connection gap for inbound flight ${inbound.flightCode} to ${outbound.flightCode} is ${connectionGap} minutes`);
                   const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
                   if (!validGap) {
                     if (debug) console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
@@ -3794,7 +3808,8 @@ for (const outbound of outboundFlights) {
       prevBtn.disabled = false;
       prevBtn.classList.remove("opacity-50", "cursor-not-allowed");
     }
-  
+    
+
     // Handle Prev/Next navigation (stopPropagation to prevent closing)
     prevBtn.addEventListener("click", (event) => {
       event.stopPropagation();
