@@ -1156,7 +1156,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           if (text.trim().startsWith("<!DOCTYPE")) {
             if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
             localStorage.removeItem("wizz_page_data");
-            await getDynamicUrl();
+            await refreshMultipassTab();
             continue;
             // showNotification("Authorization required: please log in to your account to search for routes.");
             // throw new Error("Authorization required: expected JSON but received HTML");
@@ -1451,6 +1451,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         return data.dynamicUrl;
       }
     }
+    const isLikelyMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, async (tabs) => {
         let targetTab;
@@ -1477,6 +1479,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
               if (debug) console.log("After refresh, found multipass tab:", targetTab);
             }
           });
+        }
+
+        if (!targetTab && isLikelyMobile) {
+          // Mobile-specific handling
+          localStorage.removeItem('wizz_page_data');
+          showNotification("⚠️ Error. Refresh Wizz Air Multipass tab manually, if it doesn't work - restart the browser");
+          reject(new Error("Mobile manual login required"));
+          return;
         }
 
         if (!targetTab) {
@@ -1525,31 +1535,46 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     });
   }
 
-  async function refreshMultipassTab() {
+async function refreshMultipassTab() {
+  const MULTIPASS_URL = "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
+  
+  // 1. Try Chrome API first
+  if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
         if (!tabs || tabs.length === 0) {
-          // No multipass tab exists, so create a new one.
-          chrome.tabs.create(
-            { url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" },
-            (newTab) => {
-              waitForTabToComplete(newTab.id).then(resolve).catch(reject);
-            }
-          );
+          chrome.tabs.create({ url: MULTIPASS_URL }, newTab => {
+            waitForTabToComplete(newTab.id).then(resolve).catch(reject);
+          });
         } else {
-          // Look for a non-active tab first.
-          let tabToReload = tabs.find(tab => !tab.active);
-          if (!tabToReload) {
-            // If all tabs are active, pick the first one.
-            tabToReload = tabs[0];
-          }
+          const tabToReload = tabs.find(tab => !tab.active) || tabs[0];
           chrome.tabs.reload(tabToReload.id, {}, () => {
             waitForTabToComplete(tabToReload.id).then(resolve).catch(reject);
           });
         }
       });
     });
+  } else {
+    localStorage.removeItem('wizz_page_data');
+    
+    // Try to open in new tab if possible
+    if (typeof window !== 'undefined' && window.open) {
+      const newTab = window.open(MULTIPASS_URL, '_blank');
+      
+      if (newTab) {
+        return new Promise(resolve => {
+          newTab.addEventListener('load', () => {
+            setTimeout(resolve, 2000); // Extra buffer time
+          });
+        });
+      }
+    }
+    
+    // Final fallback - manual refresh instruction
+    showNotification("⚠️ Please open Wizz Air Multipass in a new tab and log in");
+    return Promise.resolve();
   }
+}
   
 
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
