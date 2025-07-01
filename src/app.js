@@ -1156,7 +1156,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           if (text.trim().startsWith("<!DOCTYPE")) {
             if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
             localStorage.removeItem("wizz_page_data");
-            await refreshMultipassTab();
+            await getDynamicUrl();
             continue;
             // showNotification("Authorization required: please log in to your account to search for routes.");
             // throw new Error("Authorization required: expected JSON but received HTML");
@@ -1175,7 +1175,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           if (searchCancelled) {
             if (debug) console.log("Search was cancelled. Stopping execution in checkRouteSegment.");
             resetCountdownTimers();
-            return;
+            return [];
           }
       
           let waitTime = 0;
@@ -1688,7 +1688,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
           flights = [];
-          return [];
+          return;
         }
       }
       // Convert flight dates if they are not already Date objects.
@@ -2659,7 +2659,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
         if (!Array.isArray(flights)) {
           if (debug) console.warn(`No valid flights array for ${origin}→${arrivalCode}`, flights);
-          flights = [];
         }
         flights = flights.map(unifyRawFlight);
         if (shouldAppend) flights.forEach(appendRouteToDisplay);
@@ -2668,7 +2667,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       } catch (err) {
           console.error(`Error checking ${origin}→${arrivalCode}:`, err);
           showNotification(
-            `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
+            `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}
+            Please reload the page and try again.`
           );
         return;
       }

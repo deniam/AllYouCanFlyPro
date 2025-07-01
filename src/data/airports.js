@@ -1,6 +1,6 @@
 import Dexie from '../libs/dexie.mjs';
 
-// Initialize Dexie database (ensure the version and store definitions match your app)
+// Initialize Dexie database
 const db = new Dexie("FlightSearchCache");
 db.version(1).stores({
   cache: 'key, timestamp'
