@@ -907,8 +907,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       localArrival = new Date(localArrival.getTime() + 24 * 3600000);
     }
     
-    const adjustedUtcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
-    const totalMinutes = Math.round((adjustedUtcArrival - utcDeparture) / 60000);
+    const totalMinutes = Math.round((utcArrival - utcDeparture) / 60000);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     
@@ -927,7 +926,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       arrivalStation: rawFlight.arrivalStation,
       arrivalStationText: rawFlight.arrivalStationText,
       departureDate: rawFlight.departureDate,
+      departureDateUtc: utcDeparture,
       arrivalDate: rawFlight.arrivalDate,
+      arrivalDateUtc: utcArrival,
       departureStationCode: rawFlight.departureStationCode,
       arrivalStationCode: rawFlight.arrivalStationCode,
       reference: rawFlight.reference,
@@ -1451,6 +1452,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         return data.dynamicUrl;
       }
     }
+    const isLikelyMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, async (tabs) => {
         let targetTab;
@@ -1477,6 +1480,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
               if (debug) console.log("After refresh, found multipass tab:", targetTab);
             }
           });
+        }
+
+        if (!targetTab && isLikelyMobile) {
+          // Mobile-specific handling
+          localStorage.removeItem('wizz_page_data');
+          showNotification("⚠️ Error. Refresh Wizz Air Multipass tab manually, if it doesn't work - restart the browser");
+          reject(new Error("Mobile manual login required"));
+          return;
         }
 
         if (!targetTab) {
@@ -1525,31 +1536,46 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     });
   }
 
-  async function refreshMultipassTab() {
+async function refreshMultipassTab() {
+  const MULTIPASS_URL = "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
+  
+  // 1. Try Chrome API first
+  if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
     return new Promise((resolve, reject) => {
       chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
         if (!tabs || tabs.length === 0) {
-          // No multipass tab exists, so create a new one.
-          chrome.tabs.create(
-            { url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" },
-            (newTab) => {
-              waitForTabToComplete(newTab.id).then(resolve).catch(reject);
-            }
-          );
+          chrome.tabs.create({ url: MULTIPASS_URL }, newTab => {
+            waitForTabToComplete(newTab.id).then(resolve).catch(reject);
+          });
         } else {
-          // Look for a non-active tab first.
-          let tabToReload = tabs.find(tab => !tab.active);
-          if (!tabToReload) {
-            // If all tabs are active, pick the first one.
-            tabToReload = tabs[0];
-          }
+          const tabToReload = tabs.find(tab => !tab.active) || tabs[0];
           chrome.tabs.reload(tabToReload.id, {}, () => {
             waitForTabToComplete(tabToReload.id).then(resolve).catch(reject);
           });
         }
       });
     });
+  } else {
+    localStorage.removeItem('wizz_page_data');
+    
+    // Try to open in new tab if possible
+    if (typeof window !== 'undefined' && window.open) {
+      const newTab = window.open(MULTIPASS_URL, '_blank');
+      
+      if (newTab) {
+        return new Promise(resolve => {
+          newTab.addEventListener('load', () => {
+            setTimeout(resolve, 2000); // Extra buffer time
+          });
+        });
+      }
+    }
+    
+    // Final fallback - manual refresh instruction
+    showNotification("⚠️ Please open Wizz Air Multipass in a new tab and log in");
+    return Promise.resolve();
   }
+}
   
 
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
@@ -1688,7 +1714,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
           flights = [];
-          return [];
+          return;
         }
       }
       // Convert flight dates if they are not already Date objects.
@@ -1906,7 +1932,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       updateProgress(
         routeCounter,
         totalRoutes,
-        B !== N ? `Checking route: ${origin} → ${B} | ${N} → ${destination}` : `Checking route: ${origin} → ${B} → ${destination}`
+        B !== N ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}` : `Checking route: ${origin} → ${B} → ${destination}`
       );
 
       // first leg: exact selectedDate
@@ -2137,9 +2163,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       processedCandidates++;
       const progressMessage = 
         A === X && B === Y ? `Checking route: ${O} → ${A} → ${B} → ${D}` :
-        A !== X && B === Y ? `Checking route: ${O} → ${A} | ${X} → ${B} → ${D}` :
-        A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} | ${B} → ${D}` :
-        `Checking route: ${O} → ${A} | ${X} → ${Y} | ${B} → ${D}`;
+        A !== X && B === Y ? `Checking route: ${O} → ${A} ⇄ ${X} → ${B} → ${D}` :
+        A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} ⇄ ${B} → ${D}` :
+        `Checking route: ${O} → ${A} ⇄ ${X} → ${Y} ⇄ ${B} → ${D}`;
         updateProgress(processedCandidates, totalCandidates, progressMessage);
 
       // leg 1: real flight O→A
@@ -2176,7 +2202,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             // build your aggregated object:
             const dep  = flight1.calculatedDuration.departureDate;
             const arr  = flight3.calculatedDuration.arrivalDate;
-            const totM = Math.round((arr - dep)/60000);
+            const depUtc = flight1.departureDateUtc;
+            const arrUtc = flight3.arrivalDateUtc;
+            const totalDuration = Math.round((arrUtc - depUtc)/60000); // need to consider offsets
             const locA = airportLookup[flight1.arrivalStation];
             const locB = airportLookup[flight2.departureStation];
             const locC = airportLookup[flight2.arrivalStation];
@@ -2205,9 +2233,9 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
                 distanceKm: changeDistanceKmTwo
               },
               calculatedDuration: {
-                hours: Math.floor(totM/60),
-                minutes: totM % 60,
-                totalMinutes: totM,
+                hours: Math.floor(totalDuration/60),
+                minutes: totalDuration % 60,
+                totalMinutes: totalDuration,
                 departureDate: dep,
                 arrivalDate:   arr
               },
@@ -2268,8 +2296,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   function buildAggregatedRoute(f1, f2, gap) {
     // departure of the first leg, arrival of the second leg
     const depDate = f1.calculatedDuration.departureDate;
+    const depDateUtc = f1.departureDateUtc;
     const arrDate = f2.calculatedDuration.arrivalDate;
-    const totalMin = Math.round((arrDate - depDate) / 60000);
+    const arrDateUtc = f2.arrivalDateUtc;
+    const totalMin = Math.round((arrDateUtc - depDateUtc) / 60000);
 
     const codeB = f1.arrivalStation;
     const codeN = f2.departureStation;
@@ -2507,15 +2537,16 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       for (const chain of chains) {
         // Build your aggregated route object exactly as before…
         const firstDep = chain[0].calculatedDuration.departureDate;
+        const firstDepUtc = chain[0].departureDateUtc;
         const lastArr  = chain[chain.length-1].calculatedDuration.arrivalDate;
-        const totalMins = Math.round((lastArr - firstDep)/60000);
+        const lastArrUtc  = chain[chain.length-1].arrivalDateUtc;
+        const totalMins = Math.round((lastArrUtc - firstDepUtc)/60000);
         const totalConn = chain.slice(0,-1).reduce((sum, f, i) => {
           const next = chain[i+1];
-          return sum + Math.round((next.calculatedDuration.departureDate - f.calculatedDuration.arrivalDate)/60000);
+          return sum + Math.round((next.calculatedDuration.departureDateUtc - f.calculatedDuration.arrivalDateUtc)/60000);
         }, 0);
   
         const aggregatedRoute = {
-          // …copy over all fields…
           key: chain.map(f => f.key).join(" | "),
           fareSellKey: chain[0].fareSellKey,
           departure: chain[0].departure,
@@ -2659,7 +2690,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
         if (!Array.isArray(flights)) {
           if (debug) console.warn(`No valid flights array for ${origin}→${arrivalCode}`, flights);
-          flights = [];
         }
         flights = flights.map(unifyRawFlight);
         if (shouldAppend) flights.forEach(appendRouteToDisplay);
@@ -2668,7 +2698,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       } catch (err) {
           console.error(`Error checking ${origin}→${arrivalCode}:`, err);
           showNotification(
-            `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}`
+            `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}
+            Please reload the page and try again.`
           );
         return;
       }
@@ -2730,18 +2761,18 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       }
     }
   
-    let originInputs = getMultiAirportValues("origin-multi");
+    const originInputs = getMultiAirportValues("origin-multi");
     if (originInputs.length === 0) {
       showNotification("Please select a departure airport first.");
       searchButton.innerHTML = "SEARCH";
       searchActive = false;
       return;
     }
-    let origins = originInputs.map(s => resolveAirport(s)).flat();
+    const origins = originInputs.map(s => resolveAirport(s)).flat();
     if (debug) console.log("Resolved origins:", origins);
   
-    let destinationInputs = getMultiAirportValues("destination-multi");
-    let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
+    const destinationInputs = getMultiAirportValues("destination-multi");
+    const destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
       ? ["ANY"]
       : destinationInputs.map(s => resolveAirport(s)).flat();
     if (debug) console.log("Resolved destinations:", destinations);
@@ -2932,8 +2963,8 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         if (debug) console.log(`Deduplicated outbound flights: ${outboundFlights.length}`);
         let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
         let inboundQueries = {};
-        window.originalOriginInput = getMultiAirportValues("origin-multi").join(", ");
-        const originalOrigins = resolveAirport(window.originalOriginInput);
+        const originInputs = window.originalOriginInput = getMultiAirportValues("origin-multi");
+        const originalOrigins = originInputs.map(s => resolveAirport(s)).flat();
         if (debug) console.log("Original origins for round-trip:", originalOrigins);
   
         // If the original origin value is "ANY", search for inbound flights so that:
@@ -2981,49 +3012,61 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             }
           }
         } else {
-// Standard logic when origin is explicitly defined – ensure skipProgress is true
-for (const outbound of outboundFlights) {
-  let outboundDestination = outbound.arrivalStation;
-  for (const rDate of returnDates) {
-    for (const origin of originalOrigins) {
-      const key = `${outboundDestination}-${origin}-${rDate}`;
-      if (!inboundQueries[key]) {
-        if (maxTransfers > 0) {
-          inboundQueries[key] = async () => {
-            const connectingResults = await searchConnectingRoutes(
-              [outbound.arrivalStation],
-              [origin],
-              rDate,
-              maxTransfers,
-              false,
-              true  // pass skipProgress = true
-            );
-            const directResults = await searchDirectRoutes(
-              [outbound.arrivalStation],
-              [origin],
-              rDate,
-              false,
-              false,
-              true  // pass skipProgress = true
-            );
-            return [...connectingResults, ...directResults];
-          };
-        } else {
-          inboundQueries[key] = async () => {
-            return await searchDirectRoutes(
-              [outbound.arrivalStation],
-              [origin],
-              rDate,
-              false,
-              false,
-              true  // pass skipProgress = true
-            );
-          };
-        }
-      }
-    }
-  }
-}
+          // Standard logic when origin is explicitly defined
+          for (const outbound of outboundFlights) {
+            let outboundDestination = outbound.arrivalStation 
+            ?? (outbound.segments.length > 0 
+                ? outbound.segments[outbound.segments.length - 1].arrivalStation 
+                : undefined);
+            console.log("Outbound flight arrival station:", outboundDestination);
+            if (!outboundDestination) {
+                console.warn("Skipping outbound flight without arrival station:", outbound);
+                continue;
+            }
+            for (const rDate of returnDates) {
+              for (const origin of origins) {
+                const key = `${outboundDestination}-${origin}-${rDate}`;
+                console.log(`Procesing inbound query key: ${key}`);
+                console.log(`outboundDestination: `, [outboundDestination]);
+                console.log(`origin: `, [origin]);
+                console.log(`originalOrigins: `, origins);
+                if (!inboundQueries[key]) {
+                  if (maxTransfers > 0) {
+                    inboundQueries[key] = async () => {
+                      const connectingResults = await searchConnectingRoutes(
+                        [outboundDestination],
+                        [origin],
+                        rDate,
+                        maxTransfers,
+                        false,
+                        true  // pass skipProgress = true
+                      );
+                      const directResults = await searchDirectRoutes(
+                        [outbound.arrivalStation],
+                        [origin],
+                        rDate,
+                        false,
+                        false,
+                        true  // pass skipProgress = true
+                      );
+                      return [...connectingResults, ...directResults];
+                    };
+                  } else {
+                    inboundQueries[key] = async () => {
+                      return await searchDirectRoutes(
+                        [outbound.arrivalStation],
+                        [origin],
+                        rDate,
+                        false,
+                        false,
+                        true  // pass skipProgress = true
+                      );
+                    };
+                  }
+                }
+              }
+            }
+          }
         }
         // Process each inbound query and update overall progress accordingly.
         const inboundResults = {};
@@ -3052,6 +3095,7 @@ for (const outbound of outboundFlights) {
             flights = [];
           }
           inboundResults[key] = flights;
+          if (debug) console.log(`Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`);
           updateProgress(
             inboundProcessed,
             totalInbound,
@@ -3097,6 +3141,7 @@ for (const outbound of outboundFlights) {
                 let inboundForKey = inboundResults[key] || [];
                 const filteredInbound = inboundForKey.filter(inbound => {
                   const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
+                  if (debug) console.log(`Connection gap for inbound flight ${inbound.flightCode} to ${outbound.flightCode} is ${connectionGap} minutes`);
                   const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
                   if (!validGap) {
                     if (debug) console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
@@ -3763,7 +3808,8 @@ for (const outbound of outboundFlights) {
       prevBtn.disabled = false;
       prevBtn.classList.remove("opacity-50", "cursor-not-allowed");
     }
-  
+    
+
     // Handle Prev/Next navigation (stopPropagation to prevent closing)
     prevBtn.addEventListener("click", (event) => {
       event.stopPropagation();
