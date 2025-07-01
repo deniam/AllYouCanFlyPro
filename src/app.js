@@ -1932,7 +1932,7 @@ async function refreshMultipassTab() {
       updateProgress(
         routeCounter,
         totalRoutes,
-        B !== N ? `Checking route: ${origin} → ${B} | ${N} → ${destination}` : `Checking route: ${origin} → ${B} → ${destination}`
+        B !== N ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}` : `Checking route: ${origin} → ${B} → ${destination}`
       );
 
       // first leg: exact selectedDate
@@ -2163,9 +2163,9 @@ async function refreshMultipassTab() {
       processedCandidates++;
       const progressMessage = 
         A === X && B === Y ? `Checking route: ${O} → ${A} → ${B} → ${D}` :
-        A !== X && B === Y ? `Checking route: ${O} → ${A} | ${X} → ${B} → ${D}` :
-        A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} | ${B} → ${D}` :
-        `Checking route: ${O} → ${A} | ${X} → ${Y} | ${B} → ${D}`;
+        A !== X && B === Y ? `Checking route: ${O} → ${A} ⇄ ${X} → ${B} → ${D}` :
+        A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} ⇄ ${B} → ${D}` :
+        `Checking route: ${O} → ${A} ⇄ ${X} → ${Y} ⇄ ${B} → ${D}`;
         updateProgress(processedCandidates, totalCandidates, progressMessage);
 
       // leg 1: real flight O→A
