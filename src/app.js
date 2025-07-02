@@ -1329,7 +1329,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
    * Renders round-trip results.
    */
   function displayRoundTripResultsAll(outbounds) {
-    sortResultsArray(outbounds, currentSortOption);
     resultsAndSortContainer.classList.remove("hidden");
     totalResultsEl.textContent = `Total results: ${outbounds.length}`;
 
@@ -3167,6 +3166,7 @@ async function refreshMultipassTab() {
         }
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
+        globalDefaultResults = [...validRoundTripFlights];
         suppressDisplay = false;
         displayRoundTripResultsAll(validRoundTripFlights);
         if (debug) console.log(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
