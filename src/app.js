@@ -3,7 +3,7 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = false;
+  let debug = true;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -2761,18 +2761,18 @@ async function refreshMultipassTab() {
       }
     }
   
-    const originInputs = getMultiAirportValues("origin-multi");
+    let originInputs = getMultiAirportValues("origin-multi");
     if (originInputs.length === 0) {
       showNotification("Please select a departure airport first.");
       searchButton.innerHTML = "SEARCH";
       searchActive = false;
       return;
     }
-    const origins = originInputs.map(s => resolveAirport(s)).flat();
+    let origins = originInputs.map(s => resolveAirport(s)).flat();
     if (debug) console.log("Resolved origins:", origins);
   
-    const destinationInputs = getMultiAirportValues("destination-multi");
-    const destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
+    let destinationInputs = getMultiAirportValues("destination-multi");
+    let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
       ? ["ANY"]
       : destinationInputs.map(s => resolveAirport(s)).flat();
     if (debug) console.log("Resolved destinations:", destinations);
