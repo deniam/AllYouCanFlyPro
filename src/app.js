@@ -3166,7 +3166,6 @@ async function refreshMultipassTab() {
         }
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
-        globalDefaultResults = [...validRoundTripFlights];
         suppressDisplay = false;
         displayRoundTripResultsAll(validRoundTripFlights);
         if (debug) console.log(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
