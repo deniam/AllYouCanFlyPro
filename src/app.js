@@ -1819,14 +1819,21 @@ async function refreshMultipassTab() {
           const cacheKey = getUnifiedCacheKey(origin, destination, selectedDate);
           let flights = await getCachedResults(cacheKey);
           if (!flights) {
-            flights = await checkRouteSegment(origin, destination, selectedDate);
-            await setCachedResults(cacheKey, flights);
+            try {
+              flights = await checkRouteSegment(origin, destination, selectedDate);
+              flights = flights.map(unifyRawFlight);
+              if (debug) console.log(`   Fetched ${flights.length} flights from server for ${origin} -> ${destination} on ${selectedDate}`);
+              await setCachedResults(cacheKey, flights);
+              } catch (error) {
+                console.error(`Error loading flights: ${error.message}`);
+                flights = [];
+              }
           }
           flights = flights.map(unifyRawFlight);
           for (const flight of flights) {
             if (shouldAppend) appendRouteToDisplay(flight);
             results.push(flight);
-
+            
             directCounter++;
             updateProgress(directCounter, origins.length * destinations.length, `Direct routes`);
           }
@@ -1941,7 +1948,8 @@ async function refreshMultipassTab() {
       // second leg: allow day-offsets per user settings
       const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
       if (!flights2.length) continue;
-
+        if (debug) console.log(`Found ${flights1.length} flights for ${origin} → ${B} and ${flights2.length} flights for ${N} → ${destination}
+        (${flights2.map(f => f.calculatedDuration.departureDate.toISOString()).join(", ")})`);
       // combine and append to results or UI
       combineAndAppend(
         flights1,
@@ -2349,6 +2357,7 @@ async function refreshMultipassTab() {
     for (const f1 of f1List) {
       for (const f2 of f2List) {
         const gap = Math.round((f2.calculatedDuration.departureDate - f1.calculatedDuration.arrivalDate)/60000);
+        if (debug) console.log(`Gap between ${f1.key} and ${f2.key}: ${gap} minutes`);
         if (gap < minC || gap > maxC) continue;
         const agg = buildAggregatedRoute(f1, f2, gap);
         if (!agg) continue;
@@ -3017,7 +3026,7 @@ async function refreshMultipassTab() {
             ?? (outbound.segments.length > 0 
                 ? outbound.segments[outbound.segments.length - 1].arrivalStation 
                 : undefined);
-            console.log("Outbound flight arrival station:", outboundDestination);
+            if (debug) console.log("Outbound flight arrival station:", outboundDestination);
             if (!outboundDestination) {
                 console.warn("Skipping outbound flight without arrival station:", outbound);
                 continue;
@@ -3025,10 +3034,6 @@ async function refreshMultipassTab() {
             for (const rDate of returnDates) {
               for (const origin of origins) {
                 const key = `${outboundDestination}-${origin}-${rDate}`;
-                console.log(`Procesing inbound query key: ${key}`);
-                console.log(`outboundDestination: `, [outboundDestination]);
-                console.log(`origin: `, [origin]);
-                console.log(`originalOrigins: `, origins);
                 if (!inboundQueries[key]) {
                   if (maxTransfers > 0) {
                     inboundQueries[key] = async () => {
