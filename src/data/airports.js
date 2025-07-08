@@ -29,7 +29,7 @@ export const MULTI_AIRPORT_CITIES = {
   "SAR": ["AHO", "OLB"],
   "BLS": ["VAR", "BOJ"],
   "CRE": ["HER", "CHQ"],
-  "GRI": ["CFU", "HER", "CHQ", "JMK", "JSI", "JTR", "RHO", "SKG", "ZTH"],
+  "GRI": ["CFU", "HER", "CHQ", "JMK", "JSI", "JTR", "RHO", "ZTH"],
   "CNA": ["SKD", "TAS", "FRU", "ALA", "HSA", "NQZ"]
 };
 

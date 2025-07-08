@@ -3,7 +3,16 @@ import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = true;
+  let debug = localStorage.getItem('debugMode') === 'true' || false;
+  let debugLog = [];
+  let originalConsoleWarn = console.warn;
+    if (debug) {
+      console.warn = function(...args) {
+        debugLogger('WARN:', ...args);
+        originalConsoleWarn.apply(console, args);
+      };
+    }
+  const MAX_LOG_ENTRIES = 1000;
   let activeTimeout = null;
   let timeoutInterval = null;
   let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
@@ -46,7 +55,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   localStorage.setItem('pauseDurationSeconds', pauseDur);
   localStorage.setItem('cacheLifetimeHours', cacheLife);
   if (debug) {
-    if (debug) console.log('[DEBUG] Settings saved individually:', {
+    console.log('[DEBUG] Settings saved individually:', {
       minConnectionTime: minConnection,
       maxConnectionTime: maxConnection,
       preferredAirport,
@@ -258,6 +267,29 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
   });
 
+  // ----------------------- Debugging --------------------------------
+  function debugLogger() {
+      if (!debug) return;
+      
+      console.log.apply(console, arguments);
+      
+      const message = Array.from(arguments).map(arg => {
+          if (typeof arg === 'object' && arg !== null) {
+              try {
+                  return JSON.stringify(arg, null, 2);
+              } catch {
+                  return String(arg);
+              }
+          }
+          return String(arg);
+      }).join(' ');
+
+      debugLog.push(`${new Date().toISOString()}: ${message}`);
+      
+      if (debugLog.length > MAX_LOG_ENTRIES) {
+          debugLog.shift();
+      }
+  }
 
   // ----------------------- UI Helper Functions -----------------------
   function updateProgress(current, total, message) {
@@ -321,7 +353,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     }
   
     if (requestsThisWindow >= MAX_REQUESTS_IN_ROW) {
-      if (debug) console.log(`Reached ${MAX_REQUESTS_IN_ROW} consecutive requests; pausing for ${PAUSE_DURATION_MS}ms`);
+      debugLogger(`Reached ${MAX_REQUESTS_IN_ROW} consecutive requests; pausing for ${PAUSE_DURATION_MS}ms`);
       showTimeoutCountdown(PAUSE_DURATION_MS);
       await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION_MS));
       requestsThisWindow = 0;
@@ -339,19 +371,16 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         }
       }, delay);
     });
-    if (debug) console.log(`Current request delay: ${delay} ms`);
     if (searchCancelled) {
-      if (debug) console.log("Search was cancelled during throttleRequest. Stopping execution.");
       return;
     }
   
     const endTime = performance.now();
     const actualDelay = endTime - startTime;
-    if (debug) console.log(`Actual request delay: ${actualDelay.toFixed(2)} ms (Expected: ${delay} ms)`);
+    // debugLogger(`Actual request delay: ${actualDelay.toFixed(2)} ms (Expected: ${delay} ms)`);
   
     throttleResetTimer = setTimeout(() => {
       requestsThisWindow = 0;
-      if (debug) console.log("Throttle counter reset due to 10s inactivity.");
     }, 10000);
   }
 
@@ -363,7 +392,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     localStorage.setItem("maxRequestsInRow", MAX_REQUESTS_IN_ROW);
     localStorage.setItem("requestsFrequencyMs", REQUESTS_FREQUENCY_MS);
     localStorage.setItem("pauseDurationSeconds", pauseDur);
-    if (debug) console.log(`Throttle settings updated: Max Requests = ${MAX_REQUESTS_IN_ROW}, Requests Frequency = ${REQUESTS_FREQUENCY_MS}ms, Pause Duration = ${PAUSE_DURATION_MS / 1000}s`);
+    debugLogger(`Throttle settings updated: Max Requests = ${MAX_REQUESTS_IN_ROW}, Requests Frequency = ${REQUESTS_FREQUENCY_MS}ms, Pause Duration = ${PAUSE_DURATION_MS / 1000}s`);
   }
   function updateCacheLifetimeSetting() {
     const hours = parseFloat(document.getElementById("cache-lifetime").value);
@@ -687,7 +716,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       showSuggestions(query);
     });
 
-
     // Hide suggestions when clicking outside.
     document.addEventListener("click", event => {
       if (inputEl && suggestionsEl && !inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
@@ -1004,7 +1032,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     try {
       // Clear all cached results in Dexie
       await db.cache.clear();
-      if (debug) console.log("Dexie cache cleared.");
+      debugLogger("Dexie cache cleared.");
     } catch (error) {
       console.error("Error clearing Dexie cache:", error);
     }
@@ -1018,7 +1046,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       const expiredEntries = await db.cache.where("timestamp").below(now - CACHE_LIFETIME).toArray();
       for (const entry of expiredEntries) {
         await db.cache.delete(entry.key);
-        if (debug) console.log(`Expired cache key found and deleted: ${entry.key}`);
+        debugLogger(`Expired cache key found and deleted: ${entry.key}`);
       }
     } catch (e) {
       console.error("Error while cleaning cache:", e);
@@ -1085,7 +1113,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
 
   function isDateAvailableForSegment(origin, destination, dateStr) {
     // Find the route that starts at the given origin.
-    if (debug) console.log(`Checking availability: ${origin}→${destination} on ${dateStr}`);
+    // debugLogger(`Checking availability: ${origin}→${destination} on ${dateStr}`);
     const route = routesByOriginAndDestination[origin]?.[destination];
     if (!route) return false;
     // Find the arrival station object with the given destination.
@@ -1100,12 +1128,12 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
       return arrivalStationObj.flightDates.includes(dateStr);
     }
     // If no flightDates provided, assume available.
-    if (debug) console.log(`  No flight dates restriction`);
+    debugLogger(`  No flight dates restriction`);
     return true;
   }
 
   async function checkRouteSegment(origin, destination, date) {
-    if (debug) console.log(`Checking route segment: ${origin} → ${destination} on ${date}`);
+    // debugLogger(`Checking route segment: ${origin} → ${destination} on ${date}`);
     let attempts = 0;
     while (attempts < MAX_RETRY_ATTEMPTS) {
       await throttleRequest();
@@ -1126,14 +1154,14 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
   
         // Use cached headers if available and still valid.
         if (pageData.headers && Date.now() - pageData.timestamp < 60 * 60 * 1000) {
-          if (debug) console.log("Using cached headers");
+          debugLogger("Using cached headers");
           headers = { ...headers, ...pageData.headers };
         } else {
           const fetchedHeaders = await getHeadersFromPage();
           if (fetchedHeaders) {
             headers = { ...headers, ...fetchedHeaders };
           } else {
-            if (debug) console.log("Failed to get headers from page, using defaults");
+            debugLogger("Failed to get headers from page, using defaults");
           }
         }
   
@@ -1148,7 +1176,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             if (debug) console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
             return [];
           }
-          if (debug) throw new Error(`HTTP error: ${fetchResponse.status}`);
+          if (debug) {
+            debugLogger(`HTTP error: ${fetchResponse.status}`);
+            throw new Error(`HTTP error: ${fetchResponse.status}`);
+          }
         }
 
         const contentType = fetchResponse.headers.get("content-type") || "";
@@ -1169,12 +1200,12 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         }
   
         const responseData = await fetchResponse.json();
-        if (debug) console.log(`Response for segment ${origin} → ${destination}:`, responseData);
+        debugLogger(`Response for segment ${origin} → ${destination}:`, responseData);
         return responseData.flightsOutbound || [];
   
       } catch (error) {
           if (searchCancelled) {
-            if (debug) console.log("Search was cancelled. Stopping execution in checkRouteSegment.");
+            debugLogger("Search was cancelled. Stopping execution in checkRouteSegment.");
             resetCountdownTimers();
             return [];
           }
@@ -1196,7 +1227,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             await new Promise(resolve => setTimeout(resolve, waitTime));
             continue;
           } else {
-            if (debug) throw error;
+            if (debug) {
+              debugLogger('Error:', error.message || error);
+              throw error;
+            }
           }
       
           if (waitTime > 0) {
@@ -1215,7 +1249,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
           attempts++;
         }
       }
-      if (debug) throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
+      if (debug) {
+        debugLogger("Max retry attempts reached for segment " + origin + " → " + destination);
+        throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
+      }
       return [];
     }
 
@@ -1447,7 +1484,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (pageDataStr) {
       const data = JSON.parse(pageDataStr);
       if (Date.now() - data.timestamp < 60 * 60 * 1000 && data.dynamicUrl) {
-        if (debug) console.log("Using cached dynamic URL");
+        debugLogger("Using cached dynamic URL");
         return data.dynamicUrl;
       }
     }
@@ -1462,7 +1499,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         }
         if (tabs && tabs.length > 0) {
           targetTab = tabs[0];
-          if (debug) console.log("Found multipass tab:", targetTab);
+          debugLogger("Found multipass tab:", targetTab);
         } else {
           try {
             await refreshMultipassTab();
@@ -1476,7 +1513,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
             }
             if (tabsAfter && tabsAfter.length > 0) {
               targetTab = tabsAfter[0];
-              if (debug) console.log("After refresh, found multipass tab:", targetTab);
+              debugLogger("After refresh, found multipass tab:", targetTab);
             }
           });
         }
@@ -1642,7 +1679,7 @@ async function refreshMultipassTab() {
       // Check if at least one allowed date is present in flightDates
       const hasValid = allowedDates.some(date => arrivalObj.flightDates.includes(date));
       if (!hasValid) {
-        if (debug) console.log(`Preliminary check: Segment ${dep} -> ${arr} does not have any allowed flightDates among ${allowedDates.join(", ")}`);
+        debugLogger(`Preliminary check: Segment ${dep} -> ${arr} does not have any allowed flightDates among ${allowedDates.join(", ")}`);
         return false;
       }
     }
@@ -1663,17 +1700,17 @@ async function refreshMultipassTab() {
     const segDestination = candidate[index + 1];
     let validChains = [];
     
-    if (debug) console.log(`--> Processing segment: ${segOrigin} -> ${segDestination}`);
+    debugLogger(`--> Processing segment: ${segOrigin} -> ${segDestination}`);
     
     for (let offset = 0; offset <= baseMaxDays; offset++) {
       const dateToSearch = addDaysUTC(currentDate, offset);
       const dateStr = dateToSearch.toISOString().slice(0, 10);
       if (index === 0 && dateStr !== selectedDate) {
-        if (debug) console.log(`   Skipping date ${dateStr} for first segment (selected date is ${selectedDate})`);
+        debugLogger(`   Skipping date ${dateStr} for first segment (selected date is ${selectedDate})`);
         continue;
       }
       if (dateToSearch > bookingHorizon) {
-        if (debug) console.log(`   Date ${dateStr} exceeds booking horizon; breaking offset loop`);
+        debugLogger(`   Date ${dateStr} exceeds booking horizon; breaking offset loop`);
         break;
       }
       
@@ -1688,27 +1725,27 @@ async function refreshMultipassTab() {
         });
         if (arrivalObj && arrivalObj.flightDates) {
           if (!arrivalObj.flightDates.includes(dateStr)) {
-            if (debug) console.log(`   No available flight on ${dateStr} for segment ${segOrigin} -> ${segDestination} (flightDates filter)`);
+            debugLogger(`   No available flight on ${dateStr} for segment ${segOrigin} -> ${segDestination} (flightDates filter)`);
             continue;
           }
         }
       }
       if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr)) {
-        if (debug) console.log(`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
+        debugLogger(`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
         continue;
       }
       
       const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
-      if (debug) console.log(`   Checking cache for segment ${segOrigin} -> ${segDestination} on ${dateStr} (cache key: ${cacheKey})`);
+      debugLogger(`   Checking cache for segment ${segOrigin} -> ${segDestination} on ${dateStr} (cache key: ${cacheKey})`);
       let flights = await getCachedResults(cacheKey);
       if (flights !== null) {
         flights = flights.map(unifyRawFlight);
-        if (debug) console.log(`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+        debugLogger(`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       } else {
         try {
           flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
           flights = flights.map(unifyRawFlight);
-          if (debug) console.log(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+          debugLogger(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
           await setCachedResults(cacheKey, flights);
         } catch (error) {
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
@@ -1729,25 +1766,25 @@ async function refreshMultipassTab() {
       // Filter flights by "local" date (taking the target offset into account)
       // flights = flights.filter(f => {
       //   f.departureDateIso === dateStr
-      //   if (debug) console.log(` Flight ${f.flightCode} rejected: departure date ${f.departureDateIso} does not match ${dateStr}`);
+      //   debugLogger(` Flight ${f.flightCode} rejected: departure date ${f.departureDateIso} does not match ${dateStr}`);
       //   }
       // );
-      // if (debug) console.log(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
+      // debugLogger(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       if (previousFlight) {
         flights = flights.filter(f => {
           const connectionTime = (f.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime()) / 60000;
           const valid = connectionTime >= minConnection && connectionTime <= maxConnection;
           if (!valid) {
-            if (debug) console.log(`      Flight ${f.flightCode} rejected: connection time ${connectionTime} minutes not in [${minConnection}, ${maxConnection}]`);
+            debugLogger(`      Flight ${f.flightCode} rejected: connection time ${connectionTime} minutes not in [${minConnection}, ${maxConnection}]`);
           }
           return valid;
         });
-        if (debug) console.log(`   After connection time filtering: ${flights.length} flights available`);
+        debugLogger(`   After connection time filtering: ${flights.length} flights available`);
       }
       
       // Iterate over all found flights for this offset.
       for (let flight of flights) {
-        if (debug) console.log(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
+        debugLogger(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
         // Recursively process the next segment, passing the date adjusted by the current offset.
         const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData);
         // For each found option, add the current flight at the beginning.
@@ -1758,7 +1795,7 @@ async function refreshMultipassTab() {
     }
     
     if (validChains.length === 0) {
-      if (debug) console.log(`   No suitable flight found for segment ${segOrigin} -> ${segDestination} at any offset`);
+      debugLogger(`   No suitable flight found for segment ${segOrigin} -> ${segDestination} at any offset`);
     }
     return validChains;
   }
@@ -1786,7 +1823,7 @@ async function refreshMultipassTab() {
     allowedOffsets,
     shouldAppend
   ) {
-    if (debug) console.log("[DEBUG] airport-change search start", {
+    debugLogger("[DEBUG] airport-change search start", {
       origins,
       destinations,
       selectedDate,
@@ -1804,7 +1841,7 @@ async function refreshMultipassTab() {
       const candidateDate = addDaysUTC(new Date(selectedDate + "T00:00:00Z"), offset);
       return candidateDate <= bookingHorizon;
     });
-    if (debug) console.log(`Filtered allowedOffsets within booking horizon: ${allowedOffsets.join(", ")}`);
+    debugLogger(`Filtered allowedOffsets within booking horizon: ${allowedOffsets.join(", ")}`);
     // Fetch global flight network once
     const routesData = await fetchDestinations();
     const results = [];
@@ -1822,7 +1859,7 @@ async function refreshMultipassTab() {
             try {
               flights = await checkRouteSegment(origin, destination, selectedDate);
               flights = flights.map(unifyRawFlight);
-              if (debug) console.log(`   Fetched ${flights.length} flights from server for ${origin} -> ${destination} on ${selectedDate}`);
+              debugLogger(`   Fetched ${flights.length} flights from server for ${origin} -> ${destination} on ${selectedDate}`);
               await setCachedResults(cacheKey, flights);
               } catch (error) {
                 console.error(`Error loading flights: ${error.message}`);
@@ -1861,7 +1898,7 @@ async function refreshMultipassTab() {
         }
       }
       firstLegMap.set(origin, bs);
-      if (debug) console.log(`[DEBUG] first-leg options for ${origin}:`, Array.from(bs));
+      debugLogger(`[DEBUG] first-leg options for ${origin}:`, Array.from(bs));
     }
 
     //
@@ -1889,7 +1926,7 @@ async function refreshMultipassTab() {
         }
       }
       secondLegMap.set(destination, ns);
-      if (debug) console.log(`[DEBUG] second-leg options for ${destination}:`, Array.from(ns));
+      debugLogger(`[DEBUG] second-leg options for ${destination}:`, Array.from(ns));
     }
 
     //
@@ -1948,7 +1985,7 @@ async function refreshMultipassTab() {
       // second leg: allow day-offsets per user settings
       const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
       if (!flights2.length) continue;
-        if (debug) console.log(`Found ${flights1.length} flights for ${origin} → ${B} and ${flights2.length} flights for ${N} → ${destination}
+        debugLogger(`Found ${flights1.length} flights for ${origin} → ${B} and ${flights2.length} flights for ${N} → ${destination}
         (${flights2.map(f => f.calculatedDuration.departureDate.toISOString()).join(", ")})`);
       // combine and append to results or UI
       combineAndAppend(
@@ -1961,7 +1998,7 @@ async function refreshMultipassTab() {
       );
     }
 
-    if (debug) console.log(
+    debugLogger(
       `[DEBUG] airport-change search found ${results.length} routes:`,
       results.map(r => r.key).join(", ")
     );
@@ -2154,7 +2191,7 @@ async function refreshMultipassTab() {
       );
     });
 
-    if (debug) console.log(
+    debugLogger(
       `[DEBUG] After real‑flight date‑filter: ${candidates.length} of ${totalCands} remain`
     );
     console.table(candidates);
@@ -2202,7 +2239,7 @@ async function refreshMultipassTab() {
               continue;
             }
 
-            if (debug) console.log(
+            debugLogger(
               `    ✓ valid: [${flight1.key}]→[${flight2.key}]→[${flight3.key}]`
             );
 
@@ -2269,7 +2306,7 @@ async function refreshMultipassTab() {
     for (const off of offsets) {
       const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off).toISOString().slice(0,10);
       if (arr == null) {
-        if (debug) console.log(`Bad params to loadFlights(): ${dep}→${arr}`);
+        debugLogger(`Bad params to loadFlights(): ${dep}→${arr}`);
         continue;
       }
       let segs = await getCachedResults(`${dep}-${arr}-${date}`);
@@ -2357,7 +2394,7 @@ async function refreshMultipassTab() {
     for (const f1 of f1List) {
       for (const f2 of f2List) {
         const gap = Math.round((f2.calculatedDuration.departureDate - f1.calculatedDuration.arrivalDate)/60000);
-        if (debug) console.log(`Gap between ${f1.key} and ${f2.key}: ${gap} minutes`);
+        debugLogger(`Gap between ${f1.key} and ${f2.key}: ${gap} minutes`);
         if (gap < minC || gap > maxC) continue;
         const agg = buildAggregatedRoute(f1, f2, gap);
         if (!agg) continue;
@@ -2376,7 +2413,7 @@ async function refreshMultipassTab() {
     shouldAppend = true,
     skipProgress = false
   ) {
-    if (debug) console.log("Starting searchConnectingRoutes");
+    debugLogger("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
     const graph = buildGraph(routesData);
   
@@ -2387,7 +2424,7 @@ async function refreshMultipassTab() {
     const connectionRadius   = parseInt(localStorage.getItem("connectionRadius"), 10) || 0;
     const allowChangeAirport = localStorage.getItem("allowChangeAirport") === "true";
   
-    if (debug) console.log(
+    debugLogger(
       `[DEBUG] searchConnectingRoutes → stopover="${stopoverText}",`,
       `allowChangeAirport=${allowChangeAirport},`,
       `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`,
@@ -2395,7 +2432,7 @@ async function refreshMultipassTab() {
     );
   
     const allowOvernight = stopoverText === "One stop or fewer (overnight)";
-    if (debug) console.log(
+    debugLogger(
       `Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "day-only"})`
     );
   
@@ -2403,7 +2440,7 @@ async function refreshMultipassTab() {
     const baseDateUTC    = new Date(selectedDate + "T00:00:00Z");
     const todayUTC       = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
     const bookingHorizon = addDaysUTC(todayUTC, 3);
-    if (debug) console.log(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
+    debugLogger(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
   
     // 3) Expand "ANY" destinations
     let destinationList = [];
@@ -2416,7 +2453,7 @@ async function refreshMultipassTab() {
       });
       destinations = Array.from(allDest);
       destinationList = destinations;
-      if (debug) console.log(`Expanded ANY → ${destinationList.join(", ")}`);
+      debugLogger(`Expanded ANY → ${destinationList.join(", ")}`);
     } else {
       destinationList = destinations;
     }
@@ -2440,7 +2477,7 @@ async function refreshMultipassTab() {
         }
       }
     }
-    if (debug) console.log(`Allowed offsets: ${allowedOffsets.join(", ")}`);
+    debugLogger(`Allowed offsets: ${allowedOffsets.join(", ")}`);
   
     // 5) Airport-change shortcut?
     const switchableForTwoStops = (
@@ -2451,7 +2488,7 @@ async function refreshMultipassTab() {
     
     if (switchableForTwoStops) {
       const results = [];
-        if (debug) console.log("Searching one-stop flights");
+        debugLogger("Searching one-stop flights");
         const oneStopResults = await processOneStopWithAirportChange(
         origins,
         destinations,
@@ -2466,7 +2503,7 @@ async function refreshMultipassTab() {
       results.push(...oneStopResults || []);
       if (searchCancelled) return results;
 
-      if (debug) console.log("Airport-change mode ON: delegating to processTwoStopsWithAirportChange");
+      debugLogger("Airport-change mode ON: delegating to processTwoStopsWithAirportChange");
       const twoStopResults = await processTwoStopsWithAirportChange(
         origins,
         destinations,
@@ -2478,7 +2515,7 @@ async function refreshMultipassTab() {
         shouldAppend
       );
       results.push(...twoStopResults || []);
-      if (debug) console.log(`Found ${results.length} two-stop routes with airport change`);
+      debugLogger(`Found ${results.length} two-stop routes with airport change`);
       return results;
     }
     const switchableForOneStop = (
@@ -2489,7 +2526,7 @@ async function refreshMultipassTab() {
       && connectionRadius > 0
     );
     if (switchableForOneStop) {
-      if (debug) console.log("Airport-change mode ON: delegating to processOneStopWithAirportChange");
+      debugLogger("Airport-change mode ON: delegating to processOneStopWithAirportChange");
       // **Pass allowedOffsets** into your new function
       const results = await processOneStopWithAirportChange(
         origins,
@@ -2501,7 +2538,7 @@ async function refreshMultipassTab() {
         allowedOffsets,
         true
       );
-      if (debug) console.log(`Found ${results.length} routes with airport change`);
+      debugLogger(`Found ${results.length} routes with airport change`);
       return results;
     }
   
@@ -2510,13 +2547,13 @@ async function refreshMultipassTab() {
     origins.forEach(origin =>
       findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes)
     );
-    if (debug) console.log(`Total candidate routes found: ${candidateRoutes.length}`);
+    debugLogger(`Total candidate routes found: ${candidateRoutes.length}`);
   
     // 7) Preliminary flight-dates filter
     candidateRoutes = candidateRoutes.filter(chain =>
       candidateHasValidFlightDates(chain, routesData, selectedDate, bookingHorizon, allowedOffsets)
     );
-    if (debug) console.log(`After date check, ${candidateRoutes.length} candidates remain`);
+    debugLogger(`After date check, ${candidateRoutes.length} candidates remain`);
   
     // 8) Process each candidate with your existing processSegment
     let processed = 0;
@@ -2598,25 +2635,25 @@ async function refreshMultipassTab() {
     reverse = false,
     skipProgress = false
   ) {
-    if (debug) console.log("Starting searchDirectRoutes");
+    debugLogger("Starting searchDirectRoutes");
 
     let allowedReversePairs = null;
     if (reverse && globalResults.length) {
       allowedReversePairs = new Set(
         globalResults.map(f => `${f.arrivalStation}-${f.departureStation}`)
       );
-      if (debug) console.log(
+      debugLogger(
         "Allowed reverse pairs:", Array.from(allowedReversePairs)
       );
     }
 
     if (reverse) {
       [origins, destinations] = [destinations, origins];
-      if (debug) console.log("After swap:", origins, destinations);
+      debugLogger("After swap:", origins, destinations);
     }
 
     let routesData = await fetchDestinations();
-    if (debug) console.log(`Fetched ${routesData.length} routes`);
+    debugLogger(`Fetched ${routesData.length} routes`);
     routesData = routesData
       .map(route => {
         route.arrivalStations = (route.arrivalStations || []).filter(arr => {
@@ -2631,7 +2668,7 @@ async function refreshMultipassTab() {
         return route;
       })
       .filter(r => r.arrivalStations.length > 0);
-    if (debug) console.log(
+    debugLogger(
       `After date-filter: ${routesData.length} origins remain`
     );
 
@@ -2659,7 +2696,7 @@ async function refreshMultipassTab() {
     }
 
     const totalArrivals = pairs.length;
-    if (debug) console.log(`Total direct pairs to check: ${totalArrivals}`);
+    debugLogger(`Total direct pairs to check: ${totalArrivals}`);
 
     let processed = 0;
     if (!skipProgress) {
@@ -2678,10 +2715,10 @@ async function refreshMultipassTab() {
           `Checking ${origin} → ${arrivalCode} on ${selectedDate}`
         );
       }
-      if (debug) console.log(`Checking ${origin} → ${arrivalCode}`);
+      debugLogger(`Checking ${origin} → ${arrivalCode}`);
 
       if (reverse && !allowedReversePairs.has(`${origin}-${arrivalCode}`)) {
-        if (debug) console.log(`Skipping reverse pair ${origin}-${arrivalCode}`);
+        debugLogger(`Skipping reverse pair ${origin}-${arrivalCode}`);
         continue;
       }
 
@@ -2713,7 +2750,7 @@ async function refreshMultipassTab() {
       }
     }
 
-    if (debug) console.log(
+    debugLogger(
       `Direct flight search complete. Found ${validDirectFlights.length} flights.`
     );
     return validDirectFlights;
@@ -2721,12 +2758,12 @@ async function refreshMultipassTab() {
   
   let searchActive = false;
   async function handleSearch() {
-    if (debug) console.log("Search initiated.");
+    debugLogger("Search initiated.");
     await cleanupCache();
     const searchButton = document.getElementById("search-button");
   
     if (searchActive) {
-      if (debug) console.log("Search already active. Cancelling current search.");
+      debugLogger("Search already active. Cancelling current search.");
       searchCancelled = true;
       resetCountdownTimers();
       if (throttleResetTimer) {
@@ -2750,7 +2787,7 @@ async function refreshMultipassTab() {
     searchActive = true;
     searchCancelled = false;
     searchButton.textContent = "Stop Search";
-    if (debug) console.log("New search started. Resetting counters and UI.");
+    debugLogger("New search started. Resetting counters and UI.");
   
     setTimeout(() => { requestsThisWindow = 0; }, 1000);
   
@@ -2777,19 +2814,19 @@ async function refreshMultipassTab() {
       return;
     }
     let origins = originInputs.map(s => resolveAirport(s)).flat();
-    if (debug) console.log("Resolved origins:", origins);
+    debugLogger("Resolved origins:", origins);
   
     let destinationInputs = getMultiAirportValues("destination-multi");
     let destinations = (destinationInputs.length === 0 || destinationInputs.includes("ANY"))
       ? ["ANY"]
       : destinationInputs.map(s => resolveAirport(s)).flat();
-    if (debug) console.log("Resolved destinations:", destinations);
+    debugLogger("Resolved destinations:", destinations);
   
     const tripType = window.currentTripType || "oneway";
     let departureDates = [];
     const departureInputRaw = document.getElementById("departure-date").value.trim();
     departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
-    if (debug) console.log("Departure dates:", departureDates);
+    debugLogger("Departure dates:", departureDates);
   
     document.querySelector(".route-list").innerHTML = "";
     updateProgress(0, 1, "Initializing search");
@@ -2803,7 +2840,7 @@ async function refreshMultipassTab() {
     } else {
       maxTransfers = 0;
     }
-    if (debug) console.log("Max transfers set to:", maxTransfers);
+    debugLogger("Max transfers set to:", maxTransfers);
   
     // --- Anywhere logic in handleSearch ---
     const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
@@ -2854,12 +2891,12 @@ async function refreshMultipassTab() {
         typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
       ));
       origins = Array.from(new Set(allOrigins));
-      if (debug) console.log("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
+      debugLogger("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
     }
   
     // 4) If only origin is ANY and destination is specified, filter origins.
     if (isOriginAnywhere && !isDestinationAnywhere && maxTransfers === 0) {
-      if (debug) console.log("Origin = ANY; filtering origins by direct routes");
+      debugLogger("Origin = ANY; filtering origins by direct routes");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -2886,12 +2923,12 @@ async function refreshMultipassTab() {
             : route.departureStation
         );
       origins = Array.from(new Set(filteredOrigins));
-      if (debug) console.log("Filtered origins:", origins);
+      debugLogger("Filtered origins:", origins);
     }
   
     // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
     if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
-      if (debug) console.log("Destination = ANY; filtering destinations by direct routes");
+      debugLogger("Destination = ANY; filtering destinations by direct routes");
       let fetchedRoutes = await fetchDestinations();
       fetchedRoutes = fetchedRoutes.map(route => {
         if (Array.isArray(route.arrivalStations)) {
@@ -2919,7 +2956,7 @@ async function refreshMultipassTab() {
           )
         );
       destinations = Array.from(new Set(filteredDestinations));
-      if (debug) console.log("Filtered destinations:", destinations);
+      debugLogger("Filtered destinations:", destinations);
     }
     // --- End Anywhere logic ---
   
@@ -2928,7 +2965,7 @@ async function refreshMultipassTab() {
       if (tripType === "oneway") {
         for (const dateStr of departureDates) {
           if (searchCancelled) return;
-          if (debug) console.log(`Searching one-way flights for date ${dateStr}`);
+          debugLogger(`Searching one-way flights for date ${dateStr}`);
           if (maxTransfers > 0) {
             await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
           } else {
@@ -2937,12 +2974,12 @@ async function refreshMultipassTab() {
         }
       } else {
         // Round-trip search
-        if (debug) console.log("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
+        debugLogger("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
         suppressDisplay = true;
         let outboundFlights = [];
         for (const outboundDate of departureDates) {
           if (searchCancelled) break;
-          if (debug) console.log(`Searching outbound flights for date ${outboundDate}`);
+          debugLogger(`Searching outbound flights for date ${outboundDate}`);
           let outboundFlightsForDate = [];
           if (maxTransfers > 0) {
             outboundFlightsForDate = outboundFlightsForDate.concat(
@@ -2955,7 +2992,7 @@ async function refreshMultipassTab() {
           }
           outboundFlights = outboundFlights.concat(outboundFlightsForDate);
         }
-        if (debug) console.log(`Total outbound flights found: ${outboundFlights.length}`);
+        debugLogger(`Total outbound flights found: ${outboundFlights.length}`);
         // Deduplicate outbound flights.
         const uniqueOutbound = [];
         const outboundKeys = new Set();
@@ -2968,12 +3005,12 @@ async function refreshMultipassTab() {
         }
         outboundFlights = uniqueOutbound;
         globalResults = outboundFlights;
-        if (debug) console.log(`Deduplicated outbound flights: ${outboundFlights.length}`);
+        debugLogger(`Deduplicated outbound flights: ${outboundFlights.length}`);
         let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
         let inboundQueries = {};
         const originInputs = window.originalOriginInput = getMultiAirportValues("origin-multi");
         const originalOrigins = originInputs.map(s => resolveAirport(s)).flat();
-        if (debug) console.log("Original origins for round-trip:", originalOrigins);
+        debugLogger("Original origins for round-trip:", originalOrigins);
   
         // If the original origin value is "ANY", search for inbound flights so that:
         // inbound.origin is any airport in the destination group, and inbound.destination equals outbound.origin.
@@ -3026,7 +3063,7 @@ async function refreshMultipassTab() {
             ?? (outbound.segments.length > 0 
                 ? outbound.segments[outbound.segments.length - 1].arrivalStation 
                 : undefined);
-            if (debug) console.log("Outbound flight arrival station:", outboundDestination);
+            debugLogger("Outbound flight arrival station:", outboundDestination);
             if (!outboundDestination) {
                 console.warn("Skipping outbound flight without arrival station:", outbound);
                 continue;
@@ -3078,7 +3115,7 @@ async function refreshMultipassTab() {
         
         // 1) Pre-calculate totalInbound exactly as before
         const totalInbound = inboundKeys.length;        
-        if (debug) console.log("Total inbound combinations:", totalInbound);
+        debugLogger("Total inbound combinations:", totalInbound);
         
         // 2) Kick off the progress bar
         let inboundProcessed = 0;
@@ -3099,7 +3136,7 @@ async function refreshMultipassTab() {
             flights = [];
           }
           inboundResults[key] = flights;
-          if (debug) console.log(`Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`);
+          debugLogger(`Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`);
           updateProgress(
             inboundProcessed,
             totalInbound,
@@ -3126,13 +3163,13 @@ async function refreshMultipassTab() {
                 const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
                 const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
                 if (!validDep) {
-                  if (debug) console.log(`Inbound flight ${inbound.flightCode} rejected: departure station ${inboundDep} is not in the destination group ${destinations}`);
+                  debugLogger(`Inbound flight ${inbound.flightCode} rejected: departure station ${inboundDep} is not in the destination group ${destinations}`);
                 }
                 if (!validArr) {
-                  if (debug) console.log(`Inbound flight ${inbound.flightCode} rejected: arrival station ${inboundArr} does not match outbound origin ${outboundOrigin}`);
+                  debugLogger(`Inbound flight ${inbound.flightCode} rejected: arrival station ${inboundArr} does not match outbound origin ${outboundOrigin}`);
                 }
                 if (!validGap) {
-                  if (debug) console.log(`Inbound flight ${inbound.flightCode} rejected: connection gap ${connectionGap} minutes`);
+                  debugLogger(`Inbound flight ${inbound.flightCode} rejected: connection gap ${connectionGap} minutes`);
                 }
                 return validDep && validArr && validGap;
               });
@@ -3145,10 +3182,10 @@ async function refreshMultipassTab() {
                 let inboundForKey = inboundResults[key] || [];
                 const filteredInbound = inboundForKey.filter(inbound => {
                   const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
-                  if (debug) console.log(`Connection gap for inbound flight ${inbound.flightCode} to ${outbound.flightCode} is ${connectionGap} minutes`);
+                  debugLogger(`Connection gap for inbound flight ${inbound.flightCode} to ${outbound.flightCode} is ${connectionGap} minutes`);
                   const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
                   if (!validGap) {
-                    if (debug) console.log(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
+                    debugLogger(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
                   }
                   return validGap;
                 });
@@ -3159,7 +3196,7 @@ async function refreshMultipassTab() {
           const seenInbound = new Set();
           const dedupedInbound = [];
           for (const flight of matchedInbound) {
-            if (debug) console.log(`flight.key: ${flight.key}`);
+            debugLogger(`flight.key: ${flight.key}`);
             const dedupKey = flight.key;
             if (!seenInbound.has(dedupKey)) {
               seenInbound.add(dedupKey);
@@ -3167,13 +3204,13 @@ async function refreshMultipassTab() {
             }
           }
           outbound.returnFlights = dedupedInbound;
-          // if (debug) console.log(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
+          // debugLogger(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
         }
         const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
         globalResults = validRoundTripFlights;
         suppressDisplay = false;
         displayRoundTripResultsAll(validRoundTripFlights);
-        if (debug) console.log(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
+        debugLogger(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
       }
     } catch (error) {
       document.querySelector(".route-list").innerHTML = `<p>Error: ${error.message}</p>`;
@@ -3190,7 +3227,7 @@ async function refreshMultipassTab() {
             </svg> SEARCH`;
       searchActive = false;
       updateCSVButtonVisibility();
-      if (debug) console.log("Search process finished.");
+      debugLogger("Search process finished.");
     }
   }
   
@@ -3477,7 +3514,7 @@ async function refreshMultipassTab() {
       </div>` : "";
     
     let bodyHtml = "";
-    if (debug) console.log("Unified flight", unifiedFlight);
+    debugLogger("Unified flight", unifiedFlight);
     if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
       unifiedFlight.segments.forEach((segment, idx) => {
         bodyHtml += createSegmentRow(segment);
@@ -4060,6 +4097,78 @@ async function refreshMultipassTab() {
     }
   };
   
+  // ---------------- Donation Reminder
+
+  function checkDonationReminder() {
+    if (localStorage.getItem('userDonated') === 'true') {
+      return;
+    }
+    
+    const lastShown = localStorage.getItem('lastReminderShown');
+    const now = Date.now();
+    const tenMinutes = 10 * 60 * 1000;
+    
+    const interval = localStorage.getItem('userLeftReview') === 'true' 
+      ? 24 * 60 * 60 * 1000 
+      : tenMinutes;
+    
+    if (!lastShown || (now - parseInt(lastShown)) > interval) {
+      const reminder = document.getElementById('donation-reminder');
+      setTimeout(() => {
+        reminder.classList.remove('hidden');
+        localStorage.setItem('lastReminderShown', now.toString());
+      }, 3000);
+    }
+  }
+
+  function setupReminderActions() {
+    const reminder = document.getElementById('donation-reminder');
+    const closeBtn = document.getElementById('close-reminder');
+    const reviewBtn = document.getElementById('leave-review');
+    const donateLink = document.getElementById('donate-link');
+    
+    closeBtn.addEventListener('click', () => {
+      reminder.classList.add('hidden');
+    });
+    
+    reviewBtn.addEventListener('click', () => {
+      reminder.classList.add('hidden');
+      window.open(
+        'https://chromewebstore.google.com/detail/all-you-can-fly-pro-aycf/oimhdkdhblofmdebbpdfabddcnpmlhha/reviews', 
+        '_blank'
+      );
+      localStorage.setItem('userLeftReview', 'true');
+    });
+    
+    donateLink.addEventListener('click', () => {
+      localStorage.setItem('userDonated', 'true');
+    });
+    
+    window.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (document.hidden) {
+          localStorage.setItem('userDonated', 'true');
+        }
+      }, 1000);
+    });
+    trackDonationReturn();
+  }
+
+  function trackDonationReturn() {
+    const donationUrl = 'https://revolut.me/denya24';
+    
+    window.addEventListener('blur', function() {
+      if (document.activeElement === document.getElementById(donationUrl)) {
+        const checkReturn = setInterval(function() {
+          if (document.hidden === false) {
+            clearInterval(checkReturn);
+            localStorage.setItem('userDonated', 'true');
+          }
+        }, 1000);
+      }
+    });
+  }
+
   // ---------------- Initialize on DOMContentLoaded ----------------
   
   document.addEventListener("DOMContentLoaded", () => {
@@ -4074,6 +4183,10 @@ async function refreshMultipassTab() {
     document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
     document.getElementById("cache-lifetime").value = localStorage.getItem("cacheLifetimeHours") || 4;
     
+    checkDonationReminder();
+    setupReminderActions();
+    setInterval(checkDonationReminder, 10 * 1000);
+
     // ========== 2. Toggle Expert Settings ==========
     document.getElementById("toggle-expert-settings").addEventListener("click", (event) => {
       const expertSettings = document.getElementById("expert-settings");
@@ -4372,5 +4485,101 @@ async function refreshMultipassTab() {
       radiusInput.addEventListener('input', () => {
         const v = parseInt(radiusInput.value) || 0;
         localStorage.setItem('connectionRadius', v);
+      });
+
+      // ========== 15. Debug Mode Controls ==========
+      const toggleDebugBtn = document.getElementById('toggle-debug');
+      const debugLogContainer = document.getElementById('debug-log-container');
+      const debugLogTextarea = document.getElementById('debug-log');
+      const downloadDebugBtn = document.getElementById('download-debug-log');
+      const clearDebugBtn = document.getElementById('clear-debug-log');
+
+      toggleDebugBtn.textContent = `DEBUG MODE: ${debug ? 'ON' : 'OFF'}`;
+      if (debug) debugLogContainer.classList.remove('hidden');
+      updateDebugLogDisplay();
+
+      toggleDebugBtn.addEventListener('click', () => {
+        debug = !debug;
+        localStorage.setItem('debugMode', debug);
+        toggleDebugBtn.textContent = `DEBUG MODE: ${debug ? 'ON' : 'OFF'}`;
+        if (debug) {
+          console.warn = function(...args) {
+            debugLogger('WARN:', ...args);
+            originalConsoleWarn.apply(console, args);
+          };
+        } else {
+          console.warn = originalConsoleWarn;
+        }
+        debugLogContainer.classList.toggle('hidden', !debug);
+      });
+
+
+
+      downloadDebugBtn.addEventListener('click', () => {
+        const blob = new Blob([debugLog.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `wizzair-debug-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 100);
+      });
+
+      clearDebugBtn.addEventListener('click', () => {
+        debugLog = [];
+        updateDebugLogDisplay();
+      });
+
+      function updateDebugLogDisplay() {
+        if (debugLogTextarea) {
+        const isScrolledToBottom = 
+          debugLogTextarea.scrollTop + debugLogTextarea.clientHeight >= 
+          debugLogTextarea.scrollHeight - 1;
+
+        const oldScrollTop = debugLogTextarea.scrollTop;
+        
+        debugLogTextarea.value = debugLog.join('\n');
+        
+        if (!isScrolledToBottom) {
+          debugLogTextarea.scrollTop = oldScrollTop;
+        } else {
+          debugLogTextarea.scrollTop = debugLogTextarea.scrollHeight;
+        }
+      }
+      }
+
+      debugLog = [];
+
+      setInterval(updateDebugLogDisplay, 500);
+
+      // Changelog Modal
+      const changelogModal = document.getElementById('changelog-modal');
+      const changelogBtn = document.getElementById('changelog-button');
+      const closeChangelog = document.getElementById('close-changelog');
+
+      changelogBtn.addEventListener('click', () => {
+        changelogModal.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+      });
+
+      const closeModal = () => {
+        changelogModal.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+      };
+
+      closeChangelog.addEventListener('click', closeModal);
+
+      changelogModal.addEventListener('click', (e) => {
+        if (e.target === changelogModal) closeModal();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !changelogModal.classList.contains('hidden')) {
+          closeModal();
+        }
       });
   });
