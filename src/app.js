@@ -4106,13 +4106,18 @@ async function refreshMultipassTab() {
     
     const lastShown = localStorage.getItem('lastReminderShown');
     const now = Date.now();
-    const tenMinutes = 10 * 60 * 1000;
+    const fiveMinutes = 5 * 60 * 1000;
     
-    const interval = localStorage.getItem('userLeftReview') === 'true' 
+    const intervalReview = localStorage.getItem('userLeftReview') === 'true' 
       ? 24 * 60 * 60 * 1000 
-      : tenMinutes;
+      : fiveMinutes;
+
+    const intervalDonation = localStorage.getItem('userDonated') === 'true'
+      ? 7 * 24 * 60 * 60 * 1000
+      : fiveMinutes;
     
-    if (!lastShown || (now - parseInt(lastShown)) > interval) {
+    const showInterval = Math.max(intervalReview, intervalDonation);
+    if (!lastShown || (now - parseInt(lastShown)) > showInterval) {
       const reminder = document.getElementById('donation-reminder');
       setTimeout(() => {
         reminder.classList.remove('hidden');
@@ -4155,7 +4160,7 @@ async function refreshMultipassTab() {
   }
 
   function trackDonationReturn() {
-    const donationUrl = 'https://revolut.me/denya24';
+    const donationUrl = 'https://buy.stripe.com/4gM00j9fA6Hua291mWbo400';
     
     window.addEventListener('blur', function() {
       if (document.activeElement === document.getElementById(donationUrl)) {
