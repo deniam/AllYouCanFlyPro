@@ -8,7 +8,22 @@
   <script src="./assets/css/tailwind_cdn_409.js"></script>
   <script src="./assets/emojis/twemoji.min.js"></script>
   <script src="./assets/twemoji-init.js"></script>
+  <script type="module" src="src/app.js"></script>
   <style>
+
+      #changelog-modal {
+        animation: fadeIn 0.3s ease-out;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      .changelog-content {
+        max-height: 70vh;
+        overflow-y: auto;
+      }
       @keyframes subtlePink {
         0%, 100% { background-color: #C90076; }
         50% { background-color: #a30268; }
@@ -68,6 +83,43 @@
         position: absolute;
         z-index: 1000;
       }
+    
+      #connection-radius-container.hidden {
+          display: none !important;
+      }
+
+      #donation-reminder {
+        animation: slideIn 0.5s ease-out;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        border-left: 4px solid #C90076;
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateY(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      .reminder-hidden {
+        animation: fadeOut 0.3s ease-in forwards;
+      }
+
+      @keyframes fadeOut {
+        from {
+          transform: translateY(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateY(20px);
+          opacity: 0;
+        }
+      }
+    
   </style>
 </head>
 <body class="bg-gray-50">
@@ -75,21 +127,58 @@
     <div class="container mx-auto px-4">
       <div class="flex flex-col lg:flex-row gap-1">
         <div class="w-full lg:w-1/2 space-y-4">
-          <!-- Donation, Version and GitHub Links -->
+          <!-- Changelog, Version and GitHub Links -->
           <div class="flex justify-between items-center p-2 bg-gray-100 rounded-md shadow-md mb-4">
-            <a href="https://revolut.me/denya24" target="_blank" rel="noopener noreferrer"
-              class="external-link support-animation inline-flex gap-1 items-center justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-white bg-[#C90076] px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] transition mr-2">
-              ☕ Donate
+          <!-- Changelog Button -->
+
+          <div class="flex justify-center gap-2 items-center">
+            <button id="changelog-button" class="inline-flex items-center gap-1 justify-center flex-nowrap min-w-0 whitespace-nowrap bg-[#20006D] text-white px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] active:bg-[#1A005D] transition cursor-pointer">
+              📜 About
+            </button>
+            <a href="https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              class="external-link inline-flex items-center gap-1 justify-center flex-nowrap min-w-0 whitespace-nowrap bg-[#C90076] text-white px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#A00065] active:bg-[#A00050] transition cursor-pointer">
+              AYCF website
             </a>
-            <div class="ml-auto flex gap-2 items-center">
-              <div id="version-display" class="inline-flex items-center justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-gray-800 bg-gray-200 py-2 rounded-md font-bold shadow-md transition">
+            <a href="https://github.com/deniam/AllYouCanFlyPro" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              class="external-link inline-flex items-center gap-1 justify-center flex-nowrap min-w-0 whitespace-nowrap text-white bg-gray-600 px-3 py-2 rounded-md font-bold shadow-md hover:bg-[#1A005D] hover:text-white active:bg-[#1A005D] transition cursor-pointer">
+              ⭐ GitHub
+            </a>
+          </div>
+        </div>
+
+        <!-- Changelog Popup -->
+        <div id="changelog-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div class="bg-white rounded-lg shadow-xl w-full ml-4 mr-4 max-w-2xl max-h-[80vh] overflow-hidden">
+            <div class="flex justify-between items-center bg-[#20006D] text-white p-4">
+              <a id="donate-link" href="https://buy.stripe.com/4gM00j9fA6Hua291mWbo400" target="_blank" 
+                class="bg-[#C90076] hover:bg-[#A00065] text-white font-bold py-2 px-4 rounded text-center transition">
+                ☕ Support with donation
+            </a>
+              <br>
+              <button id="close-changelog" class="text-white text-2xl cursor-pointer">&times;</button>
+            </div>
+            
+            <div class="p-4 overflow-y-auto max-h-[60vh]">
+              <div class="mb-4 pb-3 border-b">
+                <div class="flex items-center mb-2">
+                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2"></span>
+                  <span class="text-gray-700 font-medium">July 9, 2025</span>
+                </div>
+                <h1 class="font-bold">Changelog</h1>
+                <ul class="list-disc pl-5 text-gray-700 space-y-1">
+                  <li>Added debug logger to Expert Settings</li>
+                  <li>Changed toolbar (replaced donation link to AYCF website)</li>
+                  <li>Bugfixes</li>
+                </ul>
               </div>
-              <a href="https://github.com/deniam/AllYouCanFlyPro" target="_blank" rel="noopener noreferrer"
-                 class="external-link inline-flex items-center gap-1 justify-center flex-nowrap min-w-0 flex-1 whitespace-nowrap text-[#20006D] bg-gray px-3 py-2 rounded-md font-bold shadow-md border border-grey hover:bg-[#1A005D] hover:text-white active:bg-[#1A005D] transition">
-                ⭐  GitHub
-              </a>
+              <span class ="text-gray-500 text-xs">2025, Denys Shkodynskyi</span>
             </div>
           </div>
+        </div>
 
           <!-- Header / Logo -->
           <div class="text-center mt-[0px] mb-2">
@@ -214,7 +303,25 @@
                   </button>
                 </div>
               </div>
-
+                  <div id="donation-reminder" class="hidden absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white border border-gray-300 rounded-lg shadow-xl p-4 max-w-xs z-50 w-80">
+                    <div class="flex justify-between items-start mb-2">
+                      <h3 class="font-bold text-lg text-gray-800">Enjoy this tool?</h3>
+                      <button id="close-reminder" class="text-gray-500 hover:text-gray-700 cursor-pointer transition">
+                        ✕
+                      </button>
+                    </div>
+                    <p class="text-gray-600 mb-3">Help me keep it updated and improved. Your support matters!</p>
+                    <div class="flex flex-col gap-2">
+                      <a id="donate-link" href="https://buy.stripe.com/4gM00j9fA6Hua291mWbo400" target="_blank" 
+                        class="bg-[#C90076] hover:bg-[#A00065] text-white font-bold py-2 px-4 rounded text-center transition">
+                         ☕ Support with donation
+                      </a>
+                      <button id="leave-review" 
+                              class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded cursor-pointer transition">
+                        ⭐ Rate on Chrome Web Store
+                      </button>
+                    </div>
+                  </div>
               <!-- Options Container -->
               <div class="mb-0">
                 <div id="options-container" class="mt-2 p-2 rounded-md border-2 border-[#20006D] hidden">
@@ -303,6 +410,19 @@
                           class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
                       </div>
                     </div>
+                     <div class="mt-2">
+                      <button id="toggle-debug" class="w-full bg-gray-200 text-gray-700 px-1 py-2 mb-1 rounded hover:bg-gray-300 focus:outline-none focus:ring-1 focus:ring-gray-400 cursor-pointer">
+                        DEBUG MODE: OFF
+                      </button>
+                      <div id="debug-log-container" class="hidden mt-1">
+                        <label class="block text-gray-700 font-medium mb-1">Debug Log:</label>
+                        <textarea id="debug-log" class="w-full h-32 bg-gray-100 border border-gray-300 rounded px-2 py-1 text-xs font-mono" readonly></textarea>
+                        <div class="flex gap-1 mt-1">
+                          <button id="download-debug-log" class="flex-1 bg-gray-200 text-gray-700 px-1 py-1 rounded hover:bg-gray-300">Download Log</button>
+                          <button id="clear-debug-log" class="flex-1 bg-gray-200 text-gray-700 px-1 py-1 rounded hover:bg-gray-300">Clear Log</button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -345,6 +465,5 @@
       </div>
     </div>
   </section>
-  <script type="module" src="src/app.js"></script>
 </body>
 </html>
