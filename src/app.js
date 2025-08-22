@@ -2657,6 +2657,7 @@ async function refreshMultipassTab() {
     routesData = routesData
       .map(route => {
         route.arrivalStations = (route.arrivalStations || []).filter(arr => {
+          console.log("selectedDate: ", selectedDate)
           if (arr.operationStartDate && new Date(selectedDate) < new Date(arr.operationStartDate)) {
             return false;
           }
@@ -2880,7 +2881,7 @@ async function refreshMultipassTab() {
         if (Array.isArray(route.arrivalStations)) {
           route.arrivalStations = route.arrivalStations.filter(arrival => {
             if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
             }
             return true;
           });
@@ -2902,7 +2903,7 @@ async function refreshMultipassTab() {
         if (Array.isArray(route.arrivalStations)) {
           route.arrivalStations = route.arrivalStations.filter(arrival => {
             if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
             }
             return true;
           });
@@ -2926,7 +2927,7 @@ async function refreshMultipassTab() {
       debugLogger("Filtered origins:", origins);
     }
   
-    // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
+    // 5) If only destination is ANY and origin is specified, filter destinations.
     if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
       debugLogger("Destination = ANY; filtering destinations by direct routes");
       let fetchedRoutes = await fetchDestinations();
@@ -2934,7 +2935,7 @@ async function refreshMultipassTab() {
         if (Array.isArray(route.arrivalStations)) {
           route.arrivalStations = route.arrivalStations.filter(arrival => {
             if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
             }
             return true;
           });
