@@ -1124,7 +1124,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (!arrivalStationObj) return false;
     // If flightDates is defined, check that dateStr is included.
     if (arrivalStationObj.flightDates) {
-      // console.log(`  Flight dates: ${arrivalStationObj.flightDates.join(', ')}`);
       return arrivalStationObj.flightDates.includes(dateStr);
     }
     // If no flightDates provided, assume available.
@@ -2657,7 +2656,6 @@ async function refreshMultipassTab() {
     routesData = routesData
       .map(route => {
         route.arrivalStations = (route.arrivalStations || []).filter(arr => {
-          console.log("selectedDate: ", selectedDate)
           if (arr.operationStartDate && new Date(selectedDate) < new Date(arr.operationStartDate)) {
             return false;
           }
