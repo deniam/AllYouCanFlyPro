@@ -1124,7 +1124,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
     if (!arrivalStationObj) return false;
     // If flightDates is defined, check that dateStr is included.
     if (arrivalStationObj.flightDates) {
-      // console.log(`  Flight dates: ${arrivalStationObj.flightDates.join(', ')}`);
       return arrivalStationObj.flightDates.includes(dateStr);
     }
     // If no flightDates provided, assume available.
@@ -1142,7 +1141,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         const pageDataStr = localStorage.getItem("wizz_page_data") || "{}";
         const pageData = JSON.parse(pageDataStr);
         const data = {
-          flightType: "OW",
+          flightType: "RT",
           origin: origin,
           destination: destination,
           departure: date,
@@ -2880,7 +2879,7 @@ async function refreshMultipassTab() {
         if (Array.isArray(route.arrivalStations)) {
           route.arrivalStations = route.arrivalStations.filter(arrival => {
             if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
             }
             return true;
           });
@@ -2902,7 +2901,7 @@ async function refreshMultipassTab() {
         if (Array.isArray(route.arrivalStations)) {
           route.arrivalStations = route.arrivalStations.filter(arrival => {
             if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
             }
             return true;
           });
@@ -2926,7 +2925,7 @@ async function refreshMultipassTab() {
       debugLogger("Filtered origins:", origins);
     }
   
-    // 5) Optionally, if only destination is ANY and origin is specified, filter destinations.
+    // 5) If only destination is ANY and origin is specified, filter destinations.
     if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
       debugLogger("Destination = ANY; filtering destinations by direct routes");
       let fetchedRoutes = await fetchDestinations();
@@ -2934,7 +2933,7 @@ async function refreshMultipassTab() {
         if (Array.isArray(route.arrivalStations)) {
           route.arrivalStations = route.arrivalStations.filter(arrival => {
             if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[0]) >= new Date(arrival.operationStartDate);
+              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
             }
             return true;
           });
