@@ -1141,7 +1141,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/a
         const pageDataStr = localStorage.getItem("wizz_page_data") || "{}";
         const pageData = JSON.parse(pageDataStr);
         const data = {
-          flightType: "OW",
+          flightType: "RT",
           origin: origin,
           destination: destination,
           departure: date,
