@@ -3834,10 +3834,20 @@ async function refreshMultipassTab() {
     popupEl.appendChild(headerRow);
   
     // Compute minDate from minSelectableDate if provided
-    const minDate = minSelectableDate ? parseLocalDate(minSelectableDate) : new Date(new Date().setHours(0, 0, 0, 0));
-    const todayMidnight = new Date(new Date().setHours(0, 0, 0, 0));
-    const lastBookable = new Date(todayMidnight.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
-  
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // local midnight
+
+    // Normalize minDate to a local-midnight Date as well:
+    const minDate = minSelectableDate
+      ? parseLocalDate(minSelectableDate) // parseLocalDate already returns local midnight
+      : new Date(todayMidnight.getFullYear(), todayMidnight.getMonth(), todayMidnight.getDate());
+
+    // Build lastBookable as local-midnight by using date components (works across DST)
+    const lastBookable = new Date(
+      todayMidnight.getFullYear(),
+      todayMidnight.getMonth(),
+      todayMidnight.getDate() + maxDaysAhead
+    );
     // Disable Prev navigation if current month is before the minimum selectable month
     const currentMonthDate = new Date(year, month);
     const minMonthDate = new Date(minDate.getFullYear(), minDate.getMonth());
