@@ -38,102 +38,99 @@
       return true;
     });
     
-    function waitForDynamicUrl() {
-      return new Promise((resolve, reject) => {
-        const maxAttempts = 10;
-        let attempt = 0;
-    
-        const startObserver = () => {
-          try {
-            const observer = new MutationObserver((mutations, obs) => {
-              if (document.body.urls && document.body.urls.flightSearchUrlJson) {
-                obs.disconnect();
-                resolve(document.body.urls.flightSearchUrlJson);
-              }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-    
-            const interval = setInterval(() => {
-              attempt++;
-              if (document.body && document.body.urls && document.body.urls.flightSearchUrlJson) {
-                clearInterval(interval);
-                observer.disconnect();
-                resolve(document.body.urls.flightSearchUrlJson);
-                return;
-              }
-    
-              const headContent = document.head.innerHTML;
-              const bodyContent = document.body ? document.body.innerHTML : "";
-              const headMatch = headContent.match(/"searchFlight":"https:\/\/multipass\.wizzair\.com[^"]+\/([^"]+)"/);
-              const bodyMatch = bodyContent.match(/window\.CVO\.flightSearchUrlJson\s*=\s*"(https:\/\/multipass\.wizzair\.com[^"]+)"/);
-    
-              let dynamicUrl;
-              if (headMatch && headMatch[1]) {
-                dynamicUrl = `https://multipass.wizzair.com/w6/subscriptions/json/availability/${headMatch[1]}`;
-              } else if (bodyMatch && bodyMatch[1]) {
-                dynamicUrl = bodyMatch[1];
-              }
-    
-              if (dynamicUrl) {
-                clearInterval(interval);
-                observer.disconnect();
-                resolve(dynamicUrl);
-                return;
-              }
-    
-              if (attempt >= maxAttempts) {
-                clearInterval(interval);
-                observer.disconnect();
-                reject(new Error("Dynamic URL not found after waiting"));
-              }
-            }, 500);
-          } catch (e) {
-            reject(e);
-          }
-        };
-    
-        if (!document.body) {
-          document.addEventListener("DOMContentLoaded", startObserver, { once: true });
-        } else {
-          startObserver();
-        }
-      });
-    }
-    
-    if (!window.cachedDynamicUrlPromise) {
-      window.cachedDynamicUrlPromise = waitForDynamicUrl();
-    }
-    
-    function handleGetDynamicUrl(sendResponse) {
-      window.cachedDynamicUrlPromise
-        .then(dynamicUrl => {
-          sendResponse({ dynamicUrl });
-        })
-        .catch(err => {
-          console.error("[Content.js] Dynamic URL not found", err);
-          sendResponse({ error: err.message });
-        });
-      return true;
-    }
-    
-    function handleGetHeaders(sendResponse) {
+function waitForDynamicUrl() {
+  return new Promise((resolve, reject) => {
+    const maxAttempts = 10;
+    let attempt = 0;
+
+    const startObserver = () => {
       try {
-        const headers = {};
-        performance.getEntriesByType("resource").forEach(entry => {
-          if (entry.name.includes("https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets")) {
-            entry.serverTiming.forEach(timing => {
-              if (timing.name.startsWith("request_header_")) {
-                headers[timing.name.replace("request_header_", "")] = timing.description;
-              }
-            });
+        const observer = new MutationObserver((mutations, obs) => {
+          if (attempt >= maxAttempts) {
+            obs.disconnect();
+            reject(new Error("Dynamic URL not found within max attempts"));
+            return;
           }
         });
-        sendResponse({ headers });
+
+        observer.observe(document.body, { 
+          childList: true, 
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['pass_id']
+        });
+
+        const interval = setInterval(() => {
+          attempt++;
+
+          const scripts = document.querySelectorAll('script');
+          for (let script of scripts) {
+            if (script.textContent && script.textContent.includes('DD_RUM.setUser')) {
+              try {
+                // Looking pass_id in json
+                const passMatch = script.textContent.match(/\bpass_id\s*:\s*['"]?([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})['"]?/);
+                if (passMatch && passMatch[1]) {
+                  clearInterval(interval);
+                  observer.disconnect();
+                  const dynamicUrl = `https://multipass.wizzair.com/w6/subscriptions/json/availability/${passMatch[1]}`;
+                  resolve(dynamicUrl);
+                  return;
+                }
+              } catch (e) {
+                // ignoring JSON parse errors
+              }
+            }
+          }
+        }, 1000);
       } catch (e) {
-        console.error("[Content.js] Error getting headers:", e);
-        sendResponse({ error: e.message });
+        console.error('[waitForDynamicUrl] Catch exception:', e);
+        reject(e);
       }
+    };
+
+    if (!document.body) {
+      document.addEventListener("DOMContentLoaded", startObserver, { once: true });
+    } else {
+      startObserver();
     }
+  });
+}
+
+
+if (!window.cachedDynamicUrlPromise) {
+  window.cachedDynamicUrlPromise = waitForDynamicUrl();
+}
+
+function handleGetDynamicUrl(sendResponse) {
+  window.cachedDynamicUrlPromise
+    .then(dynamicUrl => {
+      sendResponse({ dynamicUrl });
+    })
+    .catch(err => {
+      console.error("[Content.js] Dynamic URL not found", err);
+      sendResponse({ error: err.message });
+    });
+  return true;
+}
+
+function handleGetHeaders(sendResponse) {
+  try {
+    const headers = {};
+    performance.getEntriesByType("resource").forEach(entry => {
+      if (entry.name.includes("https://multipass.wizzair.com/w6/subscriptions/spa/private-page/passs")) {
+        entry.serverTiming.forEach(timing => {
+          if (timing.name.startsWith("request_header_")) {
+            headers[timing.name.replace("request_header_", "")] = timing.description;
+          }
+        });
+      }
+    });
+    sendResponse({ headers });
+  } catch (e) {
+    console.error("[Content.js] Error getting headers:", e);
+    sendResponse({ error: e.message });
+  }
+}
     
     function handleGetDestinations(sendResponse) {
       setTimeout(() => {
