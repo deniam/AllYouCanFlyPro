@@ -12,6 +12,7 @@ db.version(2).stores({
 
 // Mapping for multi-airport cities:
 // Keys are the city code used in autocomplete, values are arrays of actual airport codes.
+// This object is intentionally mutable — custom groups added at runtime extend it in place.
 export const MULTI_AIRPORT_CITIES = {
   "LON": ["LTN", "LGW"],
   "PAR": ["ORY", "BVA"],
@@ -94,8 +95,13 @@ function getCountryFlag(country) {
   return flagMapping[country] || "";
 }
 
+// Mutable registry for user-defined custom group names.
+// app.js populates this at runtime; cityNameLookup checks it before the static mapping.
+export const customCityNames = {};
+
 // Helper to look up a display name for multi-airport cities.
 export function cityNameLookup(cityCode) {
+  if (customCityNames[cityCode]) return customCityNames[cityCode];
   const mapping = {
     "LON": "London (Any)",
     "PAR": "Paris (Any)",
@@ -160,7 +166,7 @@ export async function loadAirportsData() {
     }
   });
 
-  // Add multi-airport city entries.
+  // Add built-in multi-airport city entries.
   Object.keys(MULTI_AIRPORT_CITIES).forEach(cityCode => {
     const airportCodes = MULTI_AIRPORT_CITIES[cityCode];
     let country = "";
@@ -177,6 +183,24 @@ export async function loadAirportsData() {
       flag: getCountryFlag(country)
     });
   });
+
+  // Load user-defined custom airport groups from localStorage and merge them in.
+  try {
+    const saved = JSON.parse(localStorage.getItem('customAirportGroups') || '[]');
+    saved.forEach(group => {
+      if (!group.key || !group.name || !Array.isArray(group.airports)) return;
+      MULTI_AIRPORT_CITIES[group.key] = group.airports;
+      customCityNames[group.key] = group.name;
+      airportsMap.set(group.key, {
+        code: group.key,
+        name: group.name,
+        country: '',
+        flag: '✈️'
+      });
+    });
+  } catch (e) {
+    console.warn('Failed to load custom airport groups:', e);
+  }
 
   // Convert map to a sorted array.
   const AIRPORTS = Array.from(airportsMap.values()).sort((a, b) =>

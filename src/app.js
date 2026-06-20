@@ -1,6 +1,6 @@
 import { routesData } from './data/routes.js';
 import Dexie from '../src/libs/dexie.mjs';
-import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup } from './data/airports.js';
+import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames } from './data/airports.js';
 // ----------------------- Global Settings -----------------------
   // Throttle and caching parameters (loaded from localStorage if available)
   let debug = localStorage.getItem('debugMode') === 'true' || false;
@@ -1964,37 +1964,87 @@ async function refreshMultipassTab() {
     let routeCounter = 0;
 
     //
-    // 4) Iterate each candidate, update progress, fetch two legs, combine if valid
+    // 4) Smart-grouped iteration: group by whichever leg covers more candidates per
+    //    unique pair, so one empty-leg result eliminates the most follow-up fetches.
     //
-    for (const { origin, B, N, destination } of candidates) {
-      if (searchCancelled) break;
+    const byFirstLeg = new Map();
+    const bySecondLeg = new Map();
+    for (const cand of candidates) {
+      const k1 = `${cand.origin}|${cand.B}`;
+      const k2 = `${cand.N}|${cand.destination}`;
+      if (!byFirstLeg.has(k1)) byFirstLeg.set(k1, []);
+      byFirstLeg.get(k1).push(cand);
+      if (!bySecondLeg.has(k2)) bySecondLeg.set(k2, []);
+      bySecondLeg.get(k2).push(cand);
+    }
 
-      // update UI
-      routeCounter++;
-      updateProgress(
-        routeCounter,
-        totalRoutes,
-        B !== N ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}` : `Checking route: ${origin} → ${B} → ${destination}`
-      );
+    // Choose the grouping whose keys cover more candidates on average.
+    const groupByFirst = byFirstLeg.size <= bySecondLeg.size;
 
-      // first leg: exact selectedDate
-      const flights1 = await loadFlights(origin, B, selectedDate, [0]);
-      if (!flights1.length) continue;
-
-      // second leg: allow day-offsets per user settings
-      const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
-      if (!flights2.length) continue;
-        debugLogger(`Found ${flights1.length} flights for ${origin} → ${B} and ${flights2.length} flights for ${N} → ${destination}
-        (${flights2.map(f => f.calculatedDuration.departureDate.toISOString()).join(", ")})`);
-      // combine and append to results or UI
-      combineAndAppend(
-        flights1,
-        flights2,
-        minConnection,
-        maxConnection,
-        results,
-        shouldAppend
-      );
+    if (groupByFirst) {
+      for (const [, group] of byFirstLeg) {
+        if (searchCancelled) break;
+        const { origin, B } = group[0];
+        const flights1 = await loadFlights(origin, B, selectedDate, [0]);
+        if (!flights1.length) {
+          routeCounter += group.length;
+          updateProgress(routeCounter, totalRoutes, `No flights: ${origin} → ${B}`);
+          continue;
+        }
+        // Deduplicate second legs within this first-leg group.
+        const bySecondInGroup = new Map();
+        for (const cand of group) {
+          const k2 = `${cand.N}|${cand.destination}`;
+          if (!bySecondInGroup.has(k2)) bySecondInGroup.set(k2, []);
+          bySecondInGroup.get(k2).push(cand);
+        }
+        for (const [, subGroup] of bySecondInGroup) {
+          if (searchCancelled) break;
+          const { N, destination } = subGroup[0];
+          routeCounter += subGroup.length;
+          updateProgress(routeCounter, totalRoutes,
+            N !== B
+              ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}`
+              : `Checking route: ${origin} → ${B} → ${destination}`
+          );
+          const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
+          if (!flights2.length) continue;
+          debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
+          combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
+        }
+      }
+    } else {
+      for (const [, group] of bySecondLeg) {
+        if (searchCancelled) break;
+        const { N, destination } = group[0];
+        const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
+        if (!flights2.length) {
+          routeCounter += group.length;
+          updateProgress(routeCounter, totalRoutes, `No flights: ${N} → ${destination}`);
+          continue;
+        }
+        // Deduplicate first legs within this second-leg group.
+        const byFirstInGroup = new Map();
+        for (const cand of group) {
+          const k1 = `${cand.origin}|${cand.B}`;
+          if (!byFirstInGroup.has(k1)) byFirstInGroup.set(k1, []);
+          byFirstInGroup.get(k1).push(cand);
+        }
+        for (const [, subGroup] of byFirstInGroup) {
+          if (searchCancelled) break;
+          const { origin, B } = subGroup[0];
+          routeCounter += subGroup.length;
+          updateProgress(routeCounter, totalRoutes,
+            N !== B
+              ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}`
+              : `Checking route: ${origin} → ${B} → ${destination}`
+          );
+          const flights1 = await loadFlights(origin, B, selectedDate, [0]);
+          if (!flights1.length) continue;
+          debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
+          combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
+        }
+      }
     }
 
     debugLogger(
@@ -2196,101 +2246,160 @@ async function refreshMultipassTab() {
     console.table(candidates);
 
 
-    // ─── 4) load & stitch only the survivors ───
+    // ─── 4) Smart-grouped load & stitch: check outer legs once per unique pair,
+    //        skipping the inner legs entirely when an outer leg has no flights.
+    //        Group by whichever outer leg has fewer unique keys (more candidates per
+    //        key → bigger saving per empty result).
     const totalCandidates = candidates.length;
     let processedCandidates = 0;
 
-    for (let { O, A, X, B, Y, D } of candidates) {
+    const byOuterFirst = new Map();   // keyed by (O,A)
+    const byOuterThird = new Map();   // keyed by (B,D)
+    for (const cand of candidates) {
+      const k1 = `${cand.O}|${cand.A}`;
+      const k3 = `${cand.B}|${cand.D}`;
+      if (!byOuterFirst.has(k1)) byOuterFirst.set(k1, []);
+      byOuterFirst.get(k1).push(cand);
+      if (!byOuterThird.has(k3)) byOuterThird.set(k3, []);
+      byOuterThird.get(k3).push(cand);
+    }
+    // Outer group with fewer unique keys has more candidates per key → check it first.
+    const outerGroupByFirst = byOuterFirst.size <= byOuterThird.size;
+    const outerMap   = outerGroupByFirst ? byOuterFirst : byOuterThird;
+    const innerKeyFn = outerGroupByFirst
+      ? cand => `${cand.B}|${cand.D}`
+      : cand => `${cand.O}|${cand.A}`;
+
+    for (const [, outerGroup] of outerMap) {
       if (searchCancelled) break;
-      // Progress update
-      processedCandidates++;
-      const progressMessage = 
-        A === X && B === Y ? `Checking route: ${O} → ${A} → ${B} → ${D}` :
-        A !== X && B === Y ? `Checking route: ${O} → ${A} ⇄ ${X} → ${B} → ${D}` :
-        A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} ⇄ ${B} → ${D}` :
-        `Checking route: ${O} → ${A} ⇄ ${X} → ${Y} ⇄ ${B} → ${D}`;
-        updateProgress(processedCandidates, totalCandidates, progressMessage);
 
-      // leg 1: real flight O→A
-      const f1 = await loadFlights(O, A, selectedDate, [0]);
-      if (!f1.length) continue;
+      // Fetch the outer leg (leg1 or leg3 depending on which grouping we chose).
+      let fOuter;
+      if (outerGroupByFirst) {
+        const { O, A } = outerGroup[0];
+        fOuter = await loadFlights(O, A, selectedDate, [0]);
+      } else {
+        const { B, D } = outerGroup[0];
+        fOuter = await loadFlights(B, D, selectedDate, allowedOffsets);
+      }
+      if (!fOuter.length) {
+        processedCandidates += outerGroup.length;
+        const label = outerGroupByFirst
+          ? `${outerGroup[0].O}→${outerGroup[0].A}` : `${outerGroup[0].B}→${outerGroup[0].D}`;
+        updateProgress(processedCandidates, totalCandidates, `No flights: ${label}`);
+        continue;
+      }
 
-      // leg 2: real flight X→Y
-      const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets);
-      if (!f2.length) continue;
+      // Within the outer group, group by the inner outer leg (leg3 or leg1).
+      const innerMap = new Map();
+      for (const cand of outerGroup) {
+        const k = innerKeyFn(cand);
+        if (!innerMap.has(k)) innerMap.set(k, []);
+        innerMap.get(k).push(cand);
+      }
 
-      // leg 3: real flight B→D
-      const f3 = await loadFlights(B, D, selectedDate, allowedOffsets);
-      if (!f3.length) continue;
+      for (const [, innerGroup] of innerMap) {
+        if (searchCancelled) break;
 
-      // now combine them with layover checks:
-      for (let flight1 of f1) {
-        for (let flight2 of f2) {
-          const gap1 = (flight2.calculatedDuration.departureDate
-                      - flight1.calculatedDuration.arrivalDate) / 60000;
-          if (gap1 < minConnection || gap1 > maxConnection) {
-            continue;
-          }
-          for (let flight3 of f3) {
-            const gap2 = (flight3.calculatedDuration.departureDate
-                        - flight2.calculatedDuration.arrivalDate) / 60000;
-            if (gap2 < minConnection || gap2 > maxConnection) {
-              continue;
+        let fInner;
+        if (outerGroupByFirst) {
+          const { B, D } = innerGroup[0];
+          fInner = await loadFlights(B, D, selectedDate, allowedOffsets);
+        } else {
+          const { O, A } = innerGroup[0];
+          fInner = await loadFlights(O, A, selectedDate, [0]);
+        }
+        if (!fInner.length) {
+          processedCandidates += innerGroup.length;
+          continue;
+        }
+
+        // Resolve f1 and f3 based on which grouping is active.
+        const f1 = outerGroupByFirst ? fOuter : fInner;
+        const f3 = outerGroupByFirst ? fInner : fOuter;
+
+        // Group remaining candidates by middle leg (X, Y).
+        const byMidLeg = new Map();
+        for (const cand of innerGroup) {
+          const km = `${cand.X}|${cand.Y}`;
+          if (!byMidLeg.has(km)) byMidLeg.set(km, []);
+          byMidLeg.get(km).push(cand);
+        }
+
+        for (const [, midGroup] of byMidLeg) {
+          if (searchCancelled) break;
+          const { O, A, X, B, Y, D } = midGroup[0];
+          processedCandidates += midGroup.length;
+          const progressMessage =
+            A === X && B === Y ? `Checking route: ${O} → ${A} → ${B} → ${D}` :
+            A !== X && B === Y ? `Checking route: ${O} → ${A} ⇄ ${X} → ${B} → ${D}` :
+            A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} ⇄ ${B} → ${D}` :
+            `Checking route: ${O} → ${A} ⇄ ${X} → ${Y} ⇄ ${B} → ${D}`;
+          updateProgress(processedCandidates, totalCandidates, progressMessage);
+
+          const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets);
+          if (!f2.length) continue;
+
+          for (let flight1 of f1) {
+            for (let flight2 of f2) {
+              const gap1 = (flight2.calculatedDuration.departureDate
+                          - flight1.calculatedDuration.arrivalDate) / 60000;
+              if (gap1 < minConnection || gap1 > maxConnection) continue;
+              for (let flight3 of f3) {
+                const gap2 = (flight3.calculatedDuration.departureDate
+                            - flight2.calculatedDuration.arrivalDate) / 60000;
+                if (gap2 < minConnection || gap2 > maxConnection) continue;
+
+                debugLogger(`    ✓ valid: [${flight1.key}]→[${flight2.key}]→[${flight3.key}]`);
+
+                const dep  = flight1.calculatedDuration.departureDate;
+                const arr  = flight3.calculatedDuration.arrivalDate;
+                const depUtc = flight1.departureDateUtc;
+                const arrUtc = flight3.arrivalDateUtc;
+                const totalDuration = Math.round((arrUtc - depUtc) / 60000);
+                const locA = airportLookup[flight1.arrivalStation];
+                const locBNode = airportLookup[flight2.departureStation];
+                const locC = airportLookup[flight2.arrivalStation];
+                const locD = airportLookup[flight3.departureStation];
+                const conn = Math.round(gap1 + gap2);
+                const changeDistanceKmOne = locA && locBNode
+                  ? Math.round(haversineDistance(locA.latitude, locA.longitude, locBNode.latitude, locBNode.longitude))
+                  : null;
+                const changeDistanceKmTwo = locC && locD
+                  ? Math.round(haversineDistance(locC.latitude, locC.longitude, locD.latitude, locD.longitude))
+                  : null;
+                const agg = {
+                  key: flight1.key + " | " + flight2.key + " | " + flight3.key,
+                  stops: "2 transfers",
+                  totalConnectionTime: conn,
+                  segments: [flight1, flight2, flight3],
+                  airportChangeOne: {
+                    from: flight1.arrivalStation,
+                    to: flight2.departureStation,
+                    distanceKm: changeDistanceKmOne
+                  },
+                  airportChangeTwo: {
+                    from: flight2.arrivalStation,
+                    to: flight3.departureStation,
+                    distanceKm: changeDistanceKmTwo
+                  },
+                  calculatedDuration: {
+                    hours: Math.floor(totalDuration / 60),
+                    minutes: totalDuration % 60,
+                    totalMinutes: totalDuration,
+                    departureDate: dep,
+                    arrivalDate: arr
+                  },
+                  formattedFlightDate: formatFlightDateCombined(dep, arr),
+                  currency: flight1.currency,
+                  displayPrice: flight1.displayPrice,
+                  priceTag: flight1.priceTag,
+                  route: [flight1.departureStationText, flight3.arrivalStationText]
+                };
+                if (shouldAppend) appendRouteToDisplay(agg);
+                results.push(agg);
+              }
             }
-
-            debugLogger(
-              `    ✓ valid: [${flight1.key}]→[${flight2.key}]→[${flight3.key}]`
-            );
-
-            // build your aggregated object:
-            const dep  = flight1.calculatedDuration.departureDate;
-            const arr  = flight3.calculatedDuration.arrivalDate;
-            const depUtc = flight1.departureDateUtc;
-            const arrUtc = flight3.arrivalDateUtc;
-            const totalDuration = Math.round((arrUtc - depUtc)/60000); // need to consider offsets
-            const locA = airportLookup[flight1.arrivalStation];
-            const locB = airportLookup[flight2.departureStation];
-            const locC = airportLookup[flight2.arrivalStation];
-            const locD = airportLookup[flight3.departureStation];
-            const conn = Math.round(gap1 + gap2);
-            const changeDistanceKmOne = locA && locB
-              ? Math.round(haversineDistance(locA.latitude, locA.longitude, locB.latitude, locB.longitude))
-              : null;
-
-            const changeDistanceKmTwo = locC && locD
-            ? Math.round(haversineDistance(locC.latitude, locC.longitude, locD.latitude, locD.longitude))
-            : null;
-            const agg = {
-              key: flight1.key + " | " + flight2.key + " | " + flight3.key,
-              stops: "2 transfers",
-              totalConnectionTime: conn,
-              segments: [flight1, flight2, flight3],
-              airportChangeOne: {
-                from: flight1.arrivalStation,
-                to: flight2.departureStation,
-                distanceKm: changeDistanceKmOne
-              },
-              airportChangeTwo: {
-                from: flight2.arrivalStation,
-                to: flight3.departureStation,
-                distanceKm: changeDistanceKmTwo
-              },
-              calculatedDuration: {
-                hours: Math.floor(totalDuration/60),
-                minutes: totalDuration % 60,
-                totalMinutes: totalDuration,
-                departureDate: dep,
-                arrivalDate:   arr
-              },
-              formattedFlightDate: formatFlightDateCombined(dep, arr),
-              currency: flight1.currency,
-              displayPrice: flight1.displayPrice,
-              priceTag: flight1.priceTag,
-              route: [flight1.departureStationText, flight3.arrivalStationText]
-            };
-            
-            if (shouldAppend) appendRouteToDisplay(agg);
-            results.push(agg);
           }
         }
       }
@@ -4183,8 +4292,119 @@ async function refreshMultipassTab() {
     });
   }
 
+  // ---------------- Custom Airport Groups ----------------
+
+  function loadCustomGroups() {
+    try {
+      return JSON.parse(localStorage.getItem('customAirportGroups') || '[]');
+    } catch { return []; }
+  }
+
+  function saveCustomGroups(groups) {
+    localStorage.setItem('customAirportGroups', JSON.stringify(groups));
+  }
+
+  function applyCustomGroup(group) {
+    MULTI_AIRPORT_CITIES[group.key] = group.airports;
+    customCityNames[group.key] = group.name;
+    if (!airportLookup[group.key]) {
+      const entry = { code: group.key, name: group.name, country: '', flag: '✈️' };
+      airportLookup[group.key] = entry;
+      AIRPORTS.push(entry);
+      AIRPORTS.sort((a, b) => a.code.localeCompare(b.code));
+    }
+  }
+
+  function removeCustomGroup(key) {
+    delete MULTI_AIRPORT_CITIES[key];
+    delete customCityNames[key];
+    delete airportLookup[key];
+    const idx = AIRPORTS.findIndex(a => a.code === key);
+    if (idx >= 0) AIRPORTS.splice(idx, 1);
+  }
+
+  function renderCustomGroupsList() {
+    const list = document.getElementById('custom-groups-list');
+    if (!list) return;
+    const groups = loadCustomGroups();
+    if (groups.length === 0) {
+      list.innerHTML = '<p class="text-xs text-gray-500 mb-2">No custom groups yet.</p>';
+      return;
+    }
+    list.innerHTML = groups.map(g => `
+      <div class="flex items-center justify-between bg-white border border-gray-300 rounded px-2 py-1 mb-1 text-xs gap-1">
+        <span class="font-semibold text-[#20006D] shrink-0">[${g.key}]</span>
+        <span class="font-medium truncate flex-1">${g.name}</span>
+        <span class="text-gray-500 shrink-0">${g.airports.join(', ')}</span>
+        <button class="delete-custom-group shrink-0 bg-red-500 hover:bg-red-600 text-white rounded px-1.5 py-0.5 cursor-pointer" data-key="${g.key}">✕</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('.delete-custom-group').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-key');
+        const updated = loadCustomGroups().filter(g => g.key !== key);
+        saveCustomGroups(updated);
+        removeCustomGroup(key);
+        renderCustomGroupsList();
+        showNotification(`Custom group "${key}" removed.`);
+      });
+    });
+  }
+
+  function initCustomGroupsUI() {
+    renderCustomGroupsList();
+
+    document.getElementById('toggle-custom-groups').addEventListener('click', () => {
+      const panel = document.getElementById('custom-groups-panel');
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden')) {
+        animateElement(panel, 'dropdown-enter', 300);
+      }
+    });
+
+    const keyInput = document.getElementById('custom-group-key');
+    keyInput.addEventListener('input', () => {
+      keyInput.value = keyInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    });
+
+    document.getElementById('add-custom-group-btn').addEventListener('click', () => {
+      const name = document.getElementById('custom-group-name').value.trim();
+      const key  = document.getElementById('custom-group-key').value.trim().toUpperCase();
+      const raw  = document.getElementById('custom-group-airports').value.trim();
+
+      if (!name) { showNotification('Please enter a group name.'); return; }
+      if (!key || key.length < 2 || key.length > 6) {
+        showNotification('Tag must be 2–6 uppercase letters/digits.'); return;
+      }
+      if (MULTI_AIRPORT_CITIES[key] || airportLookup[key]) {
+        showNotification(`Tag "${key}" is already in use — choose a different one.`); return;
+      }
+      const airports = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+      if (airports.length < 2) {
+        showNotification('Please enter at least 2 airport codes, comma-separated.'); return;
+      }
+      const unknown = airports.filter(code => !airportLookup[code]);
+      if (unknown.length) {
+        showNotification(`Unknown airport codes: ${unknown.join(', ')}`); return;
+      }
+
+      const group = { key, name, airports };
+      const groups = loadCustomGroups();
+      groups.push(group);
+      saveCustomGroups(groups);
+      applyCustomGroup(group);
+      renderCustomGroupsList();
+
+      document.getElementById('custom-group-name').value = '';
+      document.getElementById('custom-group-key').value  = '';
+      document.getElementById('custom-group-airports').value = '';
+
+      showNotification(`Group "${name}" [${key}] added! Type "${key}" in any airport field.`);
+    });
+  }
+
   // ---------------- Initialize on DOMContentLoaded ----------------
-  
+
   document.addEventListener("DOMContentLoaded", () => {
     // ========== 1. Load settings from localStorage ==========
     document.getElementById("preferred-airport").value = localStorage.getItem("preferredAirport") || "";
@@ -4200,6 +4420,7 @@ async function refreshMultipassTab() {
     checkDonationReminder();
     setupReminderActions();
     setInterval(checkDonationReminder, 10 * 1000);
+    initCustomGroupsUI();
 
     // ========== 2. Toggle Expert Settings ==========
     document.getElementById("toggle-expert-settings").addEventListener("click", (event) => {
