@@ -4,3 +4,6 @@ Thumbs.db
 .continue/*
 makefile
 temp_backup/*
+node_modules/
+coverage/
+extension.zip

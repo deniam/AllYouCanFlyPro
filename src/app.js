@@ -1,9 +1,37 @@
 import { routesData } from './data/routes.js';
-import Dexie from '../src/libs/dexie.mjs';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames } from './data/airports.js';
+import { createRouteCatalog } from './domain/route-catalog.js';
+import { getDatabase } from './infrastructure/database.js';
+import { createFlightCache, segmentCacheKey } from './infrastructure/cache-repository.js';
+import { createRequestThrottler } from './infrastructure/request-throttler.js';
+import { appState } from './app/state.js';
+import { createSettingsRepository } from './infrastructure/settings-repository.js';
+import { createExtensionGateway } from './infrastructure/extension-api.js';
+import { ErrorCode } from './infrastructure/errors.js';
+import { downloadBlob } from './ui/dom.js';
+import { createNotifier } from './ui/notifications.js';
+import { downloadTabSeparatedFile, escapeTabularCell } from './ui/csv-export.js';
+import { createMultipassClient } from './infrastructure/multipass-client.js';
+import { parseLocalDate } from './domain/dates.js';
+import { initMultiCalendar, renderCalendarMonth } from './ui/calendar.js';
+import { setupAirportAutocomplete } from './ui/autocomplete.js';
+import { createResultsRenderer } from './ui/results-renderer.js';
+import { createAirportFields } from './ui/airport-fields.js';
+import { createCustomGroupsController } from './ui/custom-groups.js';
+import { mountChangelog } from './ui/changelog.js';
+import { mountDonationReminder } from './ui/reminders.js';
+import { createSearchProgress } from './ui/search-progress.js';
+import { mountSettingsPanel } from './ui/settings-panel.js';
+import { unifyRawFlight } from './domain/flight-normalizer.js';
+import { createDirectSearch } from './domain/search/direct.js';
+import { runSearch } from './domain/search/orchestrator.js';
+import { createConnectionsSearch } from './domain/search/connections.js';
 // ----------------------- Global Settings -----------------------
+  const settingsRepository = createSettingsRepository(localStorage);
+  const extensionGateway = createExtensionGateway();
+  const initialSettings = settingsRepository.load();
   // Throttle and caching parameters (loaded from localStorage if available)
-  let debug = localStorage.getItem('debugMode') === 'true' || false;
+  let debug = initialSettings.debugMode;
   let debugLog = [];
   let originalConsoleWarn = console.warn;
     if (debug) {
@@ -13,24 +41,10 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
       };
     }
   const MAX_LOG_ENTRIES = 1000;
-  let activeTimeout = null;
-  let timeoutInterval = null;
-  let REQUESTS_FREQUENCY_MS = Number(localStorage.getItem('requestsFrequencyMs')) || 1800;
-  const MAX_RETRY_ATTEMPTS = 2;  
-  let PAUSE_DURATION_MS = Number(localStorage.getItem('pauseDurationSeconds'))
-    ? Number(localStorage.getItem('pauseDurationSeconds')) * 1000
-    : 1500;
-  let CACHE_LIFETIME = (Number(localStorage.getItem('cacheLifetimeHours')) || 4) * 60 * 60 * 1000;
+  let CACHE_LIFETIME = initialSettings.cacheLifetimeHours * 60 * 60 * 1000;
   // 4 hours in ms
-  let MAX_REQUESTS_IN_ROW = Number(localStorage.getItem('maxRequestsInRow')) || 50;
-  // Variables to track state
-  let requestsThisWindow = 0;
-  let searchCancelled = false;
-  let globalResults = [];
-  let globalDefaultResults = [];
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
-  const airportNames = {};
   let AIRPORTS = [];
   let COUNTRY_AIRPORTS = {};
   let airportFlags = {};
@@ -45,15 +59,17 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
   const reqFrequency = document.getElementById('requests-frequency').value;
   const pauseDur = document.getElementById('pause-duration').value;
   const cacheLife = document.getElementById('cache-lifetime').value;
-  localStorage.setItem('minConnectionTime', minConnection);
-  localStorage.setItem('maxConnectionTime', maxConnection);
-  localStorage.setItem('preferredAirport', preferredAirport);
-  localStorage.setItem('allowChangeAirport', allowChange);
-  localStorage.setItem('connectionRadius', connectionRadius);
-  localStorage.setItem('maxRequestsInRow', maxReq);
-  localStorage.setItem('requestsFrequencyMs', reqFrequency);
-  localStorage.setItem('pauseDurationSeconds', pauseDur);
-  localStorage.setItem('cacheLifetimeHours', cacheLife);
+  settingsRepository.update({
+    minConnectionTime: minConnection,
+    maxConnectionTime: maxConnection,
+    preferredAirport,
+    allowChangeAirport: allowChange,
+    connectionRadius,
+    maxRequestsInRow: maxReq,
+    requestsFrequencyMs: reqFrequency,
+    pauseDurationSeconds: pauseDur,
+    cacheLifetimeHours: cacheLife
+  });
   if (debug) {
     console.log('[DEBUG] Settings saved individually:', {
       minConnectionTime: minConnection,
@@ -69,19 +85,15 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
   }
 }
 
-    //---------DixieDB Initialisation------------------
-    const db = new Dexie("FlightSearchCache");
-    db.version(1).stores({
-      cache: 'key, timestamp'  // 'key' is our primary key; we also index the timestamp
-    });
-    db.version(2).stores({
-      cache: 'key, timestamp',
-      routes: '++id, departureStation'
-    });
+    // IndexedDB is used only for the API response cache. Static routes stay in
+    // the packaged module and are indexed once in memory.
+    const db = getDatabase();
+    const flightCache = createFlightCache(db, () => CACHE_LIFETIME);
+    const routeCatalog = createRouteCatalog(routesData);
 
   async function initAirports() {
     try {
-      const { AIRPORTS: loadedAirports, COUNTRY_AIRPORTS: loadedCountryAirports } = await loadAirportsData();
+      const { AIRPORTS: loadedAirports, COUNTRY_AIRPORTS: loadedCountryAirports } = await loadAirportsData(routesData);
       AIRPORTS = loadedAirports;
       COUNTRY_AIRPORTS = loadedCountryAirports;
       
@@ -93,60 +105,28 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
         airportLookup[airport.code] = airport;
       });
             
-      // Now initialize UI components that rely on the airport data.
-      setupAutocomplete("origin-multi", "origin-suggestions");
-      setupAutocomplete("destination-multi", "destination-suggestions");
-      
     } catch (error) {
       console.error("Error loading airports data:", error);
     }
     // Removed the stray closing brace as it was not part of any valid block or function.
   }
-  // Restore saved tab context (supports Chrome and Orion)
-  const storageApi = (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)
-    ? chrome.storage.local
-    : (typeof browser !== 'undefined' && browser.storage && browser.storage.local)
-      ? browser.storage.local
-      : null;
-    
-  if (storageApi) {
-    storageApi.get("currentTabContext", (result) => {
+  // Restore saved tab context through the WebExtensions compatibility gateway.
+  extensionGateway.storageGet("currentTabContext")
+    .then(result => {
       const ctx = result?.currentTabContext;
       if (ctx) {
-        window.currentTabContext = ctx;
+        appState.currentTabContext = ctx;
         const tabInfoEl = document.getElementById("tab-info");
         if (tabInfoEl) tabInfoEl.textContent = `Current Tab: ${ctx.title} (${ctx.url})`;
-        storageApi.remove("currentTabContext");
+        extensionGateway.storageRemove("currentTabContext");
       }
-    });
-  } else {
-    // Fallback for Orion: use localStorage
-    const saved = JSON.parse(localStorage.getItem("currentTabContext") || "{}");
-    if (saved.currentTabContext) {
-      window.currentTabContext = saved.currentTabContext;
-      const tabInfoEl = document.getElementById("tab-info");
-      if (tabInfoEl) tabInfoEl.textContent = `Current Tab: ${saved.currentTabContext.title} (${saved.currentTabContext.url})`;
-      localStorage.removeItem("currentTabContext");
-    }
-  }
+    })
+    .catch(error => debugLogger("Unable to restore tab context:", error));
 
-  async function importRoutes() {
-    try {
-      await db.routes.clear();
-      await db.routes.bulkAdd(routesData);
-      // Load routes from Dexie and assign them to a global variable
-      const routes = await db.routes.toArray();
-      window.ROUTES = routes;  // now ROUTES is defined globally
-    } catch (error) {
-      console.error("Error importing routes:", error);
-    }
-  }
-  
   async function initApp() {
-    await importRoutes();    // Wait for routes data to be imported and stored in IndexedDB (fills window.ROUTES)
-    await initAirports();    // Then load airports and initialize autocomplete (which uses window.ROUTES)
+    await initAirports();
   }
-  initApp();
+  const initializationPromise = initApp();
   // ---------------- Helper: Airport Flag ----------------
   const airportLookup = {};
 
@@ -192,30 +172,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
     return "";
   }
   
-    // === Pre-index routesData for O(1) lookups ===
-    const routesByOrigin = new Map();               // origin → [route,…]
-    const routesByOriginAndDestination = {};        // origin → (destination → route)
-    
-    routesData.forEach(route => {
-      // normalize origin code
-      const origin = typeof route.departureStation === 'object'
-        ? route.departureStation.id
-        : route.departureStation;
-    
-      // fill routesByOrigin
-      if (!routesByOrigin.has(origin)) {
-        routesByOrigin.set(origin, []);
-      }
-      routesByOrigin.get(origin).push(route);
-    
-      // fill routesByOriginAndDestination
-      (route.arrivalStations || []).forEach(arr => {
-        const dest = typeof arr === 'object' ? arr.id : arr;
-        routesByOriginAndDestination[origin] ??= {};
-        routesByOriginAndDestination[origin][dest] = route;
-      });
-    });
-  
   // ----------------------- DOM Elements -----------------------
   const progressContainer = document.getElementById('progress-container');
   const progressText = document.getElementById('progress-text');
@@ -224,7 +180,24 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
   const resultsAndSortContainer = document.getElementById("results-and-sort-container");
   const totalResultsEl = document.getElementById("total-results");
   const sortSelect = document.getElementById("sort-select");
+  const searchProgress = createSearchProgress({
+    container: progressContainer,
+    text: progressText,
+    bar: progressBar,
+    resultsContainer,
+    timeoutStatus: document.getElementById("timeout-status")
+  });
   let currentSortOption = "default";
+  const resultsRenderer = createResultsRenderer({
+    list: document.querySelector(".route-list"),
+    toolbar: resultsAndSortContainer,
+    total: totalResultsEl,
+    countryFor: getCountry,
+    flagFor: getCountryFlag,
+    airportName: code => airportLookup[code]?.name ?? code,
+    logger: debugLogger
+  });
+  const airportFields = createAirportFields({ setupAutocomplete });
 
     const settingSelectors = [
     '#min-connection-time',
@@ -250,16 +223,15 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
     currentSortOption = sortSelect.value;
     if (currentSortOption === "default") {
       // Render using the preserved unsorted order.
-      if (window.currentTripType === "return") {
-        displayRoundTripResultsAll(globalDefaultResults);
+      if (appState.tripType === "return") {
+        displayRoundTripResultsAll(appState.defaultResults);
       } else {
-        displayGlobalResults(globalDefaultResults);
+        displayGlobalResults(appState.defaultResults);
       }
     } else {
       // Work on a shallow copy of the default order so the original remains intact.
-      let sortedResults = [...globalDefaultResults];
-      sortResultsArray(sortedResults, currentSortOption);
-      if (window.currentTripType === "return") {
+      let sortedResults = [...appState.defaultResults];
+      if (appState.tripType === "return") {
         displayRoundTripResultsAll(sortedResults);
       } else {
         displayGlobalResults(sortedResults);
@@ -293,111 +265,49 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
 
   // ----------------------- UI Helper Functions -----------------------
   function updateProgress(current, total, message) {
-    resultsContainer.classList.remove("hidden");
-      progressContainer.style.display = "block";
-      progressText.textContent = `${message} (${current} of ${total})`;
-      const percentage = total > 0 ? (current / total) * 100 : 0;
-      progressBar.style.width = percentage + "%";
+    searchProgress.update(current, total, message);
   }
 
   function hideProgress() {
-    progressContainer.style.display = "none";
+    searchProgress.hide();
   }
   
   function resetCountdownTimers() {
-    if (activeTimeout) {
-      clearTimeout(activeTimeout);
-      activeTimeout = null;
-    }
-    if (timeoutInterval) {
-      clearInterval(timeoutInterval);
-      timeoutInterval = null;
-    }
-    const timeoutEl = document.getElementById("timeout-status");
-    timeoutEl.textContent = "";
-    timeoutEl.style.display = "none";
+    searchProgress.resetCountdown();
   }
 
   function showTimeoutCountdown(waitTimeMs) {
-    resetCountdownTimers();
-    const timeoutEl = document.getElementById("timeout-status");
-    let seconds = Math.floor(waitTimeMs / 1000);
-    timeoutEl.style.display = "block";
-    timeoutEl.style.color = "";
-    timeoutInterval = setInterval(() => {
-      seconds--;
-      if (waitTimeMs == 40000) {
-        timeoutEl.style.color = "red";
-        timeoutEl.textContent = `Rate limit encountered, pausing for ${seconds} seconds. Increase values inside of Expert Settings or take a break between searches.`;
-      } else {
-        timeoutEl.style.color = "";
-        timeoutEl.textContent = `Pausing for ${seconds} seconds to avoid API rate limits...`;
-      }
-      if (seconds <= 0) {
-        clearInterval(timeoutInterval);
-        timeoutInterval = null;
-        timeoutEl.textContent = "";
-        timeoutEl.style.display = "none";
-      }
-    }, 1000);
+    searchProgress.showCountdown(waitTimeMs);
   }
 
-  let throttleResetTimer = null;
-
-  async function throttleRequest() {
-    if (searchCancelled) return;
-  
-    if (throttleResetTimer) {
-      clearTimeout(throttleResetTimer);
-      throttleResetTimer = null;
-    }
-  
-    if (requestsThisWindow >= MAX_REQUESTS_IN_ROW) {
-      debugLogger(`Reached ${MAX_REQUESTS_IN_ROW} consecutive requests; pausing for ${PAUSE_DURATION_MS}ms`);
-      showTimeoutCountdown(PAUSE_DURATION_MS);
-      await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION_MS));
-      requestsThisWindow = 0;
-    }
-  
-    const startTime = performance.now();
-    requestsThisWindow++;
-  
-    // Recalculate delay on every request
-    const delay = REQUESTS_FREQUENCY_MS + Math.floor(151 * (performance.now() % 1));
-    await new Promise(resolve => {
-      activeTimeout = setTimeout(() => {
-        if (!searchCancelled) {
-          resolve();
-        }
-      }, delay);
-    });
-    if (searchCancelled) {
-      return;
-    }
-  
-    const endTime = performance.now();
-    const actualDelay = endTime - startTime;
-    // debugLogger(`Actual request delay: ${actualDelay.toFixed(2)} ms (Expected: ${delay} ms)`);
-  
-    throttleResetTimer = setTimeout(() => {
-      requestsThisWindow = 0;
-    }, 10000);
-  }
+  const requestThrottler = createRequestThrottler(
+    () => settingsRepository.load(),
+    waitTimeMs => showTimeoutCountdown(waitTimeMs)
+  );
+  const multipassClient = createMultipassClient({
+    gateway: extensionGateway,
+    cache: flightCache,
+    throttler: requestThrottler,
+    logger: debugLogger,
+    onPause: waitTimeMs => showTimeoutCountdown(waitTimeMs)
+  });
 
   function updateThrottleSettings() {
-    MAX_REQUESTS_IN_ROW = parseInt(document.getElementById("max-requests").value, 10);
-    REQUESTS_FREQUENCY_MS = parseInt(document.getElementById("requests-frequency").value, 10);
+    const maxRequestsInRow = parseInt(document.getElementById("max-requests").value, 10);
+    const requestsFrequencyMs = parseInt(document.getElementById("requests-frequency").value, 10);
     const pauseDur = parseInt(document.getElementById("pause-duration").value, 10);
-    PAUSE_DURATION_MS = pauseDur * 1000;
-    localStorage.setItem("maxRequestsInRow", MAX_REQUESTS_IN_ROW);
-    localStorage.setItem("requestsFrequencyMs", REQUESTS_FREQUENCY_MS);
-    localStorage.setItem("pauseDurationSeconds", pauseDur);
-    debugLogger(`Throttle settings updated: Max Requests = ${MAX_REQUESTS_IN_ROW}, Requests Frequency = ${REQUESTS_FREQUENCY_MS}ms, Pause Duration = ${PAUSE_DURATION_MS / 1000}s`);
+    settingsRepository.update({
+      maxRequestsInRow,
+      requestsFrequencyMs,
+      pauseDurationSeconds: pauseDur
+    });
+    requestThrottler.reset();
+    debugLogger(`Throttle settings updated: Max Requests = ${maxRequestsInRow}, Requests Frequency = ${requestsFrequencyMs}ms, Pause Duration = ${pauseDur}s`);
   }
   function updateCacheLifetimeSetting() {
     const hours = parseFloat(document.getElementById("cache-lifetime").value);
     CACHE_LIFETIME = hours * 60 * 60 * 1000;
-    localStorage.setItem("cacheLifetimeHours", hours);
+    settingsRepository.update({ cacheLifetimeHours: hours });
   }
 
   function animateElement(element, animationClass, duration = 300) {
@@ -409,22 +319,6 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
     }
   }
 
-  /**
-   * Returns distance between two coordinates in kilometers.
-   */
-  function haversineDistance(lat1, lon1, lat2, lon2) {
-    const toRad = x => x * Math.PI / 180;
-    const R = 6371; // earth radius km
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const distance = R * c; // distance in km
-    return distance;
-  }
   //===========Autocomplete Functions================
 // Assumptions:
 //   - Global variables AIRPORTS, COUNTRY_AIRPORTS, and ROUTES are available and populated.
@@ -433,306 +327,25 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
 //   - ROUTES is an array of route objects loaded from Dexie (instead of the old static routesData).
 
   function setupAutocomplete(inputId, suggestionsId) {
-    const inputEl = document.getElementById(inputId);
-    const suggestionsEl = document.getElementById(suggestionsId);
-
-    const lowerInputId = inputId.toLowerCase();
-    
-    function getDirectSuggestionsForDestination() {
-      // 1) Read dates: Input field, or default to 4 days from now
-      const rawDates = document.getElementById("departure-date").value || "";
-      let selectedDates = rawDates
-        .split(",")
-        .map(s => s.trim())
-        .filter(Boolean);
-      if (!selectedDates.length) {
-        const today = new Date();
-        selectedDates = Array.from({ length: 4 }, (_, i) =>
-          new Date(today.getTime() + i * 86400000)
-            .toISOString()
-            .slice(0, 10)
-        );
-      }
-    
-      // 2) Take origins
-      const origins = getMultiAirportValues("origin-multi")
-        .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
-    
-      const suggestionsMap = new Map();
-    
-      origins.forEach(origin => {
-        // 3) Expand multiairports (LON→[LTN,LGW…])
-        const resolved = resolveAirport(origin);
-        const originCodes = resolved.flatMap(code => {
-          const key = code.toUpperCase();
-          return MULTI_AIRPORT_CITIES[key] || [key];
-        });
-    
-        originCodes.forEach(code => {
-          const matching = routesByOrigin.get(code) || [];
-          if (matching.length) {
-            matching.forEach(route => {
-              // 4) Filtering arrivalStations by dates
-              (route.arrivalStations || [])
-                .filter(arr => 
-                  !arr.flightDates
-                  || selectedDates.some(d => arr.flightDates.includes(d))
-                )
-                .forEach(arr => {
-                  const id   = typeof arr === "object" ? arr.id   : arr;
-                  const name = typeof arr === "object"
-                    ? arr.name
-                    : airportLookup[id]?.name || id;
-                  if (id && name && !suggestionsMap.has(id)) {
-                    suggestionsMap.set(id, name);
-                  }
-                });
-            });
-          } else {
-            // fallback by clean AIRPORTS
-            const found = AIRPORTS.find(a => a.code === code);
-            if (found && !suggestionsMap.has(found.code)) {
-              suggestionsMap.set(found.code, found.name);
-            }
-          }
-        });
-      });
-    
-      // 5) Merge and sort
-      const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
-        isCountry: false,
-        code,
-        name
-      }));
-      suggestions.sort((a, b) => a.name.localeCompare(b.name));
-      return suggestions;
-    }
-    
-    function getDirectSuggestionsForOrigin() {
-      // 1) Set dates (similar to getDirectSuggestionsForDestination)
-      const rawDates = document.getElementById("departure-date").value || "";
-      let selectedDates = rawDates
-        .split(",")
-        .map(s => s.trim())
-        .filter(Boolean);
-      if (!selectedDates.length) {
-        const today = new Date();
-        selectedDates = Array.from({ length: 4 }, (_, i) =>
-          new Date(today.getTime() + i * 86400000)
-            .toISOString()
-            .slice(0, 10)
-        );
-      }
-    
-      // 2) Take destinations
-      const destinations = getMultiAirportValues("destination-multi")
-        .filter(v => v.trim() && v.toLowerCase() !== "anywhere");
-    
-      const suggestionsMap = new Map();
-    
-      destinations.forEach(dest => {
-        // 3) Multiairport (LON→[LTN,LGW…])
-        const resolved = resolveAirport(dest);
-        const destCodes = resolved.flatMap(code => {
-          const key = code.toUpperCase();
-          return MULTI_AIRPORT_CITIES[key] || [key];
-        });
-    
-        destCodes.forEach(code => {
-          // 4) Search all routes where it is on arrivalStations
-          const matching = ROUTES.filter(route =>
-            (route.arrivalStations || []).some(arr => {
-              const arrId = typeof arr === "object" ? arr.id : arr;
-              // considering flightDates
-              return arrId === code
-                && (
-                  !arr.flightDates
-                  || selectedDates.some(d => arr.flightDates.includes(d))
-                );
-            })
-          );
-    
-          matching.forEach(route => {
-            // 5) Take departureStation fromn matching routes
-            const depObj = route.departureStation;
-            const id   = typeof depObj === "object" ? depObj.id   : depObj;
-            const name = typeof depObj === "object"
-              ? depObj.name
-              : airportLookup[id]?.name || id;
-            if (id && name && !suggestionsMap.has(id)) {
-              suggestionsMap.set(id, name);
-            }
-          });
-        });
-      });
-    
-      // 6) Merge and sort
-      const suggestions = Array.from(suggestionsMap, ([code, name]) => ({
-        isCountry: false,
-        code,
-        name
-      }));
-      suggestions.sort((a, b) => a.name.localeCompare(b.name));
-      return suggestions;
-    }
-    
-
-    let previousQuery = "";
-    let directAnimated = false;
-    function showSuggestions(query = "") {
-      // Guard: if suggestionsEl or inputEl are not defined, do nothing.
-      if (!inputEl || !suggestionsEl) return;
-      
-      suggestionsEl.innerHTML = "";
-      
-      // When a query is entered: filter the full catalog
-      if (query) {     
-        const countryMatches = Object.keys(COUNTRY_AIRPORTS)
-          .filter(country => country.toLowerCase().includes(query))
-          .map(country => ({ isCountry: true, code: country, name: country }));
-        
-        const airportMatches = AIRPORTS.filter(a => {
-          const codeLower = a.code.toLowerCase();
-          const nameLower = a.name.toLowerCase();
-          return codeLower.includes(query) || nameLower.includes(query);
-        }).map(a => ({ isCountry: false, code: a.code, name: a.name }));
-        
-        let matches = [...countryMatches, ...airportMatches];
-        matches.sort((a, b) => {
-          const aStarts = a.name.toLowerCase().startsWith(query);
-          const bStarts = b.name.toLowerCase().startsWith(query);
-          if (aStarts && !bStarts) return -1;
-          if (!aStarts && bStarts) return 1;
-          return a.name.localeCompare(b.name);
-        });
-        // Limit to six suggestions from filtering
-        matches = matches.slice(0, 6);
-        // For fields other than preferred-airport, always add "Anywhere" first.
-        if (inputId !== "preferred-airport") {
-          matches.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
-        }
-        
-        if (matches.length === 0) {
-          suggestionsEl.classList.add("hidden");
-          return;
-        }
-        
-        matches.forEach(match => {
-          const div = document.createElement("div");
-          div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
-          div.textContent = match.name;
-          div.addEventListener("click", () => {
-            inputEl.value = match.name;
-            suggestionsEl.classList.add("hidden");
-            if (inputId === "preferred-airport") {
-            localStorage.setItem("preferredAirport", match.name);
-            const originContainer = document.getElementById("origin-multi");
-            const firstInput = originContainer.querySelector("input");
-            if (firstInput) {
-              firstInput.value = match.name;
-              updateAirportRows(originContainer);
-            }
-            saveSettings();
-          }
-          });
-          suggestionsEl.appendChild(div);
-        });
-        const shouldAnimate = previousQuery.length === 0 && query.length > 0;
-        previousQuery = query;
-        suggestionsEl.style.maxHeight = "250px";
-        suggestionsEl.style.overflowY = "auto";
-        suggestionsEl.classList.remove("hidden");
-        if (shouldAnimate) {
-          suggestionsEl.classList.add("suggestions-enter");
-          setTimeout(() => {
-            suggestionsEl.classList.remove("suggestions-enter");
-          }, 300);
-        }
-        directAnimated = false;
-        return;
-      }
-      
-      // When no query is entered.
-      if (!query) {
-        // For the preferred-airport field, do not include "Anywhere"
-        if (inputId === "preferred-airport") {
-          // Show full list without fixed height
-          suggestionsEl.style.maxHeight = "";
-          suggestionsEl.style.overflowY = "";
-          suggestionsEl.classList.remove("hidden");
-          return;
-        }
-        
-        // For origin/destination fields when nothing is entered:
-        let directSuggestions = [];
-        if (lowerInputId.includes("destination")) {
-          directSuggestions = getDirectSuggestionsForDestination();
-        } else if (lowerInputId.includes("origin")) {
-          directSuggestions = getDirectSuggestionsForOrigin();
-        }
-        // Always add "Anywhere" first.
-        directSuggestions.unshift({ isCountry: false, code: "ANY", name: "Anywhere" });
-        
-        directSuggestions.forEach(suggestion => {
-          const div = document.createElement("div");
-          div.className = "flex justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100";
-          div.textContent = suggestion.name;
-          div.addEventListener("click", () => {
-            inputEl.value = suggestion.name;
-            suggestionsEl.classList.add("hidden");
-          });
-          suggestionsEl.appendChild(div);
-        });
-        const shouldAnimate = previousQuery.length === 0 && query.length > 0;
-        previousQuery = query;
-        suggestionsEl.style.maxHeight = "250px";
-        suggestionsEl.style.overflowY = "auto";
-        suggestionsEl.classList.remove("hidden");
-        if (!directAnimated) {
-          suggestionsEl.classList.add("suggestions-enter");
-          setTimeout(() => {
-            suggestionsEl.classList.remove("suggestions-enter");
-          }, 300);
-          directAnimated = true;
-        }
-        previousQuery = "";
-        return;
-      }
-      
-      suggestionsEl.style.maxHeight = "";
-      suggestionsEl.style.overflowY = "";
-      suggestionsEl.classList.remove("hidden");
-    }
-              // Show suggestions when the input is focused and empty.
-    inputEl.addEventListener("focus", () => {
-      if (!inputEl.value.trim()) {
-        showSuggestions();
+    setupAirportAutocomplete(inputId, suggestionsId, {
+      airports: () => AIRPORTS,
+      countries: () => COUNTRY_AIRPORTS,
+      groups: MULTI_AIRPORT_CITIES,
+      catalog: routeCatalog,
+      getValues: getMultiAirportValues,
+      resolve: resolveAirport,
+      onSelect: ({ inputId: selectedInputId, option }) => {
+        if (selectedInputId !== "preferred-airport") return;
+        settingsRepository.update({ preferredAirport: option.name });
+        const firstOrigin = document.querySelector("#origin-multi input");
+        if (firstOrigin) firstOrigin.value = option.name;
       }
     });
-
-    // Update suggestions as the user types.
-    inputEl.addEventListener("input", (e) => {
-      const query = e.target.value.trim().toLowerCase();
-      showSuggestions(query);
-    });
-
-    // Hide suggestions when clicking outside.
-    document.addEventListener("click", event => {
-      if (inputEl && suggestionsEl && !inputEl.contains(event.target) && !suggestionsEl.contains(event.target)) {
-        suggestionsEl.classList.add("hidden");
-      }
-    });
-    
   }
-  
+
   // Helper function to get values from all input fields within a container.
   function getMultiAirportValues(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return [];
-    const inputs = container.querySelectorAll("input");
-    return Array.from(inputs)
-      .map(input => (input.value || "").trim())
-      .filter(val => val !== "");
+    return airportFields.values(containerId);
   }
 
     // Helper to expand multi-airport city codes
@@ -800,321 +413,48 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
     return [input.toUpperCase()];
   }
 
-      /**
- * Parses a 12‑hour time string (e.g., "11:20 pm") and returns an object {hour, minute} in 24‑hour format.
- */
-  function parse12HourTime(timeStr) {
-    const regex = /(\d{1,2}):(\d{2})\s*(am|pm)/i;
-    const match = timeStr.match(regex);
-    if (!match) {
-      console.warn("Cannot parse time string:", timeStr);
-      return null;
-    }
-    let hour = parseInt(match[1], 10);
-    const minute = parseInt(match[2], 10);
-    const period = match[3].toLowerCase();
-    if (period === "pm" && hour !== 12) hour += 12;
-    if (period === "am" && hour === 12) hour = 0;
-    return { hour, minute };
-  }
-
-  /**
-   * Converts a 12‑hour time string into a 24‑hour formatted string (e.g., "11:20 pm" → "23:20").
-   */
-  function convertTo24Hour(timeStr) {
-    const parsed = parse12HourTime(timeStr);
-    if (!parsed) return timeStr;
-    return `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
-  }
-
-  /**
-   * Normalizes a time zone offset string.
-   * For example, "UTC+1" becomes "+01:00" and "UTC" becomes "+00:00".
-   */
-  function normalizeOffset(offset) {
-    if (!offset || offset.trim() === "" || offset.toUpperCase() === "UTC") {
-      return "+00:00";
-    }
-    if (offset.toUpperCase().startsWith("UTC")) {
-      let rest = offset.substring(3).trim();
-      if (!rest) return "+00:00";
-      if (!rest.startsWith("+") && !rest.startsWith("-")) {
-        rest = "+" + rest;
-      }
-      if (!rest.includes(":")) {
-        let sign = rest.charAt(0);
-        let num = rest.substring(1);
-        if (num.length === 1) {
-          num = "0" + num;
-        }
-        rest = sign + num + ":00";
-      }
-      return rest;
-    }
-    return offset;
-  }
-
-  /**
-   * Combines a date string (in "YYYY‑MM‑DD" format) with a time object ({hour, minute})
-   * into a Date object representing the “pure” local time.
-   * This Date is constructed using UTC so that, for example, new Date(Date.UTC(2025, 2, 8, 23, 20, 0))
-   * produces "2025‑03‑08T23:20:00.000Z".
-   */
-  function combineDateAndTime(dateStr, timeObj) {
-    const parts = dateStr.split("-");
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    const day = parseInt(parts[2], 10);
-    return new Date(Date.UTC(year, month, day, timeObj.hour, timeObj.minute, 0));
-  }
-
-  /**
-   * Formats a Date object as a flight date string, e.g., "Sat, 8 Mar, 2025".
-   */
-  function formatFlightDateSingle(date) {
-    if (!(date instanceof Date)) {
-      // Try to parse the string into a Date object.
-      date = parseServerDate(date);
-    }
-    if (!(date instanceof Date)) return "";
-    const options = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
-    return date.toLocaleDateString('en-US', options);
-  }
-
-
-  /**
-   * Combines two Date objects (departure and arrival) into a formatted date range.
-   * If both dates fall on the same day, returns a single formatted date;
-   * otherwise, returns "Date1 - Date2".
-   */
-  function formatFlightDateCombined(depDate, arrDate) {
-    const dep = typeof depDate === "string" ? parseServerDate(depDate) : depDate;
-    const arr = typeof arrDate === "string" ? parseServerDate(arrDate) : arrDate;
-  
-    if (!(dep instanceof Date) || !(arr instanceof Date)) return "";
-  
-    if (dep.toDateString() === arr.toDateString()) {
-      return formatFlightDateSingle(dep);
-    } else {
-      return `${formatFlightDateSingle(dep)} - ${formatFlightDateSingle(arr)}`;
-    }
-  }
-  
-
-  /**
-   * Unifies a raw flight object from the server by recalculating the departure and arrival Date objects,
-   * the display times, the flight duration (accounting for time zone differences), and a formatted date range.
-  */
-  function unifyRawFlight(rawFlight) {
-    const depDateStr = rawFlight.departureDateIso 
-      ? rawFlight.departureDateIso 
-      : new Date(parseServerDate(rawFlight.departureDate)).toISOString().slice(0, 10);
-    const arrDateStr = rawFlight.arrivalDateIso 
-      ? rawFlight.arrivalDateIso 
-      : new Date(parseServerDate(rawFlight.arrivalDate)).toISOString().slice(0, 10);
-      
-    const depTimeObj = parse12HourTime(rawFlight.departure);
-    const arrTimeObj = parse12HourTime(rawFlight.arrival);
-    if (!depTimeObj || !arrTimeObj) {
-      console.error("Time parsing failed for flight:", rawFlight);
-      return rawFlight;
-    }
-    
-    let localDeparture = combineDateAndTime(depDateStr, depTimeObj);
-    let localArrival = combineDateAndTime(arrDateStr, arrTimeObj);
-    
-    const normDepOffset = normalizeOffset(rawFlight.departureOffsetText);
-    const normArrOffset = normalizeOffset(rawFlight.arrivalOffsetText);
-    const depOffsetHours = parseInt(normDepOffset.slice(0, 3), 10);
-    const arrOffsetHours = parseInt(normArrOffset.slice(0, 3), 10);
-    
-    const utcDeparture = new Date(localDeparture.getTime() - depOffsetHours * 3600000);
-    const utcArrival = new Date(localArrival.getTime() - arrOffsetHours * 3600000);
-    
-    if (utcArrival <= utcDeparture) {
-      localArrival = new Date(localArrival.getTime() + 24 * 3600000);
-    }
-    
-    const totalMinutes = Math.round((utcArrival - utcDeparture) / 60000);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    
-    const displayDep = convertTo24Hour(rawFlight.departure);
-    const displayArr = convertTo24Hour(rawFlight.arrival);
-    const formattedFlightDate = formatFlightDateCombined(rawFlight.departureDate, rawFlight.arrivalDate);
-    const route = [rawFlight.departureStationText, rawFlight.arrivalStationText];
-    
-    return {
-      key: rawFlight.key,
-      fareSellKey: rawFlight.fareSellKey,
-      departure: rawFlight.departure,
-      arrival: rawFlight.arrival,
-      departureStation: rawFlight.departureStation,
-      departureStationText: rawFlight.departureStationText,
-      arrivalStation: rawFlight.arrivalStation,
-      arrivalStationText: rawFlight.arrivalStationText,
-      departureDate: rawFlight.departureDate,
-      departureDateUtc: utcDeparture,
-      arrivalDate: rawFlight.arrivalDate,
-      arrivalDateUtc: utcArrival,
-      departureStationCode: rawFlight.departureStationCode,
-      arrivalStationCode: rawFlight.arrivalStationCode,
-      reference: rawFlight.reference,
-      stops: rawFlight.stops,
-      flightCode: rawFlight.flightCode,
-      carrierText: rawFlight.carrierText,
-      currency: rawFlight.currency,
-      fare: rawFlight.fare,
-      discount: rawFlight.discount,
-      price: rawFlight.price,
-      taxes: rawFlight.taxes,
-      totalPrice: rawFlight.totalPrice,
-      displayPrice: rawFlight.displayPrice,
-      priceTag: rawFlight.priceTag,
-      flightId: rawFlight.flightId,
-      fareBasisCode: rawFlight.fareBasisCode,
-      actionText: rawFlight.actionText,
-      isFree: rawFlight.isFree,
-      departureOffsetText: rawFlight.departureOffsetText,
-      arrivalOffsetText: rawFlight.arrivalOffsetText,
-      departureOffset: normDepOffset,
-      arrivalOffset: normArrOffset,
-      displayDeparture: displayDep,
-      displayArrival: displayArr,
-      calculatedDuration: {
-        hours: hours,
-        minutes: minutes,
-        totalMinutes: totalMinutes,
-        departureDate: localDeparture,
-        arrivalDate: localArrival
-      },
-      formattedFlightDate: formattedFlightDate,
-      route: route
-    };
-  }
-  /**
- * Formats an offset string for display.
- * For example, "+01:00" is shown as "UTC+1" and "+00:00" as "UTC".
- */
-  function formatOffsetForDisplay(offsetText) {
-    if (!offsetText) return "UTC";
-    const sign = offsetText.charAt(0);
-    const hours = parseInt(offsetText.slice(1, 3), 10);
-    return isNaN(hours) || hours === 0 ? "UTC" : `UTC${sign}${hours}`;
-  }
-
-  function parseServerDate(dateStr) {
-    if (!dateStr) return null;
-    if (dateStr instanceof Date) return dateStr;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return new Date(dateStr + "T00:00:00Z");
-    }
-    const parts = dateStr.trim().split(" ");
-    if (parts.length === 3) {
-      const day = parseInt(parts[0], 10);
-      const monthNames = ["January", "February", "March", "April", "May", "June",
-                          "July", "August", "September", "October", "November", "December"];
-      const monthIndex = monthNames.indexOf(parts[1]);
-      const year = parseInt(parts[2], 10);
-      if (monthIndex >= 0 && !isNaN(day) && !isNaN(year)) {
-        return new Date(Date.UTC(year, monthIndex, day));
-      }
-    }
-    return new Date(dateStr);
-  }
-  
   // ---------------- Candidate Caching Functions ----------------
   function getUnifiedCacheKey(origin, destination, date) {
-    return `${origin}-${destination}-${date}`;
+    return segmentCacheKey(origin, destination, date);
   }
 
   async function handleClearCache() {  
     try {
       // Clear all cached results in Dexie
-      await db.cache.clear();
+      await flightCache.clear();
       debugLogger("Dexie cache cleared.");
     } catch (error) {
       console.error("Error clearing Dexie cache:", error);
     }
-    localStorage.removeItem("wizz_page_data");
+    multipassClient.clearSession();
     showNotification("✅ Cache successfully cleared!");
   }  
 
   async function cleanupCache() {
     try {
-      const now = Date.now();
-      const expiredEntries = await db.cache.where("timestamp").below(now - CACHE_LIFETIME).toArray();
-      for (const entry of expiredEntries) {
-        await db.cache.delete(entry.key);
-        debugLogger(`Expired cache key found and deleted: ${entry.key}`);
-      }
+      await flightCache.cleanup();
     } catch (e) {
       console.error("Error while cleaning cache:", e);
     }
   }
 
   async function setCachedResults(key, results) {
-    const cacheData = { key, results, timestamp: Date.now() };
-    try {
-      await db.cache.put(cacheData);
-    } catch (e) {
-      console.error("Error setting cached results in IndexedDB:", e);
-    }
+    await flightCache.put(key, results);
   }
 
   async function getCachedResults(key) {
     try {
-      const entry = await db.cache.get(key);
-      if (entry && Array.isArray(entry.results) && Date.now() - entry.timestamp < CACHE_LIFETIME) {
-        return entry.results;
-      }
+      return await flightCache.get(key);
     } catch (e) {
       console.error("Error retrieving cached results from IndexedDB:", e);
     }
     return null;
   }
 
-  // ---------------- API Request Function ----------------
-  function getHeadersFromPage() {
-    return new Promise((resolve) => {
-      // Instead of querying the active tab, query any tab with the multipass URL.
-      chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
-        if (chrome.runtime.lastError) {
-          console.error("sendMessage error:", chrome.runtime.lastError.message);
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (tabs && tabs.length > 0) {
-          // Use the first multipass tab found.
-          const multipassTab = tabs[0];
-          chrome.tabs.sendMessage(multipassTab.id, { action: "getHeaders" }, (response) => {
-            if (chrome.runtime.lastError) {
-              console.error("sendMessage error:", chrome.runtime.lastError.message);
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-            if (response && response.headers) {
-              resolve(response.headers);
-            } else if
-              (chrome.runtime.lastError) {
-                console.error("sendMessage error:", chrome.runtime.lastError.message);
-                reject(new Error(chrome.runtime.lastError.message));
-                return;
-            } else {
-              resolve(null);
-            }
-          });
-        } else {
-          resolve(null);
-        }
-      });
-    });
-  }
-
   function isDateAvailableForSegment(origin, destination, dateStr) {
     // Find the route that starts at the given origin.
     // debugLogger(`Checking availability: ${origin}→${destination} on ${dateStr}`);
-    const route = routesByOriginAndDestination[origin]?.[destination];
+    const route = routeCatalog.getRoute(origin, destination);
     if (!route) return false;
     // Find the arrival station object with the given destination.
     const arrivalStationObj = route.arrivalStations.find(st => {
@@ -1132,173 +472,11 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
   }
 
   async function checkRouteSegment(origin, destination, date) {
-    // debugLogger(`Checking route segment: ${origin} → ${destination} on ${date}`);
-    let attempts = 0;
-    while (attempts < MAX_RETRY_ATTEMPTS) {
-      await throttleRequest();
-      try {
-        let dynamicUrl = await getDynamicUrl();
-        const pageDataStr = localStorage.getItem("wizz_page_data") || "{}";
-        const pageData = JSON.parse(pageDataStr);
-        const data = {
-          flightType: "RT",
-          origin: origin,
-          destination: destination,
-          departure: date,
-          arrival: "",
-          intervalSubtype: null
-        };
-  
-        let headers = { "Content-Type": "application/json" };
-  
-        // Use cached headers if available and still valid.
-        if (pageData.headers && Date.now() - pageData.timestamp < 60 * 60 * 1000) {
-          debugLogger("Using cached headers");
-          headers = { ...headers, ...pageData.headers };
-        } else {
-          const fetchedHeaders = await getHeadersFromPage();
-          if (fetchedHeaders) {
-            headers = { ...headers, ...fetchedHeaders };
-          } else {
-            debugLogger("Failed to get headers from page, using defaults");
-          }
-        }
-  
-        const fetchResponse = await fetch(dynamicUrl, {
-          method: "POST",
-          headers: headers,
-          body: JSON.stringify(data)
-        });
-  
-        if (!fetchResponse.ok) {
-          if (fetchResponse.status === 400) {
-            if (debug) console.warn(`HTTP 400 for segment ${origin} → ${destination}: returning empty array`);
-            return [];
-          }
-          if (debug) {
-            debugLogger(`HTTP error: ${fetchResponse.status}`);
-            throw new Error(`HTTP error: ${fetchResponse.status}`);
-          }
-        }
-
-        const contentType = fetchResponse.headers.get("content-type") || "";
-        if (!contentType.includes("application/json")) {
-          const text = await fetchResponse.text();
-          if (text.trim().startsWith("<!DOCTYPE")) {
-            if (debug) console.warn("Dynamic URL returned HTML. Clearing cache and refreshing multipass tab.");
-            localStorage.removeItem("wizz_page_data");
-            await refreshMultipassTab();
-            continue;
-            // showNotification("Authorization required: please log in to your account to search for routes.");
-            // throw new Error("Authorization required: expected JSON but received HTML");
-          }
-            // dynamicUrl = await getDynamicUrl();
-            // // Throw a specific error that we can catch below
-            // throw new Error("Invalid response format: expected JSON but received HTML");
-          
-        }
-  
-        const responseData = await fetchResponse.json();
-        debugLogger(`Response for segment ${origin} → ${destination}:`, responseData);
-        return responseData.flightsOutbound || [];
-  
-      } catch (error) {
-          if (searchCancelled) {
-            debugLogger("Search was cancelled. Stopping execution in checkRouteSegment.");
-            resetCountdownTimers();
-            return [];
-          }
-      
-          let waitTime = 0;
-          if (error.message.includes("426")) {
-            waitTime = 60000;
-            if (debug) console.warn(`Rate limit encountered (426) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
-          } else if (error.message.includes("429")) {
-            waitTime = 40000;
-            if (debug) console.warn(`Rate limit encountered (429) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
-          } else if (error.message.includes("501")) {
-            waitTime = 15000;
-            if (debug) console.warn(`Rate limit encountered (501) for segment ${origin} → ${destination} – waiting for ${waitTime / 1000} seconds`);
-
-          } else if (error.message.includes("Invalid response format")) {
-            waitTime = 2000;
-            if (debug) console.warn(`Dynamic URL returned HTML for segment ${origin} → ${destination} – waiting for ${waitTime / 2000} seconds`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          } else {
-            if (debug) {
-              debugLogger('Error:', error.message || error);
-              throw error;
-            }
-          }
-      
-          if (waitTime > 0) {
-            showTimeoutCountdown(waitTime);
-            // Before setting a new timer, clear any existing activeTimeout
-            if (activeTimeout) {
-              clearTimeout(activeTimeout);
-              activeTimeout = null;
-            }
-            await new Promise(resolve => {
-              activeTimeout = setTimeout(() => {
-                resolve();
-              }, waitTime);
-            });
-          }
-          attempts++;
-        }
-      }
-      if (debug) {
-        debugLogger("Max retry attempts reached for segment " + origin + " → " + destination);
-        throw new Error("Max retry attempts reached for segment " + origin + " → " + destination);
-      }
-      return [];
-    }
-
-  // ---------------- Graph Building and DFS Functions ----------------
-  function buildGraph(routesData) {
-    const graph = {};
-    routesData.forEach(route => {
-      const origin = typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation;
-      if (!graph[origin]) {
-        graph[origin] = [];
-      }
-      if (route.arrivalStations && Array.isArray(route.arrivalStations)) {
-        route.arrivalStations.forEach(station => {
-          const stationId = typeof station === "object" ? station.id : station;
-          graph[origin].push(stationId);
-        });
-      }
-    });
-    return graph;
+    return multipassClient.getFlights(
+      { origin, destination, date },
+      appState.searchSession.controller?.signal
+    );
   }
-  
-  function findRoutesDFS(graph, current, destinationList, path, maxTransfers, routes, visited = new Set()) {
-    // Limit route length: for maxTransfers, allowed nodes = maxTransfers + 2 (origin + transfers + destination)
-    if (path.length > maxTransfers + 2) return;
-  
-    // Create a candidate key from the current path.
-    const candidateKey = path.join("-");
-    // If we’ve already seen this candidate, skip to avoid duplicate processing.
-    if (visited.has(candidateKey)) return;
-  
-    // If the current airport is one of the destinations and the path has at least one segment, record it.
-    if (destinationList.includes(current) && path.length > 1) {
-      routes.push([...path]);
-      visited.add(candidateKey);
-    }
-  
-    if (!graph[current]) return;
-  
-    // Recursively explore neighbors while preventing cycles.
-    for (const next of graph[current]) {
-      if (!path.includes(next)) {
-        path.push(next);
-        findRoutesDFS(graph, next, destinationList, path, maxTransfers, routes, visited);
-        path.pop();
-      }
-    }
-  }   
 
     // ---------------- Global Results Display Functions ----------------
     /**
@@ -1306,148 +484,31 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
    * then triggers re‑rendering.
    */
   function appendRouteToDisplay(routeObj) {
-    globalResults.push(routeObj);
-    globalDefaultResults.push(routeObj);
+    appState.results.push(routeObj);
+    appState.defaultResults.push(routeObj);
     if (!suppressDisplay) {
-      if (window.currentTripType === "return") {
-        displayRoundTripResultsAll(globalResults);
+      if (appState.tripType === "return") {
+        displayRoundTripResultsAll(appState.results);
       } else {
-        displayGlobalResults(globalResults);
+        displayGlobalResults(appState.results);
       }
     }
   }
     
 
-  /**
-   * Renders a list of direct or aggregated routes.
-   */
   function displayGlobalResults(results) {
-    // 1) Sort before rendering
-    sortResultsArray(results, currentSortOption);
-  
-    // 2) Show the container, update total results
-    resultsAndSortContainer.classList.remove("hidden");
-    totalResultsEl.textContent = `Total results: ${results.length}`;
-  
-    // 3) Render them
-    const resultsDiv = document.querySelector(".route-list");
-    resultsDiv.innerHTML = "";
-    results.forEach(routeObj => {
-      const routeHtml = renderRouteBlock(routeObj);
-      resultsDiv.insertAdjacentHTML("beforeend", routeHtml);
-    });
-    bindTooltipListeners(resultsDiv);
-
+    resultsRenderer.setSortOption(currentSortOption);
+    resultsRenderer.display(results);
   }
 
-  function bindTooltipListeners(rootElement) {
-    const triggers = rootElement.querySelectorAll('.tooltip-trigger');
-
-    triggers.forEach(el => {
-      el.addEventListener('click', (event) => {
-        event.stopPropagation();
-
-        const tooltip = el.parentElement.querySelector('.tooltip');
-        if (!tooltip) return;
-
-        tooltip.classList.toggle('hidden');
-      });
-    });
-
-    document.addEventListener('click', () => {
-      document.querySelectorAll('.tooltip').forEach(t => {
-        t.classList.add('hidden');
-      });
-    });
-  }
-
-  /**
-   * Renders round-trip results.
-   */
-  function displayRoundTripResultsAll(outbounds) {
-    resultsAndSortContainer.classList.remove("hidden");
-    totalResultsEl.textContent = `Total results: ${outbounds.length}`;
-
-    const resultsDiv = document.querySelector(".route-list");
-    resultsDiv.innerHTML = "";
-
-    outbounds.forEach((outbound, index) => {
-      const outboundHtml = renderRouteBlock(outbound, "Outbound Flight");
-      const toggleId = `toggle-return-${index}`;
-      const returnId = `return-list-${index}`;
-
-      let returnHtml = "";
-      if (outbound.returnFlights && outbound.returnFlights.length > 0) {
-        const returns = outbound.returnFlights.map((ret, idx) => {
-          const outboundLastArrival = outbound.calculatedDuration.arrivalDate;
-          const inboundFirstDeparture = ret.calculatedDuration.departureDate;
-          const stopoverMs = inboundFirstDeparture - outboundLastArrival;
-          const stopoverMinutes = Math.max(0, Math.round(stopoverMs / 60000));
-          const sh = Math.floor(stopoverMinutes / 60);
-          const sm = stopoverMinutes % 60;
-          const stopoverText = `Stopover: ${sh}h ${sm}m`;
-          return renderRouteBlock(ret, `Inbound Flight ${idx + 1}`, stopoverText);
-        }).join("");
-        
-        returnHtml = `
-          <div id="${returnId}" class="mt-2 hidden">
-            ${returns}
-          </div>
-        `;
-      }
-
-      const inboundCount = outbound.returnFlights?.length || 0;
-      const toggleButtonHtml = inboundCount > 0
-        ? `<div class="text-center mt-2">
-             <button
-               id="${toggleId}"
-               class="inline-flex items-center px-4 py-2 text-sm text-[#C90076] font-semibold hover:underline active:scale-95 cursor-pointer transition"
-               aria-expanded="false"
-               data-count="${inboundCount}"
-             >
-               <svg focusable="false" aria-hidden="true" width="24" height="24" viewBox="0 0 24 24"
-                    class="w-6 h-6 mr-1 transition-transform">
-                 <path fill="currentColor" d="M12 16.41l-6.71-6.7 1.42-1.42 5.29 5.3 5.29-5.3 1.42 1.42z"/>
-               </svg>
-               <span class="toggle-label">${inboundCount} inbound flight${inboundCount > 1 ? "s" : ""} found</span>
-             </button>
-           </div>`
-        : "";
-
-      resultsDiv.insertAdjacentHTML("beforeend", `
-        <div class="border rounded-lg p-2.5 mb-4">
-          ${outboundHtml}
-          ${toggleButtonHtml}
-          ${returnHtml}
-        </div>
-      `);
-
-      if (outbound.returnFlights?.length) {
-        setTimeout(() => {
-          const toggleBtn = document.getElementById(toggleId);
-          const returnBlock = document.getElementById(returnId);
-
-          toggleBtn.addEventListener("click", () => {
-            const count = Number(toggleBtn.dataset.count);
-            const expanded = toggleBtn.getAttribute("aria-expanded") === "true";
-            returnBlock.classList.toggle("hidden");
-            toggleBtn.setAttribute("aria-expanded", String(expanded));
-            toggleBtn.querySelector(".toggle-label").textContent = expanded
-              ? `${count} inbound flight${count > 1 ? "s" : ""} found`
-              : `${count} inbound flight${count > 1 ? "s" : ""} found`;
-            toggleBtn.querySelector("svg").classList.toggle("rotate-180");
-          });
-        }, 0);
-      }
-    });
-
-    bindTooltipListeners(resultsDiv);
+  function displayRoundTripResultsAll(results) {
+    resultsRenderer.setSortOption(currentSortOption);
+    resultsRenderer.displayRoundTrips(results);
   }
 
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
-    const routes = await window.ROUTES;
-    return routes.map(route => ({
+    return routesData.map(route => ({
       ...route,
       arrivalStations: Array.isArray(route.arrivalStations)
       ?
@@ -1457,1450 +518,77 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
     }));
   }
   
-  async function sendMessageWithRetry(tabId, message, retries = 3, delay = 1000) {
-    return new Promise((resolve, reject) => {
-      function attempt() {
-        chrome.tabs.sendMessage(tabId, message, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error("sendMessage error:", chrome.runtime.lastError.message);
-            if (retries > 0) {
-              retries--;
-              setTimeout(attempt, delay);
-            } else {
-              reject(new Error(chrome.runtime.lastError.message));
-            }
-          } else {
-            resolve(response);
-          }
-        });
-      }
-      attempt();
-    });
-  }
-
-  async function getDynamicUrl() {
-    const pageDataStr = localStorage.getItem("wizz_page_data");
-    if (pageDataStr) {
-      const data = JSON.parse(pageDataStr);
-      if (Date.now() - data.timestamp < 60 * 60 * 1000 && data.dynamicUrl) {
-        debugLogger("Using cached dynamic URL");
-        return data.dynamicUrl;
-      }
-    }
-    const isLikelyMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-    return new Promise((resolve, reject) => {
-      chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, async (tabs) => {
-        let targetTab;
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (tabs && tabs.length > 0) {
-          targetTab = tabs[0];
-          debugLogger("Found multipass tab:", targetTab);
-        } else {
-          try {
-            await refreshMultipassTab();
-          } catch (err) {
-            if (debug) console.error("Failed to refresh multipass tab:", err);
-          }
-          chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabsAfter) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-            if (tabsAfter && tabsAfter.length > 0) {
-              targetTab = tabsAfter[0];
-              debugLogger("After refresh, found multipass tab:", targetTab);
-            }
-          });
-        }
-
-        if (!targetTab && isLikelyMobile) {
-          // Mobile-specific handling
-          localStorage.removeItem('wizz_page_data');
-          showNotification("⚠️ Error. Refresh Wizz Air Multipass tab manually, if it doesn't work - restart the browser");
-          reject(new Error("Mobile manual login required"));
-          return;
-        }
-
-        if (!targetTab) {
-          reject(new Error("No multipass tab found"));
-          return;
-        }
-
-        if (targetTab.status !== "complete") {
-          await waitForTabToComplete(targetTab.id);
-        }
-        await new Promise((r) => setTimeout(r, 1000));
-
-        try {
-          const response = await sendMessageWithRetry(targetTab.id, { action: "getDynamicUrl" });
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          if (response && response.dynamicUrl) {
-            const pageData = JSON.parse(localStorage.getItem("wizz_page_data") || "{}");
-            pageData.dynamicUrl = response.dynamicUrl;
-            pageData.timestamp = Date.now();
-            localStorage.setItem("wizz_page_data", JSON.stringify(pageData));
-            resolve(response.dynamicUrl);
-          } else if (response && response.error) {
-            reject(new Error(response.error));
-          } else {
-            reject(new Error("Failed to get dynamic URL"));
-          }
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-  }
-
-  function waitForTabToComplete(tabId) {
-    return new Promise((resolve) => {
-      const listener = (updatedTabId, changeInfo) => {
-        if (updatedTabId === tabId && changeInfo.status === "complete") {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-    });
-  }
-
-async function refreshMultipassTab() {
-  const MULTIPASS_URL = "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
-  
-  // 1. Try Chrome API first
-  if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-    return new Promise((resolve, reject) => {
-      chrome.tabs.query({ url: "https://multipass.wizzair.com/*" }, (tabs) => {
-        if (!tabs || tabs.length === 0) {
-          chrome.tabs.create({ url: MULTIPASS_URL }, newTab => {
-            waitForTabToComplete(newTab.id).then(resolve).catch(reject);
-          });
-        } else {
-          const tabToReload = tabs.find(tab => !tab.active) || tabs[0];
-          chrome.tabs.reload(tabToReload.id, {}, () => {
-            waitForTabToComplete(tabToReload.id).then(resolve).catch(reject);
-          });
-        }
-      });
-    });
-  } else {
-    localStorage.removeItem('wizz_page_data');
-    
-    // Try to open in new tab if possible
-    if (typeof window !== 'undefined' && window.open) {
-      const newTab = window.open(MULTIPASS_URL, '_blank');
-      
-      if (newTab) {
-        return new Promise(resolve => {
-          newTab.addEventListener('load', () => {
-            setTimeout(resolve, 2000); // Extra buffer time
-          });
-        });
-      }
-    }
-    
-    // Final fallback - manual refresh instruction
-    showNotification("⚠️ Please open Wizz Air Multipass in a new tab and log in");
-    return Promise.resolve();
-  }
-}
-  
-
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
   // Searches for connecting (multi‑leg) routes.
   // Uses the "overnight-checkbox" value to decide if connecting flights must depart on the same day as selected.
-// Function to add days in UTC mode
-  function addDaysUTC(date, days) {
-    const result = new Date(date.getTime());
-    result.setUTCDate(result.getUTCDate() + days);
-    return result;
-  }
-
-  // Function to correctly convert a datetime string with an offset into a Date object
-  function parseFlightDateTime(dateTimeIso, offsetText) {
-    if (!dateTimeIso) return null;
-    let offsetFormatted = "Z";
-    const match = offsetText.match(/UTC([+-]\d+)/);
-    if (match) {
-      let hours = parseInt(match[1], 10);
-      offsetFormatted = (hours >= 0 ? "+" : "") + String(hours).padStart(2, "0") + ":00";
-    }
-    const isoString = dateTimeIso.replace(" ", "T") + offsetFormatted;
-    return new Date(isoString);
-  }
-
-  /**
-   * Preliminary check for a candidate route.
-   * For each segment (departure -> arrival), this function retrieves the arrival object's flightDates array
-   * and verifies that at least one date within the allowed search window is available.
-   *
-   * @param {Array} candidate - Array of station codes representing the candidate route.
-   * @param {Array} routesData - The routes data.
-   * @param {string} selectedDate - The selected date string (YYYY-MM-DD).
-   * @param {Date} bookingHorizon - The maximum allowed date.
-   * @param {Array<number>} allowedOffsets - Array of allowed day offsets (e.g. [0,1,2] for multi‑stop).
-   * @returns {boolean} - True if all segments have at least one allowed flight date, false otherwise.
-   */
-  function candidateHasValidFlightDates(candidate, routesData, selectedDate, bookingHorizon, allowedOffsets) {
-    const baseDateUTC = new Date(selectedDate + "T00:00:00Z");
-    for (let i = 0; i < candidate.length - 1; i++) {
-      const dep = candidate[i];
-      const arr = candidate[i + 1];
-      const route = routesData.find(r => {
-        const depCode = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
-        return depCode === dep;
-      });
-      if (!route) {
-        return false;
-      }
-      const arrivalObj = route.arrivalStations.find(s => {
-        const code = typeof s === "object" ? s.id : s;
-        return code === arr;
-      });
-      if (!arrivalObj || !arrivalObj.flightDates) {
-        return false;
-      }
-      // Compute allowed dates based on allowedOffsets
-      const allowedDates = allowedOffsets
-        .map(offset => {
-          const d = addDaysUTC(baseDateUTC, offset);
-          if (d > bookingHorizon) return null;
-          return d.toISOString().slice(0,10);
-        })
-        .filter(x => x !== null);
-      // Check if at least one allowed date is present in flightDates
-      const hasValid = allowedDates.some(date => arrivalObj.flightDates.includes(date));
-      if (!hasValid) {
-        debugLogger(`Preliminary check: Segment ${dep} -> ${arr} does not have any allowed flightDates among ${allowedDates.join(", ")}`);
-        return false;
-      }
-    }
-    return true;
-  }
-
   /**
    * Recursive function to iterate through possible options for route segments.
    * Returns an array of options (each option is an array of flights for segments from index to the end).
    */
-  async function processSegment(candidate, index, currentDate, previousFlight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData) {
-    if (index >= candidate.length - 1) {
-      // Base case: return one option – an empty array.
-      return [[]];
-    }
-    
-    const segOrigin = candidate[index];
-    const segDestination = candidate[index + 1];
-    let validChains = [];
-    
-    debugLogger(`--> Processing segment: ${segOrigin} -> ${segDestination}`);
-    
-    for (let offset = 0; offset <= baseMaxDays; offset++) {
-      const dateToSearch = addDaysUTC(currentDate, offset);
-      const dateStr = dateToSearch.toISOString().slice(0, 10);
-      if (index === 0 && dateStr !== selectedDate) {
-        debugLogger(`   Skipping date ${dateStr} for first segment (selected date is ${selectedDate})`);
-        continue;
-      }
-      if (dateToSearch > bookingHorizon) {
-        debugLogger(`   Date ${dateStr} exceeds booking horizon; breaking offset loop`);
-        break;
-      }
-      
-      // Check flightDates for this segment from routes data
-      const routeForSegment = routesData.find(r => {
-        const dep = typeof r.departureStation === "object" ? r.departureStation.id : r.departureStation;
-        return dep === segOrigin;
-      });
-      if (routeForSegment) {
-        const arrivalObj = routeForSegment.arrivalStations.find(st => {
-          return (typeof st === "object" ? st.id : st) === segDestination;
-        });
-        if (arrivalObj && arrivalObj.flightDates) {
-          if (!arrivalObj.flightDates.includes(dateStr)) {
-            debugLogger(`   No available flight on ${dateStr} for segment ${segOrigin} -> ${segDestination} (flightDates filter)`);
-            continue;
-          }
-        }
-      }
-      if (!isDateAvailableForSegment(segOrigin, segDestination, dateStr)) {
-        debugLogger(`   Date ${dateStr} rejected for segment ${segOrigin} -> ${segDestination} (date availability check)`);
-        continue;
-      }
-      
-      const cacheKey = getUnifiedCacheKey(segOrigin, segDestination, dateStr);
-      debugLogger(`   Checking cache for segment ${segOrigin} -> ${segDestination} on ${dateStr} (cache key: ${cacheKey})`);
-      let flights = await getCachedResults(cacheKey);
-      if (flights !== null) {
-        flights = flights.map(unifyRawFlight);
-        debugLogger(`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
-      } else {
-        try {
-          flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
-          flights = flights.map(unifyRawFlight);
-          debugLogger(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
-          await setCachedResults(cacheKey, flights);
-        } catch (error) {
-          console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
-          flights = [];
-          return;
-        }
-      }
-      // Convert flight dates if they are not already Date objects.
-      flights = flights.map(f => {
-        if (!(f.calculatedDuration.departureDate instanceof Date)) {
-          f.calculatedDuration.departureDate = parseFlightDateTime(f.departureDateTimeIso, f.departureOffsetText);
-        }
-        if (!(f.calculatedDuration.arrivalDate instanceof Date)) {
-          f.calculatedDuration.arrivalDate = parseFlightDateTime(f.arrivalDateTimeIso, f.arrivalOffsetText);
-        }
-        return f;
-      });
-      // Filter flights by "local" date (taking the target offset into account)
-      // flights = flights.filter(f => {
-      //   f.departureDateIso === dateStr
-      //   debugLogger(` Flight ${f.flightCode} rejected: departure date ${f.departureDateIso} does not match ${dateStr}`);
-      //   }
-      // );
-      // debugLogger(`   After local date filtering: ${flights.length} flights remain for ${segOrigin} -> ${segDestination} on ${dateStr}`);
-      if (previousFlight) {
-        flights = flights.filter(f => {
-          const connectionTime = (f.calculatedDuration.departureDate.getTime() - previousFlight.calculatedDuration.arrivalDate.getTime()) / 60000;
-          const valid = connectionTime >= minConnection && connectionTime <= maxConnection;
-          if (!valid) {
-            debugLogger(`      Flight ${f.flightCode} rejected: connection time ${connectionTime} minutes not in [${minConnection}, ${maxConnection}]`);
-          }
-          return valid;
-        });
-        debugLogger(`   After connection time filtering: ${flights.length} flights available`);
-      }
-      
-      // Iterate over all found flights for this offset.
-      for (let flight of flights) {
-        debugLogger(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
-        // Recursively process the next segment, passing the date adjusted by the current offset.
-        const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData);
-        // For each found option, add the current flight at the beginning.
-        for (let chain of nextChains) {
-          validChains.push([flight, ...chain]);
-        }
-      }
-    }
-    
-    if (validChains.length === 0) {
-      debugLogger(`   No suitable flight found for segment ${segOrigin} -> ${segDestination} at any offset`);
-    }
-    return validChains;
-  }
-  
-  /**
-   * Searches all one-stop routes allowing an airport change.
-   *
-   * @param {string[]} origins                – list of origin airport codes
-   * @param {string[]} destinations          – list of destination airport codes
-   * @param {string}   selectedDate           – YYYY-MM-DD of outbound date
-   * @param {number}   minConnection          – minimum layover in minutes
-   * @param {number}   maxConnection          – maximum layover in minutes
-   * @param {number}   connectionRadiusKm     – max distance between connection airports
-   * @param {number[]} allowedOffsets         – [0…n] day offsets for second leg
-   * @param {boolean}  shouldAppend           – whether to append results as they arrive
-   * @returns {Promise<Route[]>}              – all matching routes
-   */
-  async function processOneStopWithAirportChange(
-    origins,
-    destinations,
-    selectedDate,
-    minConnection,
-    maxConnection,
-    connectionRadiusKm,
-    allowedOffsets,
-    shouldAppend
-  ) {
-    debugLogger("[DEBUG] airport-change search start", {
-      origins,
-      destinations,
-      selectedDate,
-      minConnection,
-      maxConnection,
-      connectionRadiusKm,
-      allowedOffsets,
-    });
+  const searchConnectingRoutes = createConnectionsSearch({
+    isCancelled: () => appState.searchSession.cancelled,
+    debugLogger,
+    isDateAvailableForSegment,
+    getCachedResults,
+    setCachedResults,
+    getUnifiedCacheKey,
+    checkRouteSegment,
+    updateProgress,
+    fetchDestinations,
+    routeCatalog,
+    airportLookup,
+    appendRouteToDisplay,
+    getSettings: () => settingsRepository.load(),
+    getStopoverText: () => document.getElementById("selected-stopover").textContent
+  });
+
+  const searchDirectRoutes = createDirectSearch({
+    fetchRoutes: fetchDestinations,
+    getPreviousResults: () => appState.results,
+    isCancelled: () => appState.searchSession.cancelled,
+    getCached: (origin, destination, date) =>
+      getCachedResults(getUnifiedCacheKey(origin, destination, date)),
+    setCached: (origin, destination, date, flights) =>
+      setCachedResults(getUnifiedCacheKey(origin, destination, date), flights),
+    fetchFlights: checkRouteSegment,
+    normalizeFlight: unifyRawFlight,
+    appendResult: appendRouteToDisplay,
+    updateProgress,
+    logger: debugLogger
+  });
 
-      // Compute booking horizon (today + 3 days)
-    const todayUTC = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
-    const bookingHorizon = addDaysUTC(todayUTC, 3);
-    // Filter allowedOffsets so that selectedDate + offset ≤ bookingHorizon
-    allowedOffsets = allowedOffsets.filter(offset => {
-      const candidateDate = addDaysUTC(new Date(selectedDate + "T00:00:00Z"), offset);
-      return candidateDate <= bookingHorizon;
-    });
-    debugLogger(`Filtered allowedOffsets within booking horizon: ${allowedOffsets.join(", ")}`);
-    // Fetch global flight network once
-    const routesData = await fetchDestinations();
-    const results = [];
-    let directCounter = 0;
-    
-    for (const origin of origins) {
-      for (const destination of destinations) {
-        if (origin === destination) continue;
-        if (searchCancelled) break;
-
-        if (isDateAvailableForSegment(origin, destination, selectedDate)) {
-          const cacheKey = getUnifiedCacheKey(origin, destination, selectedDate);
-          let flights = await getCachedResults(cacheKey);
-          if (!flights) {
-            try {
-              flights = await checkRouteSegment(origin, destination, selectedDate);
-              flights = flights.map(unifyRawFlight);
-              debugLogger(`   Fetched ${flights.length} flights from server for ${origin} -> ${destination} on ${selectedDate}`);
-              await setCachedResults(cacheKey, flights);
-              } catch (error) {
-                console.error(`Error loading flights: ${error.message}`);
-                flights = [];
-              }
-          }
-          flights = flights.map(unifyRawFlight);
-          for (const flight of flights) {
-            if (shouldAppend) appendRouteToDisplay(flight);
-            results.push(flight);
-            
-            directCounter++;
-            updateProgress(directCounter, origins.length * destinations.length, `Direct routes`);
-          }
-        }
-      }
-    }
-    //
-    // 1) Build a map: origin → Set of valid first-leg airports (B)
-    //
-    const firstLegMap = new Map();
-    for (const origin of origins) {
-      const bs = new Set();
-      // first leg must depart on selectedDate
-      for (const route of routesData) {
-        const dep = typeof route.departureStation === "object"
-          ? route.departureStation.id
-          : route.departureStation;
-        if (dep !== origin) continue;
-
-        for (const arrival of route.arrivalStations || []) {
-          const arr = typeof arrival === "object" ? arrival.id : arrival;
-          if (isDateAvailableForSegment(origin, arr, selectedDate)) {
-            bs.add(arr);
-          }
-        }
-      }
-      firstLegMap.set(origin, bs);
-      debugLogger(`[DEBUG] first-leg options for ${origin}:`, Array.from(bs));
-    }
-
-    //
-    // 2) Build a map: destination → Set of valid second-leg airports (N)
-    //
-    const secondLegMap = new Map();
-    for (const destination of destinations) {
-      const ns = new Set();
-      for (const offset of allowedOffsets) {
-        const date = addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), offset)
-          .toISOString()
-          .slice(0, 10);
-
-        for (const route of routesData) {
-          const dep = typeof route.departureStation === "object"
-            ? route.departureStation.id
-            : route.departureStation;
-
-          for (const arrival of route.arrivalStations || []) {
-            const arr = typeof arrival === "object" ? arrival.id : arrival;
-            if (arr === destination && isDateAvailableForSegment(dep, arr, date)) {
-              ns.add(dep);
-            }
-          }
-        }
-      }
-      secondLegMap.set(destination, ns);
-      debugLogger(`[DEBUG] second-leg options for ${destination}:`, Array.from(ns));
-    }
-
-    //
-    // 3) Build a flat list of all candidate chains {origin, B, N, destination}
-    //
-    const candidates = [];
-    for (const origin of origins) {
-      const Bs = Array.from(firstLegMap.get(origin) || []);
-      for (const destination of destinations) {
-        const Ns = Array.from(secondLegMap.get(destination) || []);
-        for (const B of Bs) {
-          // filter N by distance <= radius
-          const validNs = Ns.filter(N => {
-            if (B === N) return true;
-            const locB = airportLookup[B];
-            const locN = airportLookup[N];
-            return (
-              locB &&
-              locN &&
-              haversineDistance(
-                locB.latitude,
-                locB.longitude,
-                locN.latitude,
-                locN.longitude
-              ) <= connectionRadiusKm
-            );
-          });
-          for (const N of validNs) {
-            candidates.push({ origin, B, N, destination });
-          }
-        }
-      }
-    }
-
-    const totalRoutes = candidates.length;
-    let routeCounter = 0;
-
-    //
-    // 4) Smart-grouped iteration: group by whichever leg covers more candidates per
-    //    unique pair, so one empty-leg result eliminates the most follow-up fetches.
-    //
-    const byFirstLeg = new Map();
-    const bySecondLeg = new Map();
-    for (const cand of candidates) {
-      const k1 = `${cand.origin}|${cand.B}`;
-      const k2 = `${cand.N}|${cand.destination}`;
-      if (!byFirstLeg.has(k1)) byFirstLeg.set(k1, []);
-      byFirstLeg.get(k1).push(cand);
-      if (!bySecondLeg.has(k2)) bySecondLeg.set(k2, []);
-      bySecondLeg.get(k2).push(cand);
-    }
-
-    // Choose the grouping whose keys cover more candidates on average.
-    const groupByFirst = byFirstLeg.size <= bySecondLeg.size;
-
-    if (groupByFirst) {
-      for (const [, group] of byFirstLeg) {
-        if (searchCancelled) break;
-        const { origin, B } = group[0];
-        const flights1 = await loadFlights(origin, B, selectedDate, [0]);
-        if (!flights1.length) {
-          routeCounter += group.length;
-          updateProgress(routeCounter, totalRoutes, `No flights: ${origin} → ${B}`);
-          continue;
-        }
-        // Deduplicate second legs within this first-leg group.
-        const bySecondInGroup = new Map();
-        for (const cand of group) {
-          const k2 = `${cand.N}|${cand.destination}`;
-          if (!bySecondInGroup.has(k2)) bySecondInGroup.set(k2, []);
-          bySecondInGroup.get(k2).push(cand);
-        }
-        for (const [, subGroup] of bySecondInGroup) {
-          if (searchCancelled) break;
-          const { N, destination } = subGroup[0];
-          routeCounter += subGroup.length;
-          updateProgress(routeCounter, totalRoutes,
-            N !== B
-              ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}`
-              : `Checking route: ${origin} → ${B} → ${destination}`
-          );
-          const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
-          if (!flights2.length) continue;
-          debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
-          combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
-        }
-      }
-    } else {
-      for (const [, group] of bySecondLeg) {
-        if (searchCancelled) break;
-        const { N, destination } = group[0];
-        const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
-        if (!flights2.length) {
-          routeCounter += group.length;
-          updateProgress(routeCounter, totalRoutes, `No flights: ${N} → ${destination}`);
-          continue;
-        }
-        // Deduplicate first legs within this second-leg group.
-        const byFirstInGroup = new Map();
-        for (const cand of group) {
-          const k1 = `${cand.origin}|${cand.B}`;
-          if (!byFirstInGroup.has(k1)) byFirstInGroup.set(k1, []);
-          byFirstInGroup.get(k1).push(cand);
-        }
-        for (const [, subGroup] of byFirstInGroup) {
-          if (searchCancelled) break;
-          const { origin, B } = subGroup[0];
-          routeCounter += subGroup.length;
-          updateProgress(routeCounter, totalRoutes,
-            N !== B
-              ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}`
-              : `Checking route: ${origin} → ${B} → ${destination}`
-          );
-          const flights1 = await loadFlights(origin, B, selectedDate, [0]);
-          if (!flights1.length) continue;
-          debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
-          combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
-        }
-      }
-    }
-
-    debugLogger(
-      `[DEBUG] airport-change search found ${results.length} routes:`,
-      results.map(r => r.key).join(", ")
-    );
-    return results;
-  }
-
-// ──────────────── 1) Helper: nearby‑airport lookup ────────────────
-/**
- * Returns every airport code (from allCodes) within radiusKm of baseCode.
- */
-  function findNearbyAirports(baseCode, radiusKm, allCodes) {
-    const base = airportLookup[baseCode];
-    if (!base) return [];
-    return allCodes.filter(code => {
-      if (code === baseCode) return false;
-      const loc = airportLookup[code];
-      if (!loc) return false;
-      const d = haversineDistance(
-        base.latitude, base.longitude,
-        loc.latitude,  loc.longitude
-      );
-      return d <= radiusKm;
-    });
-  }
-
-  // ────────── 2) processTwoStopsWithAirportChange ──────────
-  async function processTwoStopsWithAirportChange(
-    origins,
-    destinations,
-    selectedDate,
-    minConnection,
-    maxConnection,
-    connectionRadiusKm,
-    allowedOffsets,
-    shouldAppend = true
-  ) {
-    const results    = [];
-    const routesData = await fetchDestinations();
-
-    // ─── collect every code in the network ───
-    const allCodes = Array.from(new Set(
-      routesData.map(r => (
-        typeof r.departureStation === 'object'
-          ? r.departureStation.id
-          : r.departureStation
-      ))
-    ));
-
-    // ─── 2a) build direct‑map & mid‑map for origins ───
-    const directMap = new Map(); // O → [A₁, A₂, …] (only where O→A exists)
-    const midMap    = new Map(); // O → [ {code: A, via: A}, {code: N, via: A}, … ]
-    for (let O of origins) {
-      if (searchCancelled) break;
-      // find A's where O→A on selectedDate
-      const As = routesData
-        .filter(r => {
-          const dep = typeof r.departureStation==='object'
-            ? r.departureStation.id
-            : r.departureStation;
-          return dep === O
-            && (r.arrivalStations || []).some(st => {
-                const id = typeof st==='object' ? st.id : st;
-                return isDateAvailableForSegment(O, id, selectedDate);
-              });
-        })
-        .flatMap(r => (r.arrivalStations || []).map(st => typeof st==='object' ? st.id : st))
-        .filter((v,i,a)=>a.indexOf(v)===i);
-
-      directMap.set(O, As);
-
-      // now build mids = each A itself + its neighbors within radius
-      const mids = [];
-      for (let A of As) {
-        mids.push({ code: A, via: A });
-        for (let neigh of findNearbyAirports(A, connectionRadiusKm, allCodes)) {
-          mids.push({ code: neigh, via: A });
-        }
-      }
-      midMap.set(O, mids);
-    }
-
-    // ─── 2b) build direct‑map & mid‑map for destinations ───
-    const directDestMap = new Map(); // D → [B₁, B₂,…] where B→D exists
-    const midDestMap    = new Map(); // D → [ {code: B, via: B}, {code: N, via: B}, … ]
-    for (let D of destinations) {
-      if (searchCancelled) break;
-      const Bs = routesData
-        .filter(r => {
-          const dep = typeof r.departureStation==='object'
-            ? r.departureStation.id
-            : r.departureStation;
-
-          return dep !== D
-            && (r.arrivalStations || []).some(st => {
-                const id = typeof st==='object' ? st.id : st;
-                if (id !== D) return false;
-                return allowedOffsets.some(offset => {
-                  const date = addDaysUTC(
-                    new Date(`${selectedDate}T00:00:00Z`),
-                    offset
-                  )
-                    .toISOString()
-                    .slice(0, 10);
-                  return isDateAvailableForSegment(dep, D, date);
-                });
-              });
-        })
-        .map(r => typeof r.departureStation==='object' ? r.departureStation.id : r.departureStation)
-        .filter((v,i,a)=>a.indexOf(v)===i);
-
-      directDestMap.set(D, Bs);
-
-      const mids = [];
-      for (let B of Bs) {
-        if (searchCancelled) break;
-        mids.push({ code: B, via: B });
-        for (let neigh of findNearbyAirports(B, connectionRadiusKm, allCodes)) {
-          mids.push({ code: neigh, via: B });
-        }
-      }
-      midDestMap.set(D, mids);
-    }
-
-    // ─── 3) build all {O,A,X,B,D} candidates ───
-    let candidates = [];
-    for (let O of origins) {
-      for (let D of destinations) {
-        if (searchCancelled) break;
-        const midsO = midMap.get(O)    || [];
-        const midsD = midDestMap.get(D) || [];
-        
-        let pairCount = 0;
-        for (let { code: X, via: A } of midsO) {
-          for (let { code: Y, via: B } of midsD) {
-            if (origins.includes(Y) || origins.includes(B) || destinations.includes(X) || destinations.includes(A)) {
-              continue;
-            }
-            // require that X→Y is either a real flight or within radius foot‑transfer
-            const routeXY   = routesByOriginAndDestination[X]?.[Y];
-            const locX      = airportLookup[X];
-            const locY      = airportLookup[Y];
-
-            const coordsValid = locX && locY && 
-                                locX.latitude !== undefined && locX.longitude !== undefined &&
-                                locY.latitude !== undefined && locY.longitude !== undefined;
-                          
-            let withinRad = false;
-            let distance = 0;
-              if (coordsValid) {
-                distance = haversineDistance(
-                  locX.latitude, locX.longitude,
-                  locY.latitude, locY.longitude
-                );
-                withinRad = distance <= connectionRadiusKm;
-              }
-
-            if (X !== Y && !routeXY && !withinRad) {
-            continue;
-            }
-            candidates.push({ O, A, X, B, Y, D });
-            pairCount++;
-          }
-        }
-      }
-    }
-    console.table(candidates);
-
-    // ─── 3.1) preliminary flight‑dates filter ───
-    const todayUTC      = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
-    const bookingHorizon= addDaysUTC(todayUTC, 3);
-    const totalCands    = candidates.length;
-    // keep only those where each *real* flight leg has at least one flightDate
-    candidates = candidates.filter(({ O, A, X, B, Y, D }) => {
-      // leg1, leg2, leg3 chains
-      const legs = [
-        [O, A],  // first real flight
-        [X, Y],  // second real flight (after transfer)
-        [B, D],  // third real flight
-      ];
-
-      // every leg must pass candidateHasValidFlightDates
-      return legs.every(pair => 
-        candidateHasValidFlightDates(
-          pair,
-          routesData,
-          selectedDate,
-          bookingHorizon,
-          allowedOffsets
-        )
-      );
-    });
-
-    debugLogger(
-      `[DEBUG] After real‑flight date‑filter: ${candidates.length} of ${totalCands} remain`
-    );
-    console.table(candidates);
-
-
-    // ─── 4) Smart-grouped load & stitch: check outer legs once per unique pair,
-    //        skipping the inner legs entirely when an outer leg has no flights.
-    //        Group by whichever outer leg has fewer unique keys (more candidates per
-    //        key → bigger saving per empty result).
-    const totalCandidates = candidates.length;
-    let processedCandidates = 0;
-
-    const byOuterFirst = new Map();   // keyed by (O,A)
-    const byOuterThird = new Map();   // keyed by (B,D)
-    for (const cand of candidates) {
-      const k1 = `${cand.O}|${cand.A}`;
-      const k3 = `${cand.B}|${cand.D}`;
-      if (!byOuterFirst.has(k1)) byOuterFirst.set(k1, []);
-      byOuterFirst.get(k1).push(cand);
-      if (!byOuterThird.has(k3)) byOuterThird.set(k3, []);
-      byOuterThird.get(k3).push(cand);
-    }
-    // Outer group with fewer unique keys has more candidates per key → check it first.
-    const outerGroupByFirst = byOuterFirst.size <= byOuterThird.size;
-    const outerMap   = outerGroupByFirst ? byOuterFirst : byOuterThird;
-    const innerKeyFn = outerGroupByFirst
-      ? cand => `${cand.B}|${cand.D}`
-      : cand => `${cand.O}|${cand.A}`;
-
-    for (const [, outerGroup] of outerMap) {
-      if (searchCancelled) break;
-
-      // Fetch the outer leg (leg1 or leg3 depending on which grouping we chose).
-      let fOuter;
-      if (outerGroupByFirst) {
-        const { O, A } = outerGroup[0];
-        fOuter = await loadFlights(O, A, selectedDate, [0]);
-      } else {
-        const { B, D } = outerGroup[0];
-        fOuter = await loadFlights(B, D, selectedDate, allowedOffsets);
-      }
-      if (!fOuter.length) {
-        processedCandidates += outerGroup.length;
-        const label = outerGroupByFirst
-          ? `${outerGroup[0].O}→${outerGroup[0].A}` : `${outerGroup[0].B}→${outerGroup[0].D}`;
-        updateProgress(processedCandidates, totalCandidates, `No flights: ${label}`);
-        continue;
-      }
-
-      // Within the outer group, group by the inner outer leg (leg3 or leg1).
-      const innerMap = new Map();
-      for (const cand of outerGroup) {
-        const k = innerKeyFn(cand);
-        if (!innerMap.has(k)) innerMap.set(k, []);
-        innerMap.get(k).push(cand);
-      }
-
-      for (const [, innerGroup] of innerMap) {
-        if (searchCancelled) break;
-
-        let fInner;
-        if (outerGroupByFirst) {
-          const { B, D } = innerGroup[0];
-          fInner = await loadFlights(B, D, selectedDate, allowedOffsets);
-        } else {
-          const { O, A } = innerGroup[0];
-          fInner = await loadFlights(O, A, selectedDate, [0]);
-        }
-        if (!fInner.length) {
-          processedCandidates += innerGroup.length;
-          continue;
-        }
-
-        // Resolve f1 and f3 based on which grouping is active.
-        const f1 = outerGroupByFirst ? fOuter : fInner;
-        const f3 = outerGroupByFirst ? fInner : fOuter;
-
-        // Group remaining candidates by middle leg (X, Y).
-        const byMidLeg = new Map();
-        for (const cand of innerGroup) {
-          const km = `${cand.X}|${cand.Y}`;
-          if (!byMidLeg.has(km)) byMidLeg.set(km, []);
-          byMidLeg.get(km).push(cand);
-        }
-
-        for (const [, midGroup] of byMidLeg) {
-          if (searchCancelled) break;
-          const { O, A, X, B, Y, D } = midGroup[0];
-          processedCandidates += midGroup.length;
-          const progressMessage =
-            A === X && B === Y ? `Checking route: ${O} → ${A} → ${B} → ${D}` :
-            A !== X && B === Y ? `Checking route: ${O} → ${A} ⇄ ${X} → ${B} → ${D}` :
-            A === X && B !== Y ? `Checking route: ${O} → ${A} → ${Y} ⇄ ${B} → ${D}` :
-            `Checking route: ${O} → ${A} ⇄ ${X} → ${Y} ⇄ ${B} → ${D}`;
-          updateProgress(processedCandidates, totalCandidates, progressMessage);
-
-          const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets);
-          if (!f2.length) continue;
-
-          for (let flight1 of f1) {
-            for (let flight2 of f2) {
-              const gap1 = (flight2.calculatedDuration.departureDate
-                          - flight1.calculatedDuration.arrivalDate) / 60000;
-              if (gap1 < minConnection || gap1 > maxConnection) continue;
-              for (let flight3 of f3) {
-                const gap2 = (flight3.calculatedDuration.departureDate
-                            - flight2.calculatedDuration.arrivalDate) / 60000;
-                if (gap2 < minConnection || gap2 > maxConnection) continue;
-
-                debugLogger(`    ✓ valid: [${flight1.key}]→[${flight2.key}]→[${flight3.key}]`);
-
-                const dep  = flight1.calculatedDuration.departureDate;
-                const arr  = flight3.calculatedDuration.arrivalDate;
-                const depUtc = flight1.departureDateUtc;
-                const arrUtc = flight3.arrivalDateUtc;
-                const totalDuration = Math.round((arrUtc - depUtc) / 60000);
-                const locA = airportLookup[flight1.arrivalStation];
-                const locBNode = airportLookup[flight2.departureStation];
-                const locC = airportLookup[flight2.arrivalStation];
-                const locD = airportLookup[flight3.departureStation];
-                const conn = Math.round(gap1 + gap2);
-                const changeDistanceKmOne = locA && locBNode
-                  ? Math.round(haversineDistance(locA.latitude, locA.longitude, locBNode.latitude, locBNode.longitude))
-                  : null;
-                const changeDistanceKmTwo = locC && locD
-                  ? Math.round(haversineDistance(locC.latitude, locC.longitude, locD.latitude, locD.longitude))
-                  : null;
-                const agg = {
-                  key: flight1.key + " | " + flight2.key + " | " + flight3.key,
-                  stops: "2 transfers",
-                  totalConnectionTime: conn,
-                  segments: [flight1, flight2, flight3],
-                  airportChangeOne: {
-                    from: flight1.arrivalStation,
-                    to: flight2.departureStation,
-                    distanceKm: changeDistanceKmOne
-                  },
-                  airportChangeTwo: {
-                    from: flight2.arrivalStation,
-                    to: flight3.departureStation,
-                    distanceKm: changeDistanceKmTwo
-                  },
-                  calculatedDuration: {
-                    hours: Math.floor(totalDuration / 60),
-                    minutes: totalDuration % 60,
-                    totalMinutes: totalDuration,
-                    departureDate: dep,
-                    arrivalDate: arr
-                  },
-                  formattedFlightDate: formatFlightDateCombined(dep, arr),
-                  currency: flight1.currency,
-                  displayPrice: flight1.displayPrice,
-                  priceTag: flight1.priceTag,
-                  route: [flight1.departureStationText, flight3.arrivalStationText]
-                };
-                if (shouldAppend) appendRouteToDisplay(agg);
-                results.push(agg);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return results;
-  }
-
-
-  async function loadFlights(dep, arr, baseDate, offsets) {
-    const out = [];
-    for (const off of offsets) {
-      const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off).toISOString().slice(0,10);
-      if (arr == null) {
-        debugLogger(`Bad params to loadFlights(): ${dep}→${arr}`);
-        continue;
-      }
-      let segs = await getCachedResults(`${dep}-${arr}-${date}`);
-
-      if (!Array.isArray(segs)) {
-        try {
-          const result = await checkRouteSegment(dep, arr, date);
-          segs = Array.isArray(result) 
-            ? result.map(unifyRawFlight) 
-            : [];
-          await setCachedResults(`${dep}-${arr}-${date}`, segs);
-        } catch (error) {
-          console.error(`Error loading flights: ${error.message}`);
-          segs = [];
-        }
-      }
-      out.push(...segs);
-    }
-    return out;
-  }
-
-
-  /**
- * Build a combined “one‑stop” route object from two unified flights.
- *
- * @param {Object} f1   – first‐leg unified flight
- * @param {Object} f2   – second‐leg unified flight
- * @param {number} gap  – layover time in minutes between f1 arrival and f2 departure
- * @returns {Object}    – the aggregated route, ready for appendRouteToDisplay
- */
-  function buildAggregatedRoute(f1, f2, gap) {
-    // departure of the first leg, arrival of the second leg
-    const depDate = f1.calculatedDuration.departureDate;
-    const depDateUtc = f1.departureDateUtc;
-    const arrDate = f2.calculatedDuration.arrivalDate;
-    const arrDateUtc = f2.arrivalDateUtc;
-    const totalMin = Math.round((arrDateUtc - depDateUtc) / 60000);
-
-    const codeB = f1.arrivalStation;
-    const codeN = f2.departureStation;
-    const locB = airportLookup[codeB];
-    const locN = airportLookup[codeN];
-    const changeDistanceKm = locB && locN
-      ? Math.round(haversineDistance(locB.latitude, locB.longitude, locN.latitude, locN.longitude))
-      : null;
-    if (!f1?.calculatedDuration?.arrivalDate || !f2?.calculatedDuration?.departureDate) {
-      console.warn("Missing duration data for aggregation:", f1, f2);
-      return null;
-    }
-    return {
-      key:        `${f1.key} | ${f2.key}`,
-      fareSellKey:f1.fareSellKey,
-      departure:  f1.departure,
-      arrival:    f2.arrival,
-      departureStation:     f1.departureStation,
-      departureStationText: f1.departureStationText,
-      arrivalStation:       f2.arrivalStation,
-      arrivalStationText:   f2.arrivalStationText,
-      departureDate: f1.departureDate,
-      arrivalDate:   f2.arrivalDate,
-      stops:       "1 transfer",
-      totalConnectionTime: gap,
-      airportChange: {
-        from: codeB,
-        to:   codeN,
-        distanceKm: changeDistanceKm
-      },
-      segments:    [f1, f2],
-      calculatedDuration: {
-        hours:       Math.floor(totalMin/60),
-        minutes:     totalMin % 60,
-        totalMinutes: totalMin,
-        departureDate: depDate,
-        arrivalDate:   arrDate
-      },
-      formattedFlightDate: formatFlightDateCombined(depDate, arrDate),
-      currency:    f1.currency,
-      displayPrice:f1.displayPrice,
-      priceTag:    f1.priceTag,
-      route:       [f1.departureStationText, f2.arrivalStationText]
-    };
-  }
-
-  function combineAndAppend(f1List, f2List, minC, maxC, resultsArr, appendFlag) {
-    for (const f1 of f1List) {
-      for (const f2 of f2List) {
-        const gap = Math.round((f2.calculatedDuration.departureDate - f1.calculatedDuration.arrivalDate)/60000);
-        debugLogger(`Gap between ${f1.key} and ${f2.key}: ${gap} minutes`);
-        if (gap < minC || gap > maxC) continue;
-        const agg = buildAggregatedRoute(f1, f2, gap);
-        if (!agg) continue;
-        if (appendFlag) appendRouteToDisplay(agg);
-        resultsArr.push(agg);
-      }
-    }
-  }
-
-
-  async function searchConnectingRoutes(
-    origins,
-    destinations,
-    selectedDate,
-    maxTransfers,
-    shouldAppend = true,
-    skipProgress = false
-  ) {
-    debugLogger("Starting searchConnectingRoutes");
-    const routesData = await fetchDestinations();
-    const graph = buildGraph(routesData);
-  
-    // 1) Load user settings
-    const minConnection      = Number(localStorage.getItem("minConnectionTime")) || 90;
-    const maxConnection      = Number(localStorage.getItem("maxConnectionTime")) || 1440;
-    const stopoverText       = document.getElementById("selected-stopover").textContent;
-    const connectionRadius   = parseInt(localStorage.getItem("connectionRadius"), 10) || 0;
-    const allowChangeAirport = localStorage.getItem("allowChangeAirport") === "true";
-  
-    debugLogger(
-      `[DEBUG] searchConnectingRoutes → stopover="${stopoverText}",`,
-      `allowChangeAirport=${allowChangeAirport},`,
-      `connectionRadius=${connectionRadius}km, maxTransfers=${maxTransfers}`,
-      `minConnection=${minConnection} min, maxConnection=${maxConnection} min`
-    );
-  
-    const allowOvernight = stopoverText === "One stop or fewer (overnight)";
-    debugLogger(
-      `Stopover setting: ${stopoverText} (${allowOvernight ? "overnight allowed" : "day-only"})`
-    );
-  
-    // 2) Compute booking horizon (today + 3 days)
-    const baseDateUTC    = new Date(selectedDate + "T00:00:00Z");
-    const todayUTC       = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
-    const bookingHorizon = addDaysUTC(todayUTC, 3);
-    debugLogger(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
-  
-    // 3) Expand "ANY" destinations
-    let destinationList = [];
-    if (destinations.length === 1 && destinations[0] === "ANY") {
-      const allDest = new Set();
-      routesData.forEach(r => {
-        (r.arrivalStations || []).forEach(s => {
-          allDest.add(typeof s === "object" ? s.id : s);
-        });
-      });
-      destinations = Array.from(allDest);
-      destinationList = destinations;
-      debugLogger(`Expanded ANY → ${destinationList.join(", ")}`);
-    } else {
-      destinationList = destinations;
-    }
-  
-    // 4) Build allowedOffsets
-    const maxDayOffset = Math.floor(maxConnection / (60*24)); // =1
-    let allowedOffsets = [];
-    if (maxTransfers > 1) {
-      // multi-stop: from day 0 up to bookingHorizon
-      for (let d = 0; ; d++) {
-        const dDate = addDaysUTC(baseDateUTC, d);
-        if (dDate > bookingHorizon) break;
-        allowedOffsets.push(d);
-      }
-    } else {
-      // one-stop: day 0 always
-      allowedOffsets = [0];
-      if (allowOvernight) {
-        for (let d = 1; d <= maxDayOffset; d++) {
-          allowedOffsets.push(d);
-        }
-      }
-    }
-    debugLogger(`Allowed offsets: ${allowedOffsets.join(", ")}`);
-  
-    // 5) Airport-change shortcut?
-    const switchableForTwoStops = (
-      maxTransfers === 2 &&
-      allowChangeAirport &&
-      connectionRadius > 0
-    );
-    
-    if (switchableForTwoStops) {
-      const results = [];
-        debugLogger("Searching one-stop flights");
-        const oneStopResults = await processOneStopWithAirportChange(
-        origins,
-        destinations,
-        selectedDate,
-        minConnection,
-        maxConnection,
-        connectionRadius,
-        allowedOffsets,
-        shouldAppend,
-        true // skipProgress
-      );
-      results.push(...oneStopResults || []);
-      if (searchCancelled) return results;
-
-      debugLogger("Airport-change mode ON: delegating to processTwoStopsWithAirportChange");
-      const twoStopResults = await processTwoStopsWithAirportChange(
-        origins,
-        destinations,
-        selectedDate,
-        minConnection,
-        maxConnection,
-        connectionRadius,
-        allowedOffsets,
-        shouldAppend
-      );
-      results.push(...twoStopResults || []);
-      debugLogger(`Found ${results.length} two-stop routes with airport change`);
-      return results;
-    }
-    const switchableForOneStop = (
-      maxTransfers === 1 &&
-      (stopoverText === "One stop or fewer"
-        || stopoverText === "One stop or fewer (overnight)")
-      && allowChangeAirport
-      && connectionRadius > 0
-    );
-    if (switchableForOneStop) {
-      debugLogger("Airport-change mode ON: delegating to processOneStopWithAirportChange");
-      // **Pass allowedOffsets** into your new function
-      const results = await processOneStopWithAirportChange(
-        origins,
-        destinations,
-        selectedDate,
-        minConnection,
-        maxConnection,
-        connectionRadius,
-        allowedOffsets,
-        true
-      );
-      debugLogger(`Found ${results.length} routes with airport change`);
-      return results;
-    }
-  
-    // 6) Build all candidate chains via DFS
-    let candidateRoutes = [];
-    origins.forEach(origin =>
-      findRoutesDFS(graph, origin, destinationList, [origin], maxTransfers, candidateRoutes)
-    );
-    debugLogger(`Total candidate routes found: ${candidateRoutes.length}`);
-  
-    // 7) Preliminary flight-dates filter
-    candidateRoutes = candidateRoutes.filter(chain =>
-      candidateHasValidFlightDates(chain, routesData, selectedDate, bookingHorizon, allowedOffsets)
-    );
-    debugLogger(`After date check, ${candidateRoutes.length} candidates remain`);
-  
-    // 8) Process each candidate with your existing processSegment
-    let processed = 0;
-    const total = candidateRoutes.length;
-    if (!skipProgress) updateProgress(0, total, "Processing routes");
-  
-    const aggregatedResults = [];
-    for (const candidate of candidateRoutes) {
-      if (searchCancelled) break;
-      processed++;
-      if (!skipProgress) updateProgress(processed, total, `Checking ${candidate.join("→")}`);
-  
-      const chains = await processSegment(
-        candidate,
-        0,
-        baseDateUTC,
-        null,                      // no previous flight
-        bookingHorizon,
-        minConnection,
-        maxConnection,
-        allowedOffsets[allowedOffsets.length - 1], // max offset
-        selectedDate,
-        routesData
-      );
-  
-      for (const chain of chains) {
-        // Build your aggregated route object exactly as before…
-        const firstDep = chain[0].calculatedDuration.departureDate;
-        const firstDepUtc = chain[0].departureDateUtc;
-        const lastArr  = chain[chain.length-1].calculatedDuration.arrivalDate;
-        const lastArrUtc  = chain[chain.length-1].arrivalDateUtc;
-        const totalMins = Math.round((lastArrUtc - firstDepUtc)/60000);
-        const totalConn = chain.slice(0,-1).reduce((sum, f, i) => {
-          const next = chain[i+1];
-          return sum + Math.round((next.calculatedDuration.departureDateUtc - f.calculatedDuration.arrivalDateUtc)/60000);
-        }, 0);
-  
-        const aggregatedRoute = {
-          key: chain.map(f => f.key).join(" | "),
-          fareSellKey: chain[0].fareSellKey,
-          departure: chain[0].departure,
-          arrival: chain[chain.length-1].arrival,
-          departureStation: chain[0].departureStation,
-          departureStationText: chain[0].departureStationText,
-          arrivalStation: chain[chain.length-1].arrivalStation,
-          arrivalStationText: chain[chain.length-1].arrivalStationText,
-          departureDate: chain[0].departureDate,
-          arrivalDate: chain[chain.length-1].arrivalDate,
-          stops: `${chain.length-1} transfer${chain.length-1===1?"":"s"}`,
-          totalConnectionTime: totalConn,
-          segments: chain,
-          calculatedDuration: {
-            hours: Math.floor(totalMins/60),
-            minutes: totalMins%60,
-            totalMinutes: totalMins,
-            departureDate: firstDep,
-            arrivalDate: lastArr
-          },
-          formattedFlightDate: formatFlightDateCombined(firstDep, lastArr),
-          currency: chain[0].currency,
-          displayPrice: chain[0].displayPrice,
-          priceTag: chain[0].priceTag,
-          route: [chain[0].departureStationText, chain[chain.length-1].arrivalStationText]
-        };
-  
-        if (shouldAppend) appendRouteToDisplay(aggregatedRoute);
-        aggregatedResults.push(aggregatedRoute);
-      }
-    }
-  
-    return aggregatedResults;
-  }
-
-  async function searchDirectRoutes(
-    origins,
-    destinations,
-    selectedDate,
-    shouldAppend = true,
-    reverse = false,
-    skipProgress = false
-  ) {
-    debugLogger("Starting searchDirectRoutes");
-
-    let allowedReversePairs = null;
-    if (reverse && globalResults.length) {
-      allowedReversePairs = new Set(
-        globalResults.map(f => `${f.arrivalStation}-${f.departureStation}`)
-      );
-      debugLogger(
-        "Allowed reverse pairs:", Array.from(allowedReversePairs)
-      );
-    }
-
-    if (reverse) {
-      [origins, destinations] = [destinations, origins];
-      debugLogger("After swap:", origins, destinations);
-    }
-
-    let routesData = await fetchDestinations();
-    debugLogger(`Fetched ${routesData.length} routes`);
-    routesData = routesData
-      .map(route => {
-        route.arrivalStations = (route.arrivalStations || []).filter(arr => {
-          if (arr.operationStartDate && new Date(selectedDate) < new Date(arr.operationStartDate)) {
-            return false;
-          }
-          if (!reverse && arr.flightDates) {
-            return arr.flightDates.includes(selectedDate);
-          }
-          return true;
-        });
-        return route;
-      })
-      .filter(r => r.arrivalStations.length > 0);
-    debugLogger(
-      `After date-filter: ${routesData.length} origins remain`
-    );
-
-    const pairs = [];
-    for (const origin of origins) {
-      const route = routesData.find(r => {
-        const dep = typeof r.departureStation === "object"
-          ? r.departureStation.id
-          : r.departureStation;
-        return dep === origin;
-      });
-      if (!route) continue;
-
-      const arrivals = (destinations.length === 1 && destinations[0] === "ANY")
-        ? route.arrivalStations
-        : route.arrivalStations.filter(arr => {
-            const code = typeof arr === "object" ? arr.id : arr;
-            return destinations.includes(code);
-          });
-
-      arrivals.forEach(arr => {
-        const code = typeof arr === "object" ? arr.id : arr;
-        pairs.push({ origin, arrivalCode: code });
-      });
-    }
-
-    const totalArrivals = pairs.length;
-    debugLogger(`Total direct pairs to check: ${totalArrivals}`);
-
-    let processed = 0;
-    if (!skipProgress) {
-      updateProgress(processed, totalArrivals, "Checking direct flights");
-    }
-
-    const validDirectFlights = [];
-    for (const { origin, arrivalCode } of pairs) {
-      if (searchCancelled) break;
-
-      processed++;
-      if (!skipProgress) {
-        updateProgress(
-          processed,
-          totalArrivals,
-          `Checking ${origin} → ${arrivalCode} on ${selectedDate}`
-        );
-      }
-      debugLogger(`Checking ${origin} → ${arrivalCode}`);
-
-      if (reverse && !allowedReversePairs.has(`${origin}-${arrivalCode}`)) {
-        debugLogger(`Skipping reverse pair ${origin}-${arrivalCode}`);
-        continue;
-      }
-
-      const cacheKey = getUnifiedCacheKey(origin, arrivalCode, selectedDate);
-      let cached = await getCachedResults(cacheKey);
-      if (cached) {
-        const flights = cached.map(unifyRawFlight);
-        if (shouldAppend) flights.forEach(appendRouteToDisplay);
-        validDirectFlights.push(...flights);
-        continue;
-      }
-
-      try {
-        let flights = await checkRouteSegment(origin, arrivalCode, selectedDate);
-        if (!Array.isArray(flights)) {
-          if (debug) console.warn(`No valid flights array for ${origin}→${arrivalCode}`, flights);
-        }
-        flights = flights.map(unifyRawFlight);
-        if (shouldAppend) flights.forEach(appendRouteToDisplay);
-        validDirectFlights.push(...flights);
-        await setCachedResults(cacheKey, flights);
-      } catch (err) {
-          console.error(`Error checking ${origin}→${arrivalCode}:`, err);
-          showNotification(
-            `Error checking direct flight ${origin} → ${arrivalCode}: ${err.message}
-            Please reload the page and try again.`
-          );
-        return;
-      }
-    }
-
-    debugLogger(
-      `Direct flight search complete. Found ${validDirectFlights.length} flights.`
-    );
-    return validDirectFlights;
-  }
-  
-  let searchActive = false;
   async function handleSearch() {
     debugLogger("Search initiated.");
     await cleanupCache();
     const searchButton = document.getElementById("search-button");
   
-    if (searchActive) {
+    if (appState.searchSession.active) {
       debugLogger("Search already active. Cancelling current search.");
-      searchCancelled = true;
+      appState.cancelSearch();
       resetCountdownTimers();
-      if (throttleResetTimer) {
-        clearTimeout(throttleResetTimer);
-        throttleResetTimer = null;
-      }
+      requestThrottler.reset();
       progressContainer.style.display = "none";
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
             viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
               <path stroke-linecap="round" stroke-linejoin="round" 
                 d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
             </svg> SEARCH`;
-      searchActive = false;
+      appState.finishSearch();
       return;
     }
   
     // Clear previous results and mark search as active.
-    globalResults = [];
-    globalDefaultResults = [];
+    appState.results = [];
+    appState.defaultResults = [];
     totalResultsEl.textContent = "Total results: 0";
-    searchActive = true;
-    searchCancelled = false;
+    appState.beginSearch();
     searchButton.textContent = "Stop Search";
     debugLogger("New search started. Resetting counters and UI.");
   
-    setTimeout(() => { requestsThisWindow = 0; }, 1000);
+    requestThrottler.reset();
   
     let returnInputRaw = "";
-    if (window.currentTripType === "return") {
+    if (appState.tripType === "return") {
       returnInputRaw = document.getElementById("return-date").value.trim();
       if (!returnInputRaw) {
         showNotification("Please select a return date for round-trip search.");
@@ -2909,7 +597,7 @@ async function refreshMultipassTab() {
                   <path stroke-linecap="round" stroke-linejoin="round" 
                     d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                 </svg> SEARCH`;
-        searchActive = false;
+        appState.finishSearch();
         return;
       }
     }
@@ -2918,7 +606,7 @@ async function refreshMultipassTab() {
     if (originInputs.length === 0) {
       showNotification("Please select a departure airport first.");
       searchButton.innerHTML = "SEARCH";
-      searchActive = false;
+      appState.finishSearch();
       return;
     }
     let origins = originInputs.map(s => resolveAirport(s)).flat();
@@ -2930,7 +618,7 @@ async function refreshMultipassTab() {
       : destinationInputs.map(s => resolveAirport(s)).flat();
     debugLogger("Resolved destinations:", destinations);
   
-    const tripType = window.currentTripType || "oneway";
+    const tripType = appState.tripType || "oneway";
     let departureDates = [];
     const departureInputRaw = document.getElementById("departure-date").value.trim();
     departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
@@ -2962,20 +650,20 @@ async function refreshMultipassTab() {
                     <path stroke-linecap="round" stroke-linejoin="round" 
                       d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                   </svg> SEARCH`;
-      searchActive = false;
+      appState.finishSearch();
       hideProgress();
       return;
     }
   
     // 2) Abort if both fields are ANY and trip type is roundtrip.
-    if (isOriginAnywhere && isDestinationAnywhere && window.currentTripType === "return") {
+    if (isOriginAnywhere && isDestinationAnywhere && appState.tripType === "return") {
       showNotification("Search for 'Anywhere to Anywhere' is available only for one-way direct flights.");
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
                   viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
                     <path stroke-linecap="round" stroke-linejoin="round" 
                       d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
                   </svg> SEARCH`;
-      searchActive = false;
+      appState.finishSearch();
       hideProgress();
       return;
     }
@@ -3067,265 +755,49 @@ async function refreshMultipassTab() {
       debugLogger("Filtered destinations:", destinations);
     }
     // --- End Anywhere logic ---
-  
-    // Then proceed with the search process using the processed origins and destinations.
+
+    const originalOrigins = originInputs.map(value => resolveAirport(value)).flat();
+    const returnDates = returnInputRaw.split(",").map(value => value.trim()).filter(Boolean);
+    let wasCancelled = false;
+
     try {
-      if (tripType === "oneway") {
-        for (const dateStr of departureDates) {
-          if (searchCancelled) return;
-          debugLogger(`Searching one-way flights for date ${dateStr}`);
-          if (maxTransfers > 0) {
-            await searchConnectingRoutes(origins, destinations, dateStr, maxTransfers);
-          } else {
-            await searchDirectRoutes(origins, destinations, dateStr, true, false);
-          }
-        }
-      } else {
-        // Round-trip search
-        debugLogger("Starting round-trip search; suppressing display until both outbound and inbound are processed.");
-        suppressDisplay = true;
-        let outboundFlights = [];
-        for (const outboundDate of departureDates) {
-          if (searchCancelled) break;
-          debugLogger(`Searching outbound flights for date ${outboundDate}`);
-          let outboundFlightsForDate = [];
-          if (maxTransfers > 0) {
-            outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchConnectingRoutes(origins, destinations, outboundDate, maxTransfers)
-            );
-          } else {
-            outboundFlightsForDate = outboundFlightsForDate.concat(
-              await searchDirectRoutes(origins, destinations, outboundDate, true, false)
-            );
-          }
-          outboundFlights = outboundFlights.concat(outboundFlightsForDate);
-        }
-        debugLogger(`Total outbound flights found: ${outboundFlights.length}`);
-        // Deduplicate outbound flights.
-        const uniqueOutbound = [];
-        const outboundKeys = new Set();
-        for (const flight of outboundFlights) {
-          const key = flight.route.join("-") + "|" + flight.calculatedDuration.departureDate.getTime();
-          if (!outboundKeys.has(key)) {
-            outboundKeys.add(key);
-            uniqueOutbound.push(flight);
-          }
-        }
-        outboundFlights = uniqueOutbound;
-        globalResults = outboundFlights;
-        debugLogger(`Deduplicated outbound flights: ${outboundFlights.length}`);
-        let returnDates = returnInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
-        let inboundQueries = {};
-        const originInputs = window.originalOriginInput = getMultiAirportValues("origin-multi");
-        const originalOrigins = originInputs.map(s => resolveAirport(s)).flat();
-        debugLogger("Original origins for round-trip:", originalOrigins);
-  
-        // If the original origin value is "ANY", search for inbound flights so that:
-        // inbound.origin is any airport in the destination group, and inbound.destination equals outbound.origin.
-        if (originalOrigins[0] === "ANY") {
-          for (const outbound of outboundFlights) {
-            // outboundOrigin is the actual departure airport of the outbound flight.
-            let outboundOrigin = (typeof outbound.departureStation === "object" ? outbound.departureStation.id : outbound.departureStation);
-            for (const rDate of returnDates) {
-              // Use the same key as when building the inbound queries.
-              const key = `${destinations.join(",")}-${outboundOrigin}-${rDate}`;
-                // Example for direct inbound search:
-                if (maxTransfers > 0) {
-                  inboundQueries[key] = async () => {
-                    const connectingResults = await searchConnectingRoutes(
-                      destinations,
-                      [outboundOrigin],
-                      rDate,
-                      maxTransfers,
-                      false,
-                      true // pass skipProgress = true if you've similarly updated searchConnectingRoutes
-                    );
-                    const directResults = await searchDirectRoutes(
-                      destinations,
-                      [outboundOrigin],
-                      rDate,
-                      false,
-                      false,
-                      true  // skipProgress set to true
-                    );
-                    return [...connectingResults, ...directResults];
-                  };
-                } else {
-                  inboundQueries[key] = async () => {
-                    return await searchDirectRoutes(
-                      destinations,
-                      [outboundOrigin],
-                      rDate,
-                      false,
-                      false,
-                      true  // skipProgress set to true
-                    );
-                  };
-              }
-            }
-          }
-        } else {
-          // Standard logic when origin is explicitly defined
-          for (const outbound of outboundFlights) {
-            let outboundDestination = outbound.arrivalStation 
-            ?? (outbound.segments.length > 0 
-                ? outbound.segments[outbound.segments.length - 1].arrivalStation 
-                : undefined);
-            debugLogger("Outbound flight arrival station:", outboundDestination);
-            if (!outboundDestination) {
-                console.warn("Skipping outbound flight without arrival station:", outbound);
-                continue;
-            }
-            for (const rDate of returnDates) {
-              for (const origin of origins) {
-                const key = `${outboundDestination}-${origin}-${rDate}`;
-                if (!inboundQueries[key]) {
-                  if (maxTransfers > 0) {
-                    inboundQueries[key] = async () => {
-                      const connectingResults = await searchConnectingRoutes(
-                        [outboundDestination],
-                        [origin],
-                        rDate,
-                        maxTransfers,
-                        false,
-                        true  // pass skipProgress = true
-                      );
-                      const directResults = await searchDirectRoutes(
-                        [outbound.arrivalStation],
-                        [origin],
-                        rDate,
-                        false,
-                        false,
-                        true  // pass skipProgress = true
-                      );
-                      return [...connectingResults, ...directResults];
-                    };
-                  } else {
-                    inboundQueries[key] = async () => {
-                      return await searchDirectRoutes(
-                        [outbound.arrivalStation],
-                        [origin],
-                        rDate,
-                        false,
-                        false,
-                        true  // pass skipProgress = true
-                      );
-                    };
-                  }
-                }
-              }
-            }
-          }
-        }
-        // Process each inbound query and update overall progress accordingly.
-        const inboundResults = {};
-        const inboundKeys = Object.keys(inboundQueries);
-        
-        // 1) Pre-calculate totalInbound exactly as before
-        const totalInbound = inboundKeys.length;        
-        debugLogger("Total inbound combinations:", totalInbound);
-        
-        // 2) Kick off the progress bar
-        let inboundProcessed = 0;
-        updateProgress(inboundProcessed, totalInbound, "Checking inbound flights");
-        // 3) Now loop *per key*, update the bar there, then fetch the flights:
-        for (const key of inboundKeys) {
-          // 3.1 increment and update
-          inboundProcessed++;
-          // parse key again for the label
-          const m = key.match(/^(.+?)-(.+?)-(\d{4}-\d{2}-\d{2})$/) || [];
-          const fromGroup = m[1] || "";
-          const toCode    = m[2] || "";
-          const dateStr   = m[3] || "";
-          let flights = [];
-          try {
-            flights = await inboundQueries[key]();
-          } catch {
-            flights = [];
-          }
-          inboundResults[key] = flights;
-          debugLogger(`Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`);
-          updateProgress(
-            inboundProcessed,
-            totalInbound,
-            `Checking inbound flights ${fromGroup} → ${toCode} on ${dateStr}`
-          );
-        }
-        // Flitering inbound flights.
-        for (const outbound of outboundFlights) {
-          let outboundDestination = (typeof outbound.arrivalStation === "object" ? outbound.arrivalStation.id : outbound.arrivalStation);
-          let matchedInbound = [];
-          if (originalOrigins[0] === "ANY") {
-            // For reverse search: inbound.origin should be one of the airports in the destination group,
-            // and inbound.destination should equal outbound.origin.
-            let outboundOrigin = (typeof outbound.departureStation === "object" ? outbound.departureStation.id : outbound.departureStation);
-            for (const rDate of returnDates) {
-              // Use the same key as above.
-              const key = `${destinations.join(",")}-${outboundOrigin}-${rDate}`;
-              let inboundForKey = inboundResults[key] || [];
-              const filteredInbound = inboundForKey.filter(inbound => {
-                const inboundDep = (typeof inbound.departureStation === "object" ? inbound.departureStation.id : inbound.departureStation);
-                const inboundArr = (typeof inbound.arrivalStation === "object" ? inbound.arrivalStation.id : inbound.arrivalStation);
-                const validDep = destinations.includes(inboundDep);
-                const validArr = inboundArr === outboundOrigin;
-                const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
-                const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
-                if (!validDep) {
-                  debugLogger(`Inbound flight ${inbound.flightCode} rejected: departure station ${inboundDep} is not in the destination group ${destinations}`);
-                }
-                if (!validArr) {
-                  debugLogger(`Inbound flight ${inbound.flightCode} rejected: arrival station ${inboundArr} does not match outbound origin ${outboundOrigin}`);
-                }
-                if (!validGap) {
-                  debugLogger(`Inbound flight ${inbound.flightCode} rejected: connection gap ${connectionGap} minutes`);
-                }
-                return validDep && validArr && validGap;
-              });
-              matchedInbound = matchedInbound.concat(filteredInbound);
-            }
-          } else {
-            for (const rDate of returnDates) {
-              for (const origin of originalOrigins) {
-                const key = `${outboundDestination}-${origin}-${rDate}`;
-                let inboundForKey = inboundResults[key] || [];
-                const filteredInbound = inboundForKey.filter(inbound => {
-                  const connectionGap = Math.round((inbound.calculatedDuration.departureDate - outbound.calculatedDuration.arrivalDate) / 60000);
-                  debugLogger(`Connection gap for inbound flight ${inbound.flightCode} to ${outbound.flightCode} is ${connectionGap} minutes`);
-                  const validGap = connectionGap >= 360 && inbound.calculatedDuration.departureDate > outbound.calculatedDuration.arrivalDate;
-                  if (!validGap) {
-                    debugLogger(`Inbound flight ${inbound.flightCode} for return ${rDate} rejected: connection gap ${connectionGap} minutes`);
-                  }
-                  return validGap;
-                });
-                matchedInbound = matchedInbound.concat(filteredInbound);
-              }
-            }
-          }
-          const seenInbound = new Set();
-          const dedupedInbound = [];
-          for (const flight of matchedInbound) {
-            debugLogger(`flight.key: ${flight.key}`);
-            const dedupKey = flight.key;
-            if (!seenInbound.has(dedupKey)) {
-              seenInbound.add(dedupKey);
-              dedupedInbound.push(flight);
-            }
-          }
-          outbound.returnFlights = dedupedInbound;
-          // debugLogger(`Outbound flight ${outbound.flightCode} matched with ${dedupedInbound.length} inbound flights`);
-        }
-        const validRoundTripFlights = outboundFlights.filter(flight => flight.returnFlights && flight.returnFlights.length > 0);
-        globalResults = validRoundTripFlights;
-        suppressDisplay = false;
-        displayRoundTripResultsAll(validRoundTripFlights);
-        debugLogger(`Round-trip search complete. Valid round-trip flights: ${validRoundTripFlights.length}`);
-      }
+      suppressDisplay = tripType === "return";
+      const results = await runSearch({
+        origins,
+        destinations,
+        originalOrigins,
+        departureDates,
+        returnDates,
+        tripType,
+        maxTransfers
+      }, {
+        searchDirect: ({ origins: from, destinations: to, date, append, skipProgress }) =>
+          searchDirectRoutes(from, to, date, append, false, skipProgress),
+        searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress }) =>
+          searchConnectingRoutes(from, to, date, transfers, append, skipProgress)
+      }, appState.searchSession.controller?.signal, progress => {
+        updateProgress(progress.current, progress.total, progress.message);
+      });
+
+      appState.results = results;
+      appState.defaultResults = [...results];
+      suppressDisplay = false;
+      if (tripType === "return") displayRoundTripResultsAll(results);
+      else displayGlobalResults(results);
+      debugLogger(`Search complete. Valid results: ${results.length}`);
     } catch (error) {
-      document.querySelector(".route-list").innerHTML = `<p>Error: ${error.message}</p>`;
-      console.error("Search error:", error);
+      if (error?.code === ErrorCode.CANCELLED || error?.name === "AbortError") {
+        wasCancelled = true;
+        debugLogger("Search cancelled.");
+      } else {
+        const resultsList = document.querySelector(".route-list");
+        resultsList.textContent = `Error: ${error.message}`;
+        console.error("Search error:", error);
+      }
     } finally {
-      if (globalResults.length === 0 && tripType === "oneway") {
-        document.querySelector(".route-list").innerHTML = "<p>There are no available flights on this route.</p>";
+      suppressDisplay = false;
+      if (!wasCancelled && appState.results.length === 0 && tripType === "oneway") {
+        document.querySelector(".route-list").textContent = "There are no available flights on this route.";
       }
       hideProgress();
       searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
@@ -3333,7 +805,7 @@ async function refreshMultipassTab() {
               <path stroke-linecap="round" stroke-linejoin="round" 
                 d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
             </svg> SEARCH`;
-      searchActive = false;
+      appState.finishSearch();
       updateCSVButtonVisibility();
       debugLogger("Search process finished.");
     }
@@ -3351,185 +823,17 @@ async function refreshMultipassTab() {
 // The containerId should be the id of a container (a div) that will hold the airport rows.
 // The fieldName is used to generate unique ids.
   function initializeMultiAirportField(containerId, fieldName) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    container.innerHTML = ""; // Clear existing content
-    // Set the container to be transparent
-    container.style.background = "transparent";
-    container.style.border = "none";
-    // Always ensure at least one row exists
-    addAirportRow(container, fieldName);
-    updateAirportRows(container);
+    airportFields.initialize(containerId, fieldName);
   }
-
-  function addAirportRow(container, fieldName) {
-    // Limit to a maximum of 3 airport rows.
-    const currentRows = container.querySelectorAll(".airport-row");
-    if (currentRows.length >= 3) return;
-  
-    const row = document.createElement("div");
-    row.className = "airport-row flex items-center gap-1 mb-1";
-  
-    // Create a wrapper for the input and suggestions
-    const inputWrapper = document.createElement("div");
-    inputWrapper.className = "relative flex-1";
-  
-    const input = document.createElement("input");
-    input.type = "text";
-    // Set placeholder based on fieldName
-    if (fieldName === "origin") {
-      input.placeholder = "Origin";
-    } else if (fieldName === "destination") {
-      input.placeholder = "Destination";
-    } else {
-      input.placeholder = "Enter Airport";
-    }
-    input.className = "block w-full bg-transparent border border-gray-300 text-gray-800 rounded-md px-1 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
-    const inputId = fieldName + "-input-" + Date.now();
-    input.id = inputId;
-    inputWrapper.appendChild(input);
-
-    const suggestions = document.createElement("div");
-    suggestions.id = inputId + "-suggestions";
-    suggestions.className = "absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 text-gray-800 text-sm hidden";
-    inputWrapper.appendChild(suggestions);
-
-    row.appendChild(inputWrapper);
-
-    // --- NEW: Button container (right side, vertical layout) ---
-    const buttonGroup = document.createElement("div");
-    buttonGroup.className = "flex flex-col items-center justify-start gap-1";
-    // Always add a delete button (even for the first row)
-    const deleteBtn = document.createElement("button");
-    deleteBtn.textContent = "—";
-    // Added cursor-pointer for hover feedback
-    deleteBtn.className = "delete-btn  w-5 h-5 text-white text-xs bg-[#20006D] rounded-xl hover:bg-red-600 flex items-center justify-center cursor-pointer";
-    deleteBtn.addEventListener("click", () => {
-      row.remove();
-      updateAirportRows(container);
-      // Ensure at least one row remains after deletion.
-      if (container.querySelectorAll(".airport-row").length === 0) {
-        addAirportRow(container, fieldName);
-        updateAirportRows(container);
-      }
-    });
-  
-    // Add the plus button for adding new rows.
-    const plusBtn = document.createElement("button");
-    plusBtn.textContent = "+";
-    // Initially hidden, will be shown only when at least one field is filled
-    plusBtn.className = "plus-btn w-5 h-5 text-white text-xs bg-[#C90076] rounded-xl hover:bg-[#A00065] flex items-center justify-center cursor-pointer hidden";
-
-    plusBtn.addEventListener("click", () => {
-      addAirportRow(container, fieldName);
-      updateAirportRows(container);
-    });
-
-    // Append the button to the row but keep it hidden initially
-    // Append both buttons to buttonGroup
-    buttonGroup.appendChild(deleteBtn);
-    buttonGroup.appendChild(plusBtn);
-
-    // Append the button group to the row
-    row.appendChild(buttonGroup);
-
-    // Function to update plus button visibility
-    function updatePlusButtonVisibility() {
-      const rows = container.querySelectorAll(".airport-row");
-      let lastFilledRow = null;
-
-      rows.forEach(row => {
-        const inputField = row.querySelector("input");
-        const plusButton = row.querySelector(".plus-btn");
-
-        if (inputField && inputField.value.trim().length > 0) {
-          lastFilledRow = row;
-        }
-
-        if (plusButton) {
-          plusButton.classList.add("hidden");
-        }
-      });
-
-      if (lastFilledRow) {
-        const plusButton = lastFilledRow.querySelector(".plus-btn");
-        if (plusButton) {
-          plusButton.classList.remove("hidden");
-        }
-      }
-    }
-
-    // Attach event listener to each input to detect changes
-    input.addEventListener("input", updatePlusButtonVisibility);
-    input.addEventListener("input", () => {
-      updateAirportRows(container);
-    });
-
-    // Ensure the function runs after initialization
-    updatePlusButtonVisibility();
-
-    container.appendChild(row);
-    setupAutocomplete(input.id, suggestions.id);
-    updateAirportRows(container);
-    }
 
   function updateAirportRows(container) {
-    const rows = container.querySelectorAll(".airport-row");
-    rows.forEach((row, index) => {
-      const deleteBtn = row.querySelector(".delete-btn");
-      if (deleteBtn) {
-        deleteBtn.style.display = "inline-block";
-      }
-      const plusBtn = row.querySelector(".plus-btn");
-  
-      // Always show the plus button on the last row if total rows is less than 3.
-      if (rows.length < 3 && index === rows.length - 1) {
-        if (plusBtn) plusBtn.style.display = "inline-block";
-      } else {
-        if (plusBtn) plusBtn.style.display = "none";
-      }
-    });
+    airportFields.update(container);
   }
-  
+
   function swapInputs() {
-    // Gather current values from each container
-    const originValues = getMultiAirportValues("origin-multi");
-    const destValues = getMultiAirportValues("destination-multi");
-  
-    const originContainer = document.getElementById("origin-multi");
-    const destContainer = document.getElementById("destination-multi");
-  
-    // Clear both containers
-    originContainer.innerHTML = "";
-    destContainer.innerHTML = "";
-  
-    // Refill origin container with previous destination values, if any
-    if (destValues.length > 0) {
-      destValues.forEach(val => {
-        addAirportRow(originContainer, "origin");
-        const rowInput = originContainer.lastElementChild.querySelector("input");
-        if (rowInput) rowInput.value = val;
-      });
-    }
-    if (originContainer.querySelectorAll(".airport-row").length === 0) {
-      addAirportRow(originContainer, "origin");
-    }
-    updateAirportRows(originContainer);
-  
-    // Refill destination container with previous origin values, if any
-    if (originValues.length > 0) {
-      originValues.forEach(val => {
-        addAirportRow(destContainer, "destination");
-        const rowInput = destContainer.lastElementChild.querySelector("input");
-        if (rowInput) rowInput.value = val;
-      });
-    }
-    if (destContainer.querySelectorAll(".airport-row").length === 0) {
-      addAirportRow(destContainer, "destination");
-    }
-    updateAirportRows(destContainer);
+    airportFields.swap();
   }
-  
+
   function toggleOptions() {
     const optionsContainer = document.getElementById("options-container");
     optionsContainer.classList.toggle("hidden");
@@ -3538,276 +842,13 @@ async function refreshMultipassTab() {
     }
   }
 
-  function showNotification(message) {
-    const banner = document.getElementById("notification-banner");
-    const text = document.getElementById("notification-text");
-  
-    text.textContent = message; // Set the message text
-    banner.classList.remove("hidden", "opacity-0"); // Show banner
-    banner.classList.add("opacity-100");
-    animateElement(banner, "notification-enter", 500);
-    // Hide after 3 seconds
-    setTimeout(() => {
-      banner.classList.remove("opacity-100");
-      banner.classList.add("opacity-0");
-      setTimeout(() => banner.classList.add("hidden"), 300); // Fully hide
-    }, 3000);
-  }  
-  // Updated sorting function for the global (outbound) results
-  function sortResultsArray(results, sortOption) {
-    if (!Array.isArray(results) || results.length === 0) return;
-    if (sortOption === "default") {
-      // No sorting needed for default.
-      return;
-    } else if (sortOption === "departure") {
-      results.sort((a, b) => {
-        return new Date(a.calculatedDuration.departureDate).getTime() -
-               new Date(b.calculatedDuration.departureDate).getTime();
-      });
-    } else if (sortOption === "airport") {
-      results.sort((a, b) => {
-        const nameA = (airportNames[a.route[0]] || a.route[0]).toLowerCase();
-        const nameB = (airportNames[b.route[0]] || b.route[0]).toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
-    } else if (sortOption === "arrival") {
-      results.sort((a, b) => {
-        const getFinalArrival = (flight) => {
-          if (flight.returnFlights && flight.returnFlights.length > 0) {
-            return new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
-          }
-          return new Date(flight.calculatedDuration.arrivalDate).getTime();
-        };
-        return getFinalArrival(a) - getFinalArrival(b);
-      });
-    } else if (sortOption === "duration") {
-      results.sort((a, b) => {
-        const getTripDuration = (flight) => {
-          if (flight.returnFlights && flight.returnFlights.length > 0) {
-            const outboundDeparture = new Date(flight.calculatedDuration.departureDate).getTime();
-            const inboundArrival = new Date(flight.returnFlights[flight.returnFlights.length - 1].calculatedDuration.arrivalDate).getTime();
-            return (inboundArrival - outboundDeparture) / 60000;
-          }
-          return flight.calculatedDuration.totalMinutes;
-        };
-        return getTripDuration(a) - getTripDuration(b);
-      });
-    }
-    // Add any additional sort options as needed.
-  }
-  
-  //-------------------Rendeting results-----------------------------
-  function renderRouteBlock(unifiedFlight, label = "", extraInfo = "") {
-    const isReturn = label && label.toLowerCase().includes("inbound flight");
-    const isOutbound = label && label.toLowerCase().includes("outbound flight");
-    const isDirectFlight = !unifiedFlight.segments || unifiedFlight.segments.length === 1; 
-    const header = isOutbound && isDirectFlight || isDirectFlight ? "" :  `
-      <div class="flex flex-col">
-        <div class="flex justify-between items-center mb-0.5 space-x-2">
-          <div class="text-xs font-semibold bg-gray-800 text-white px-2 py-1 mb-1 rounded">
-            ${unifiedFlight.formattedFlightDate}
-          </div>
-          <div class="text-xs font-semibold text-gray-800 text-right px-2 py-1 mb-1 rounded">
-            Total duration: <br>${unifiedFlight.calculatedDuration.hours}h ${unifiedFlight.calculatedDuration.minutes}m
-          </div>
-        </div>
-        <hr class="${ isOutbound ? "border-[#C90076] border-2 mt-1 my-2" : "border-[#20006D] border-2 mt-1 my-2"}">
-      </div>
-    `;
-    
-    const labelExtraHtml = (label || extraInfo) ? `
-      <div class="flex justify-between items-center mb-2">
-        ${ label ? `<div class="inline-block text-xs font-semibold ${isReturn ? "bg-[#20006D] text-white" : "bg-[#C90076] text-white"} px-2 py-1 rounded">${label}</div>` : "" }
-        ${ extraInfo ? `<div class="text-xs font-semibold ${isReturn ? "bg-white text-gray-800" : "bg-gray-200 text-gray-700"} px-2 py-1 rounded">${extraInfo}</div>` : "" }
-      </div>` : "";
-    
-    let bodyHtml = "";
-    debugLogger("Unified flight", unifiedFlight);
-    if (unifiedFlight.segments && unifiedFlight.segments.length > 0) {
-      unifiedFlight.segments.forEach((segment, idx) => {
-        bodyHtml += createSegmentRow(segment);
-        bodyHtml += `
-        <div class="flex justify-between items-center mt-2">
-          <div class="text-left text-sm font-semibold text-gray-800">
-            ${segment.currency} ${segment.displayPrice}
-          </div>
-          <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${segment.key}">
-            Continue to customize
-          </button>
-        </div>
-      `;
-        if (idx < unifiedFlight.segments.length - 1) {
-          const nextSegment = unifiedFlight.segments[idx + 1];
-          const connectionMs = nextSegment.calculatedDuration.departureDate - segment.calculatedDuration.arrivalDate;
-          const connectionMinutes = Math.max(0, Math.round(connectionMs / 60000));
-          const ch = Math.floor(connectionMinutes / 60);
-          const cm = connectionMinutes % 60;
-          let stopoverText = `Self-connection: ${ch}h ${cm}m`;
-
-          if (
-            unifiedFlight.airportChange &&
-            unifiedFlight.airportChange.from &&
-            unifiedFlight.airportChange.to &&
-            unifiedFlight.airportChange.distanceKm > 0 &&
-            unifiedFlight.airportChange.from !== unifiedFlight.airportChange.to
-          ) {
-            stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChange.from} ⇄ ${unifiedFlight.airportChange.to}, Distance: ${unifiedFlight.airportChange.distanceKm} km`;
-          }
-
-          if (
-            idx === 0 &&
-            unifiedFlight.airportChangeOne &&
-            unifiedFlight.airportChangeOne.from &&
-            unifiedFlight.airportChangeOne.to &&
-            unifiedFlight.airportChangeOne.distanceKm > 1 &&
-            unifiedFlight.airportChangeOne.from !== unifiedFlight.airportChangeOne.to
-          ) {
-            stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChangeOne.from} ⇄ ${unifiedFlight.airportChangeOne.to}, Distance: ${unifiedFlight.airportChangeOne.distanceKm} km`;
-          }
-
-          if (
-            idx === 1 &&
-            unifiedFlight.airportChangeTwo &&
-            unifiedFlight.airportChangeTwo.from &&
-            unifiedFlight.airportChangeTwo.to &&
-            unifiedFlight.airportChangeTwo.distanceKm > 0 &&
-            unifiedFlight.airportChangeTwo.from !== unifiedFlight.airportChangeTwo.to
-          ) {
-            stopoverText += `<br>⚠️ Airport change: ${unifiedFlight.airportChangeTwo.from} ⇄ ${unifiedFlight.airportChangeTwo.to}, Distance: ${unifiedFlight.airportChangeTwo.distanceKm} km`;
-          }
-
-          bodyHtml += `
-            <div class="flex items-center my-2">
-              <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
-              <div class="px-3 text-sm ${isReturn ? "text-black" : "text-gray-500"} text-center whitespace-nowrap">
-                ${stopoverText}
-              </div>
-              <div class="flex-1 border-t-2 border-dashed border-gray-400"></div>
-            </div>
-          `;
-        }
-      });
-    } else {
-      bodyHtml = createSegmentRow(unifiedFlight);
-      bodyHtml += `
-        <div class="flex justify-between items-center mt-0">
-          <div class="text-left text-sm font-semibold text-gray-800">
-            ${unifiedFlight.currency} ${unifiedFlight.displayPrice}
-          </div>
-          <button class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md active:bg-[#A00065] active:text-white hover:bg-[linear-gradient(#A00055,#A00075)] hover:text-white transition cursor-pointer" data-outbound-key="${unifiedFlight.key}">
-            Continue to customize
-          </button>
-        </div>
-      `;
-    }
-    
-    // Always include the header regardless of return flight type.
-    const containerClasses = isReturn ? "border rounded-lg p-2.5 mb-2 bg-gray-300" : "border rounded-lg p-2.5 mb-2";
-    return `
-      <div class="${containerClasses}">
-        ${labelExtraHtml}
-        ${header}
-        ${bodyHtml}
-      </div>
-    `;
-  }
-
-  function createSegmentRow(segment) {
-    const segmentDate = segment.formattedFlightDate;
-    const flightCode = formatFlightCode(segment.flightCode);
-    const departureStationCode = segment.departureStationCode || segment.departureStation;
-    const arrivalStationCode = segment.arrivalStationCode || segment.arrivalStation;
-    const segmentHeader = `
-      <div class="flex justify-between items-center mb-0">
-        <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">
-          ${segmentDate}
-        </div>
-        <div class="text-xs font-semibold bg-white border border-[#20006D] text-[#20006D] px-1 py-1 rounded">
-          ${flightCode}
-        </div>
-      </div>
-    `;
-    const gridRow = `
-      <div class="grid grid-cols-3 grid-rows-2 gap-0 items-center w-full py-1">
-        <div class="flex items-center gap-1 whitespace-normal">
-          <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
-            <span class="tooltip-trigger text-xl items-center flex -mb-1 cursor-pointer">${getCountryFlag(departureStationCode)}</span>
-            <div class="tooltip absolute hidden top-full min-w-[1rem] max-w-[10rem] left-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
-            ${getCountry(departureStationCode)}
-            </div>
-            <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">${departureStationCode}</span>
-          </div>
-          <span class="text-base font-medium break-words max-w-[calc(100%-2rem)]">${segment.departureStationText}</span>
-        </div>
-        <span class="-mb-6">
-        <svg xmlns="http://www.w3.org/2000/svg"
-            class="block m-0 p-0"
-            width="100%" height="100%"
-            viewBox="0 40 300 40"
-            preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
-              <stop offset="0" stop-color="#20006D"/>
-              <stop offset="1" stop-color="#C90076"/>
-            </linearGradient>
-          </defs>
-          <g transform="translate(20,20)">
-            <line x1="0" y1="40" x2="260" y2="40" stroke="url(#lineGradient)" stroke-width="4" stroke-linecap="round"/>
-            <circle cx="0" cy="40" r="6" fill="#20006D"/>
-            <circle cx="260" cy="40" r="6" fill="#C90076"/>
-            <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D"/>
-          </g>
-        </svg>
-        </span>
-        <div class="flex justify-end items-center gap-1 mb-0 -mr-1">
-          <span class="text-base font-medium text-right break-words max-w-[calc(100%-2rem)]">
-            ${segment.arrivalStationText}
-          </span>
-
-          <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 gap-0 items-center mr-1 relative">
-            <span class="text-xl items-center flex -mb-1 cursor-pointer tooltip-trigger">
-              ${getCountryFlag(arrivalStationCode)}
-            </span>
-
-            <div class="tooltip absolute hidden top-full right-0 min-w-[1rem] max-w-[10rem] bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 text-center whitespace-nowrap">
-              ${getCountry(arrivalStationCode)}
-            </div>
-
-            <span class="text-[10px] justify-between items-center font-bold text-gray-500 -mt-1">
-              ${arrivalStationCode}
-            </span>
-          </div>
-        </div>
-      
-        <div class="flex items-center gap-1 mt-4">
-          <span class="text-2xl font-bold whitespace-nowrap">${segment.displayDeparture}</span>
-          <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.departureOffset)}</sup>
-        </div>
-        <div class="flex flex-col items-center -mt-8">
-          <div class="text-sm font-medium">
-            ${segment.calculatedDuration.hours}h ${segment.calculatedDuration.minutes}m
-          </div>
-        </div>
-        <div class="flex items-center justify-end gap-1 mt-4">
-          <span class="text-2xl font-bold whitespace-nowrap mb-0">${segment.displayArrival}</span>
-          <sup class="text-[10px] align-super">${formatOffsetForDisplay(segment.arrivalOffset)}</sup>
-        </div>
-      </div>
-    `;
-    
-    return `<div class=>${segmentHeader}${gridRow}</div>`;
-  }
-
-  /**
-   * Formats a flight code by inserting a space after the first two characters.
-   */
-  function formatFlightCode(code) {
-    if (!code || code.length < 3) return code;
-    return code.slice(0, 2) + ' ' + code.slice(2);
-  }
+  const showNotification = createNotifier({
+    banner: document.getElementById("notification-banner"),
+    text: document.getElementById("notification-text")
+  });
   // --------CSV export-------------
   function downloadResultsAsCSV() {
-    if (!globalResults || globalResults.length === 0) {
+    if (!appState.results || appState.results.length === 0) {
       showNotification("No search results to export.");
       return;
     }
@@ -3841,39 +882,32 @@ async function refreshMultipassTab() {
       "Flight ID"                
     ];
 
-    const csvRows = [headers.join("\t")];
+    const csvRows = [headers];
 
-    // Iterate through globalResults and extract relevant flight data
-    globalResults.forEach(flight => {
+    // Iterate through appState.results and extract relevant flight data
+    appState.results.forEach(flight => {
       const row = [
-        `"${flight.departureStationText}"`,
-        `"${flight.departureStationCode}"`,
-        `"${flight.arrivalStationText}"`,
-        `"${flight.arrivalStationCode}"`,
-        `"${flight.departureDate}"`,
-        `"${flight.displayDeparture}"`,
-        `"${flight.departureOffsetText}"`,
-        `"${flight.arrivalDate}"`,
-        `"${flight.displayArrival}"`,
-        `"${flight.arrivalOffsetText}"`,
+        escapeTabularCell(flight.departureStationText),
+        escapeTabularCell(flight.departureStationCode),
+        escapeTabularCell(flight.arrivalStationText),
+        escapeTabularCell(flight.arrivalStationCode),
+        escapeTabularCell(flight.departureDate),
+        escapeTabularCell(flight.displayDeparture),
+        escapeTabularCell(flight.departureOffsetText),
+        escapeTabularCell(flight.arrivalDate),
+        escapeTabularCell(flight.displayArrival),
+        escapeTabularCell(flight.arrivalOffsetText),
         `${Math.floor(flight.calculatedDuration.totalMinutes / 60)}:${String(flight.calculatedDuration.totalMinutes % 60).padStart(2, '0')}`, // hh:mm format
         `="${parseFloat(flight.fare).toFixed(2)}"`, 
-        `"${flight.currency}"`,
-        `"${flight.carrierText}"`,
+        escapeTabularCell(flight.currency),
+        escapeTabularCell(flight.carrierText),
         flight.flightId
-      ].join("\t");
+      ];
 
       csvRows.push(row);
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadTabSeparatedFile(csvRows, fileName);
   }
 
   // Function to toggle CSV button visibility before search
@@ -3881,13 +915,13 @@ async function refreshMultipassTab() {
     const csvButton = document.getElementById("download-csv-button");
 
     // Hide the button if there are no results.
-    if (!globalResults || globalResults.length === 0) {
+    if (!appState.results || appState.results.length === 0) {
         csvButton.classList.add("hidden");
         return;
     }
 
     // Check if all flights are direct and none have return flights
-    const onlyDirectOneWay = globalResults.every(flight => {
+    const onlyDirectOneWay = appState.results.every(flight => {
         const isDirect = !flight.segments || flight.segments.length === 1;
         const isOneWay = !flight.returnFlights || flight.returnFlights.length === 0; // Ensure no return flights
         return isDirect && isOneWay;
@@ -3901,268 +935,6 @@ async function refreshMultipassTab() {
   }
 
   
-  // ---------------- Calendar ----------------
-  function renderCalendarMonth(
-    popupEl,
-    inputId,
-    year,
-    month,
-    maxDaysAhead,
-    selectedDates,
-    minSelectableDate = null
-  ) {
-    // Clear old content
-    popupEl.innerHTML = "";
-  
-    // Container for the header (Month Year, Prev/Next buttons)
-    const headerRow = document.createElement("div");
-    headerRow.className = "flex justify-between items-center mb-2";
-  
-    // --- Prev Button ---
-    const prevBtn = document.createElement("button");
-    prevBtn.textContent = "←";
-    prevBtn.className = "px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm";
-    headerRow.appendChild(prevBtn);
-  
-    // --- Title ---
-    const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
-    ];
-    const title = document.createElement("div");
-    title.className = "font-bold text-sm mx-2 flex-1 text-center";
-    title.textContent = `${monthNames[month]} ${year}`;
-    headerRow.appendChild(title);
-  
-    // --- Next Button ---
-    const nextBtn = document.createElement("button");
-    nextBtn.textContent = "→";
-    nextBtn.className = "px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm";
-    headerRow.appendChild(nextBtn);
-  
-    popupEl.appendChild(headerRow);
-  
-    // Compute minDate from minSelectableDate if provided
-    const now = new Date();
-    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // local midnight
-
-    // Normalize minDate to a local-midnight Date as well:
-    const minDate = minSelectableDate
-      ? parseLocalDate(minSelectableDate) // parseLocalDate already returns local midnight
-      : new Date(todayMidnight.getFullYear(), todayMidnight.getMonth(), todayMidnight.getDate());
-
-    // Build lastBookable as local-midnight by using date components (works across DST)
-    const lastBookable = new Date(
-      todayMidnight.getFullYear(),
-      todayMidnight.getMonth(),
-      todayMidnight.getDate() + maxDaysAhead
-    );
-    // Disable Prev navigation if current month is before the minimum selectable month
-    const currentMonthDate = new Date(year, month);
-    const minMonthDate = new Date(minDate.getFullYear(), minDate.getMonth());
-    if (currentMonthDate < minMonthDate) {
-      prevBtn.disabled = true;
-      prevBtn.classList.add("opacity-50", "cursor-not-allowed");
-    } else {
-      prevBtn.disabled = false;
-      prevBtn.classList.remove("opacity-50", "cursor-not-allowed");
-    }
-    
-
-    // Handle Prev/Next navigation (stopPropagation to prevent closing)
-    prevBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      let newMonth = month - 1;
-      let newYear = year;
-      if (newMonth < 0) {
-        newMonth = 11;
-        newYear--;
-      }
-      renderCalendarMonth(popupEl, inputId, newYear, newMonth, maxDaysAhead, selectedDates, minSelectableDate);
-    });
-  
-    nextBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      let newMonth = month + 1;
-      let newYear = year;
-      if (newMonth > 11) {
-        newMonth = 0;
-        newYear++;
-      }
-      renderCalendarMonth(popupEl, inputId, newYear, newMonth, maxDaysAhead, selectedDates, minSelectableDate);
-    });
-  
-    // --- Day Names (Monday-based) ---
-    const daysShort = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-    const dayNamesRow = document.createElement("div");
-    dayNamesRow.className = "grid grid-cols-7 text-center text-xs font-semibold mb-2";
-  
-    daysShort.forEach((dayName, i) => {
-      const dayEl = document.createElement("div");
-      dayEl.textContent = dayName;
-      dayEl.classList.add(i === 5 || i === 6 ? "text-[#C90076]" : "text-[#20006D]", "font-semibold");
-      dayNamesRow.appendChild(dayEl);
-    });
-    popupEl.appendChild(dayNamesRow);
-  
-    // --- Dates Grid ---
-    const datesGrid = document.createElement("div");
-    datesGrid.className = "grid grid-cols-7 text-center text-xs gap-1";
-  
-    const firstOfMonth = new Date(year, month, 1);
-    let startingWeekday = firstOfMonth.getDay();
-    startingWeekday = (startingWeekday + 6) % 7; // Shift Monday to 0
-  
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-  
-    // Fill in blank cells for days before the first day of the month
-    for (let i = 0; i < startingWeekday; i++) {
-      const blank = document.createElement("div");
-      blank.className = "p-2";
-      datesGrid.appendChild(blank);
-    }
-  
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateCell = document.createElement("div");
-      dateCell.className = "border rounded cursor-pointer text-xs leading-tight flex items-center justify-center p-[2px]";
-      const cellDate = new Date(year, month, d);
-      const yyyy = cellDate.getFullYear();
-      const mm = String(cellDate.getMonth() + 1).padStart(2, "0");
-      const dd = String(cellDate.getDate()).padStart(2, "0");
-      const dateStr = `${yyyy}-${mm}-${dd}`;
-      const dayOfWeek = (startingWeekday + (d - 1)) % 7;
-  
-      // Apply selected or weekend styling
-      if (selectedDates.has(dateStr)) {
-        dateCell.classList.add("bg-blue-300");
-      } else if (dayOfWeek === 5 || dayOfWeek === 6) {
-        dateCell.classList.add("bg-pink-50");
-      }
-      dateCell.textContent = d;
-  
-      // Disable cell if cellDate is earlier than minDate or later than lastBookable
-      if (cellDate.getTime() < minDate.getTime() || cellDate.getTime() > lastBookable.getTime()) {
-        dateCell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
-      } else {
-        dateCell.classList.add("font-bold");
-        dateCell.addEventListener("click", () => {
-          if (selectedDates.has(dateStr)) {
-            selectedDates.delete(dateStr);
-            dateCell.classList.remove("bg-blue-300");
-            // Reapply weekend style if applicable
-            if (dayOfWeek === 5 || dayOfWeek === 6) {
-              dateCell.classList.add("bg-pink-50");
-            }
-          } else {
-            selectedDates.add(dateStr);
-            dateCell.classList.remove("bg-pink-50");
-            dateCell.classList.add("bg-blue-300");
-          }
-          const inputEl = document.getElementById(inputId);
-          const sortedArr = Array.from(selectedDates).sort();
-          inputEl.value = sortedArr.join(", ");
-          inputEl.dispatchEvent(new Event("change"));
-        });
-      }
-      datesGrid.appendChild(dateCell);
-    }
-    popupEl.appendChild(datesGrid);
-  
-    const doneContainer = document.createElement("div");
-    doneContainer.className = "flex justify-end mt-2";
-    const doneBtn = document.createElement("button");
-    doneBtn.textContent = "Done";
-    doneBtn.className = "px-2 py-1 bg-[#C90076] text-white rounded-lg hover:bg-[#A00065] text-sm cursor-pointer";
-    doneBtn.addEventListener("click", () => {
-      popupEl.classList.add("hidden");
-    });
-    doneContainer.appendChild(doneBtn);
-    popupEl.appendChild(doneContainer);
-  }
-    
-  function parseLocalDate(dateStr) {
-    const [year, month, day] = dateStr.split("-").map(Number);
-    return new Date(year, month - 1, day);
-  }  
-  
-  function initMultiCalendar(inputId, popupId, maxDaysAhead = 3) {
-    const inputEl = document.getElementById(inputId);
-    const popupEl = document.getElementById(popupId);
-    if (!inputEl || !popupEl) {
-      console.error("Calendar input/popup not found:", inputId, popupId);
-      return;
-    }
-  
-    // Default month/year to "today"
-    let today = new Date();
-    let currentYear = today.getFullYear();
-    let currentMonth = today.getMonth();
-  
-    // When user clicks the input, show the calendar
-    inputEl.addEventListener("click", (e) => {
-      e.stopPropagation();
-  
-      // Parse input value into a Set of selected dates
-      const rawValue = inputEl.value.trim();
-      let selectedDates = new Set();
-      if (rawValue) {
-        rawValue.split(",").map(s => s.trim()).forEach(dateStr => {
-          if (dateStr) selectedDates.add(dateStr);
-        });
-      }
-  
-      // If there’s at least one selected date, jump calendar to that month
-      if (selectedDates.size > 0) {
-        const firstSelected = [...selectedDates][0]; // use only the first selected date
-        const parsedDate = parseLocalDate(firstSelected);
-        if (parsedDate.toString() !== "Invalid Date") {
-          currentYear = parsedDate.getFullYear();
-          currentMonth = parsedDate.getMonth();
-        }
-      }
-  
-      // If this is the return date calendar, use only the first departure date as minSelectableDate
-      let minSelectable = null;
-      if (inputId === "return-date") {
-        const depRaw = document.getElementById("departure-date").value.trim();
-        if (depRaw) {
-          const depDates = depRaw.split(",").map(s => s.trim()).filter(Boolean);
-          if (depDates.length > 0) {
-            minSelectable = depDates[0];
-          }
-        }
-      }
-  
-      // Render the calendar with selected dates and minSelectable date (if any)
-      renderCalendarMonth(
-        popupEl,
-        inputId,
-        currentYear,
-        currentMonth,
-        maxDaysAhead,
-        selectedDates,
-        minSelectable
-      );
-      const origWidth = 220;
-      const targetWidth = inputEl.offsetWidth;
-      const scale = targetWidth / origWidth;
-      popupEl.style.transformOrigin = 'top left';
-      popupEl.style.transform = `scale(${scale})`;
-      popupEl.style.left = '0';
-      popupEl.style.top = '100%';
-      popupEl.style.width = `${origWidth}px`;
-      popupEl.style.height = 'auto';
-      // Show the popup
-      popupEl.classList.remove("hidden");
-    });
-  
-    // Close the calendar if user clicks outside
-    document.addEventListener("click", (e) => {
-      if (!popupEl.contains(e.target) && !inputEl.contains(e.target)) {
-        popupEl.classList.add("hidden");
-      }
-    });
-  }
   // ------------- Redirect to payment --------------
   function getSubscriptionIdFromDynamicUrl(url) {
     const matches = url.match(/subscriptions\/([^/]+)\/availability\/([^/]+)/);
@@ -4172,7 +944,7 @@ async function refreshMultipassTab() {
     return null;
   }
 
-  window.continueToPayment = async function(outboundKey) {
+  async function continueToPayment(outboundKey) {
     try {
       const keyParts = outboundKey.split(' ');
       if (keyParts.length < 2) 
@@ -4193,266 +965,47 @@ async function refreshMultipassTab() {
         return;
       }
 
-      const dynamicUrl = await getDynamicUrl();
-      const subscriptionId = getSubscriptionIdFromDynamicUrl(dynamicUrl);
+      const session = await multipassClient.ensureSession();
+      const subscriptionId = getSubscriptionIdFromDynamicUrl(session.dynamicUrl);
       if (!subscriptionId) throw new Error("Lost subscription ID");
-
-      chrome.tabs.create({ url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets" }, newTab => {
-        const listener = (tabId, changeInfo) => {
-          if (tabId === newTab.id && changeInfo.status === "complete") {
-            chrome.tabs.onUpdated.removeListener(listener);
-            chrome.tabs.sendMessage(newTab.id, {
-              action: "injectPaymentForm",
-              subscriptionId,
-              outboundKey
-            });
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-      });
+      await multipassClient.continueBooking(subscriptionId, outboundKey);
     } catch (e) {
       console.error("continueToPayment error:", e);
     }
-  };
-  
-  // ---------------- Donation Reminder
-
-  function checkDonationReminder() {
-    if (localStorage.getItem('userDonated') === 'true') {
-      return;
-    }
-    
-    const lastShown = localStorage.getItem('lastReminderShown');
-    const now = Date.now();
-    const fiveMinutes = 5 * 60 * 1000;
-    
-    const intervalReview = localStorage.getItem('userLeftReview') === 'true' 
-      ? 24 * 60 * 60 * 1000 
-      : fiveMinutes;
-
-    const intervalDonation = localStorage.getItem('userDonated') === 'true'
-      ? 7 * 24 * 60 * 60 * 1000
-      : fiveMinutes;
-    
-    const showInterval = Math.max(intervalReview, intervalDonation);
-    if (!lastShown || (now - parseInt(lastShown)) > showInterval) {
-      const reminder = document.getElementById('donation-reminder');
-      setTimeout(() => {
-        reminder.classList.remove('hidden');
-        localStorage.setItem('lastReminderShown', now.toString());
-      }, 3000);
-    }
   }
 
-  function setupReminderActions() {
-    const reminder = document.getElementById('donation-reminder');
-    const closeBtn = document.getElementById('close-reminder');
-    const reviewBtn = document.getElementById('leave-review');
-    const donateLink = document.getElementById('donate-link');
-    
-    closeBtn.addEventListener('click', () => {
-      reminder.classList.add('hidden');
-    });
-    
-    reviewBtn.addEventListener('click', () => {
-      reminder.classList.add('hidden');
-      window.open(
-        'https://chromewebstore.google.com/detail/all-you-can-fly-pro-aycf/oimhdkdhblofmdebbpdfabddcnpmlhha/reviews', 
-        '_blank'
-      );
-      localStorage.setItem('userLeftReview', 'true');
-    });
-    
-    donateLink.addEventListener('click', () => {
-      localStorage.setItem('userDonated', 'true');
-    });
-    
-    window.addEventListener('blur', () => {
-      setTimeout(() => {
-        if (document.hidden) {
-          localStorage.setItem('userDonated', 'true');
-        }
-      }, 1000);
-    });
-    trackDonationReturn();
-  }
-
-  function trackDonationReturn() {
-    const donationUrl = 'https://buy.stripe.com/4gM00j9fA6Hua291mWbo400';
-    
-    window.addEventListener('blur', function() {
-      if (document.activeElement === document.getElementById(donationUrl)) {
-        const checkReturn = setInterval(function() {
-          if (document.hidden === false) {
-            clearInterval(checkReturn);
-            localStorage.setItem('userDonated', 'true');
-          }
-        }, 1000);
-      }
-    });
-  }
-
-  // ---------------- Custom Airport Groups ----------------
-
-  function loadCustomGroups() {
-    try {
-      return JSON.parse(localStorage.getItem('customAirportGroups') || '[]');
-    } catch { return []; }
-  }
-
-  function saveCustomGroups(groups) {
-    localStorage.setItem('customAirportGroups', JSON.stringify(groups));
-  }
-
-  function applyCustomGroup(group) {
-    MULTI_AIRPORT_CITIES[group.key] = group.airports;
-    customCityNames[group.key] = group.name;
-    if (!airportLookup[group.key]) {
-      const entry = { code: group.key, name: group.name, country: '', flag: '✈️' };
-      airportLookup[group.key] = entry;
-      AIRPORTS.push(entry);
-      AIRPORTS.sort((a, b) => a.code.localeCompare(b.code));
-    }
-  }
-
-  function removeCustomGroup(key) {
-    delete MULTI_AIRPORT_CITIES[key];
-    delete customCityNames[key];
-    delete airportLookup[key];
-    const idx = AIRPORTS.findIndex(a => a.code === key);
-    if (idx >= 0) AIRPORTS.splice(idx, 1);
-  }
-
-  function renderCustomGroupsList() {
-    const list = document.getElementById('custom-groups-list');
-    if (!list) return;
-    const groups = loadCustomGroups();
-    if (groups.length === 0) {
-      list.innerHTML = '<p class="text-xs text-gray-500 mb-2">No custom groups yet.</p>';
-      return;
-    }
-    list.innerHTML = groups.map(g => `
-      <div class="flex items-center justify-between bg-white border border-gray-300 rounded px-2 py-1 mb-1 text-xs gap-1">
-        <span class="font-semibold text-[#20006D] shrink-0">[${g.key}]</span>
-        <span class="font-medium truncate flex-1">${g.name}</span>
-        <span class="text-gray-500 shrink-0">${g.airports.join(', ')}</span>
-        <button class="delete-custom-group shrink-0 bg-red-500 hover:bg-red-600 text-white rounded px-1.5 py-0.5 cursor-pointer" data-key="${g.key}">✕</button>
-      </div>
-    `).join('');
-    list.querySelectorAll('.delete-custom-group').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const key = btn.getAttribute('data-key');
-        const updated = loadCustomGroups().filter(g => g.key !== key);
-        saveCustomGroups(updated);
-        removeCustomGroup(key);
-        renderCustomGroupsList();
-        showNotification(`Custom group "${key}" removed.`);
-      });
-    });
-  }
+  let customGroupsController;
 
   function initCustomGroupsUI() {
-    renderCustomGroupsList();
-
-    document.getElementById('toggle-custom-groups').addEventListener('click', () => {
-      const panel = document.getElementById('custom-groups-panel');
-      panel.classList.toggle('hidden');
-      if (!panel.classList.contains('hidden')) {
-        animateElement(panel, 'dropdown-enter', 300);
-      }
+    customGroupsController ??= createCustomGroupsController({
+      storage: localStorage,
+      groups: MULTI_AIRPORT_CITIES,
+      groupNames: customCityNames,
+      airportLookup,
+      airports: AIRPORTS,
+      notify: showNotification
     });
-
-    const keyInput = document.getElementById('custom-group-key');
-    keyInput.addEventListener('input', () => {
-      keyInput.value = keyInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    });
-
-    document.getElementById('add-custom-group-btn').addEventListener('click', () => {
-      const name = document.getElementById('custom-group-name').value.trim();
-      const key  = document.getElementById('custom-group-key').value.trim().toUpperCase();
-      const raw  = document.getElementById('custom-group-airports').value.trim();
-
-      if (!name) { showNotification('Please enter a group name.'); return; }
-      if (!key || key.length < 2 || key.length > 6) {
-        showNotification('Tag must be 2–6 uppercase letters/digits.'); return;
-      }
-      if (MULTI_AIRPORT_CITIES[key] || airportLookup[key]) {
-        showNotification(`Tag "${key}" is already in use — choose a different one.`); return;
-      }
-      const airports = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-      if (airports.length < 2) {
-        showNotification('Please enter at least 2 airport codes, comma-separated.'); return;
-      }
-      const unknown = airports.filter(code => !airportLookup[code]);
-      if (unknown.length) {
-        showNotification(`Unknown airport codes: ${unknown.join(', ')}`); return;
-      }
-
-      const group = { key, name, airports };
-      const groups = loadCustomGroups();
-      groups.push(group);
-      saveCustomGroups(groups);
-      applyCustomGroup(group);
-      renderCustomGroupsList();
-
-      document.getElementById('custom-group-name').value = '';
-      document.getElementById('custom-group-key').value  = '';
-      document.getElementById('custom-group-airports').value = '';
-
-      showNotification(`Group "${name}" [${key}] added! Type "${key}" in any airport field.`);
-    });
+    customGroupsController.initialize();
   }
 
   // ---------------- Initialize on DOMContentLoaded ----------------
 
-  document.addEventListener("DOMContentLoaded", () => {
+  export async function bootstrap() {
+    await initializationPromise;
     // ========== 1. Load settings from localStorage ==========
-    document.getElementById("preferred-airport").value = localStorage.getItem("preferredAirport") || "";
-    document.getElementById("min-connection-time").value = localStorage.getItem("minConnectionTime") || 90;
-    document.getElementById("max-connection-time").value = localStorage.getItem("maxConnectionTime") || 1440;
-    document.getElementById("allow-change-airport").checked = localStorage.getItem("allowChangeAirport") === "true" || false;
-    document.getElementById("connection-radius").value = localStorage.getItem("connectionRadius") || "100";
-    document.getElementById("max-requests").value = localStorage.getItem("maxRequestsInRow") || 25;
-    document.getElementById("requests-frequency").value = localStorage.getItem("requestsFrequencyMs") || 1200;
-    document.getElementById("pause-duration").value = localStorage.getItem("pauseDurationSeconds") || 15;
-    document.getElementById("cache-lifetime").value = localStorage.getItem("cacheLifetimeHours") || 4;
+    const settings = settingsRepository.load();
+    mountSettingsPanel({ settings, animate: animateElement });
     
-    checkDonationReminder();
-    setupReminderActions();
-    setInterval(checkDonationReminder, 10 * 1000);
+    mountDonationReminder({ storage: localStorage });
     initCustomGroupsUI();
 
-    // ========== 2. Toggle Expert Settings ==========
-    document.getElementById("toggle-expert-settings").addEventListener("click", (event) => {
-      const expertSettings = document.getElementById("expert-settings");
-      if (expertSettings.classList.contains("hidden")) {
-        expertSettings.classList.remove("hidden");
-        animateElement(expertSettings, "dropdown-enter", 300);
-        event.target.textContent = "Hide Expert Settings";
-      } else {
-        expertSettings.classList.add("hidden");
-        event.target.textContent = "Show Expert Settings";
-      }
-    });
-  
-    // ========== 3. Save settings ==========
-      localStorage.setItem("minConnectionTime", document.getElementById("min-connection-time").value);
-      localStorage.setItem("maxConnectionTime", document.getElementById("max-connection-time").value);
-      localStorage.setItem("preferredAirport", document.getElementById("preferred-airport").value.trim());
-      localStorage.setItem("allowChangeAirport", document.getElementById("allow-change-airport").checked);
-      localStorage.setItem("connectionRadius", document.getElementById("connection-radius").value);
-      localStorage.setItem("maxRequestsInRow", document.getElementById("max-requests").value);
-      localStorage.setItem("requestsFrequencyMs", document.getElementById("requests-frequency").value);
-      localStorage.setItem("pauseDurationSeconds", document.getElementById("pause-duration").value);
-      localStorage.setItem("cacheLifetimeHours", document.getElementById("cache-lifetime").value);
-  
-    // ========== 4. Setup Autocomplete and Multi-Airport Fields ==========
+    // ========== 2. Setup Autocomplete and Multi-Airport Fields ==========
     setupAutocomplete("preferred-airport", "airport-suggestions-preferred");
     initializeMultiAirportField("origin-multi", "origin");
     const originContainer = document.getElementById("origin-multi");
     const firstOriginInput = originContainer.querySelector("input");
     if (firstOriginInput) {
-      firstOriginInput.value = localStorage.getItem("preferredAirport") || "";;
+      firstOriginInput.value = settings.preferredAirport;
       updateAirportRows(originContainer);
     }
     initializeMultiAirportField("destination-multi", "destination");
@@ -4523,8 +1076,8 @@ async function refreshMultipassTab() {
       } else {
         returnInput.disabled = true;
         // If the trip type is "return", reset the return date when departure is cleared
-        if (window.currentTripType === "return") {
-          window.currentTripType = "oneway";
+        if (appState.tripType === "return") {
+          appState.tripType = "oneway";
           returnDateInput.value = "";
           returnDateContainer.style.display = "none";
           const returnCalendarPopup = document.getElementById("return-calendar-popup");
@@ -4562,7 +1115,7 @@ async function refreshMultipassTab() {
         errors.push("Please select at least one destination airport.");
       }
       // For round-trip, validate return date
-      if (window.currentTripType === "return") {
+      if (appState.tripType === "return") {
         if (!returnDateInput.value.trim()) {
           errors.push("For round-trip flights, please select a return date.");
         }
@@ -4600,7 +1153,7 @@ async function refreshMultipassTab() {
     });
   
     // ========== 9. Trip Type Switching & "Add Return Date" Button ==========
-    window.currentTripType = "oneway";
+    appState.tripType = "oneway";
     const tripTypeToggle = document.getElementById("trip-type-toggle");
     const tripTypeText = document.getElementById("trip-type-text");
     const returnDateContainer = document.getElementById("return-date-container");
@@ -4618,7 +1171,7 @@ async function refreshMultipassTab() {
         // Safety check – button should be disabled
         return;
       }
-      window.currentTripType = "return";
+      appState.tripType = "return";
       tripTypeToggle.style.display = "none";
       returnDateContainer.style.display = "block";
       const returnCalendarPopup = document.getElementById("return-calendar-popup");
@@ -4635,7 +1188,7 @@ async function refreshMultipassTab() {
   
     // "Remove Return Date" button click handler
     removeReturnDateBtn.addEventListener("click", () => {
-      window.currentTripType = "oneway";
+      appState.tripType = "oneway";
       returnDateContainer.style.display = "none";
       returnDateInput.value = "";
       const returnCalendarPopup = document.getElementById("return-calendar-popup");
@@ -4664,15 +1217,7 @@ async function refreshMultipassTab() {
       });
     });
 
-    // ========= 11. Version Number =========
-    const manifest = chrome.runtime.getManifest();
-    const versionEl = document.getElementById('version-display');
-    if (versionEl) {
-      versionEl.innerHTML = `
-      <span>v${manifest.version}</span>
-      `;
-    }
-    // ========= 12. Go to payment page =========
+    // ========= 11. Go to payment page =========
     document.querySelector(".route-list").addEventListener("click", (event) => {
       const btn = event.target.closest(".continue-payment-button");
       if (btn) {
@@ -4691,38 +1236,7 @@ async function refreshMultipassTab() {
     // Also check visibility when the page loads
     updateCSVButtonVisibility();
 
-    // ========= 14. Changing airports raius =========
-    const allowSwitch = document.getElementById('allow-change-airport');
-    const radiusContainer = document.getElementById('connection-radius-container');
-    const radiusInput = document.getElementById('connection-radius');
-    // Initialize from localStorage
-    const savedAllow  = localStorage.getItem('allowChangeAirport') === 'true';
-    const savedRadius = parseInt(localStorage.getItem('connectionRadius')) || 0;
-    radiusInput.value  = savedRadius;
-    allowSwitch.checked = savedAllow;
-    if (savedAllow) {
-      radiusContainer.classList.remove('hidden');
-    } else {
-      radiusContainer.classList.add('hidden');
-    }
-    // Show/hide radius when the checkbox is toggled
-    allowSwitch.addEventListener('change', () => {
-      // console.log('allowSwitch changed, checked=', allowSwitch.checked);
-      localStorage.setItem('allowChangeAirport', allowSwitch.checked);
-      if (allowSwitch.checked) {
-        radiusContainer.classList.remove('hidden');
-      } else {
-        radiusContainer.classList.add('hidden');
-      }
-    });
-
-      // Persist the radius as soon as it’s changed
-      radiusInput.addEventListener('input', () => {
-        const v = parseInt(radiusInput.value) || 0;
-        localStorage.setItem('connectionRadius', v);
-      });
-
-      // ========== 15. Debug Mode Controls ==========
+      // ========== 14. Debug Mode Controls ==========
       const toggleDebugBtn = document.getElementById('toggle-debug');
       const debugLogContainer = document.getElementById('debug-log-container');
       const debugLogTextarea = document.getElementById('debug-log');
@@ -4735,7 +1249,7 @@ async function refreshMultipassTab() {
 
       toggleDebugBtn.addEventListener('click', () => {
         debug = !debug;
-        localStorage.setItem('debugMode', debug);
+        settingsRepository.update({ debugMode: debug });
         toggleDebugBtn.textContent = `DEBUG MODE: ${debug ? 'ON' : 'OFF'}`;
         if (debug) {
           console.warn = function(...args) {
@@ -4752,16 +1266,10 @@ async function refreshMultipassTab() {
 
       downloadDebugBtn.addEventListener('click', () => {
         const blob = new Blob([debugLog.join('\n')], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `wizzair-debug-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 100);
+        downloadBlob(
+          blob,
+          `wizzair-debug-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`
+        );
       });
 
       clearDebugBtn.addEventListener('click', () => {
@@ -4791,30 +1299,11 @@ async function refreshMultipassTab() {
 
       setInterval(updateDebugLogDisplay, 500);
 
-      // Changelog Modal
-      const changelogModal = document.getElementById('changelog-modal');
-      const changelogBtn = document.getElementById('changelog-button');
-      const closeChangelog = document.getElementById('close-changelog');
-
-      changelogBtn.addEventListener('click', () => {
-        changelogModal.classList.remove('hidden');
-        document.body.classList.add('overflow-hidden');
+      mountChangelog({
+        modal: document.getElementById("changelog-modal"),
+        openButton: document.getElementById("changelog-button"),
+        closeButton: document.getElementById("close-changelog"),
+        content: document.getElementById("changelog-content"),
+        version: extensionGateway.getManifestVersion()
       });
-
-      const closeModal = () => {
-        changelogModal.classList.add('hidden');
-        document.body.classList.remove('overflow-hidden');
-      };
-
-      closeChangelog.addEventListener('click', closeModal);
-
-      changelogModal.addEventListener('click', (e) => {
-        if (e.target === changelogModal) closeModal();
-      });
-
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !changelogModal.classList.contains('hidden')) {
-          closeModal();
-        }
-      });
-  });
+  }

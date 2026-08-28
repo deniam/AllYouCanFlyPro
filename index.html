@@ -8,119 +8,8 @@
   <script src="./assets/css/tailwind_cdn_409.js"></script>
   <script src="./assets/emojis/twemoji.min.js"></script>
   <script src="./assets/twemoji-init.js"></script>
-  <script type="module" src="src/app.js"></script>
-  <style>
-
-      #changelog-modal {
-        animation: fadeIn 0.3s ease-out;
-      }
-
-      @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-
-      .changelog-content {
-        max-height: 70vh;
-        overflow-y: auto;
-      }
-      @keyframes subtlePink {
-        0%, 100% { background-color: #C90076; }
-        50% { background-color: #a30268; }
-      }
-      .support-animation {
-        animation: subtlePink 10s infinite alternate ease-in-out;
-      }
-
-      .dropdown-enter {
-        animation: fadeInSlide 0.3s ease-out forwards;
-      }
-
-      @keyframes fadeInSlide {
-        from {
-          opacity: 0;
-          transform: translateY(-10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      .notification-enter {
-        animation: slideUpFadeIn 0.5s ease-out forwards;
-      }
-      .suggestions-enter {
-        animation: fadeInDropdown 0.3s ease-out forwards;
-      }
-
-      @keyframes fadeInDropdown {
-        from {
-          opacity: 0;
-          transform: translateY(-10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      .calendar-popup {
-        position: absolute;
-        z-index: 100;
-        background: white;
-        border: 1px solid #ccc;
-        border-radius: 0.375rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        padding: 0.5rem;
-        margin-top: 0.25rem;
-      }
-      img.emoji {
-        width: 1em;
-        height: 1em;
-        vertical-align: text-bottom;
-      }
-      #airport-suggestions-preferred {
-        position: absolute;
-        z-index: 1000;
-      }
-    
-      #connection-radius-container.hidden {
-          display: none !important;
-      }
-
-      #donation-reminder {
-        animation: slideIn 0.5s ease-out;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-        border-left: 4px solid #C90076;
-      }
-
-      @keyframes slideIn {
-        from {
-          transform: translateY(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateY(0);
-          opacity: 1;
-        }
-      }
-
-      .reminder-hidden {
-        animation: fadeOut 0.3s ease-in forwards;
-      }
-
-      @keyframes fadeOut {
-        from {
-          transform: translateY(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateY(20px);
-          opacity: 0;
-        }
-      }
-    
-  </style>
+  <script type="module" src="src/app/main.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body class="bg-gray-50">
   <section class="pt-4">
@@ -154,143 +43,15 @@
         <div id="changelog-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div class="bg-white rounded-lg shadow-xl w-full ml-4 mr-4 max-w-2xl max-h-[80vh] overflow-hidden">
             <div class="flex justify-between items-center bg-[#20006D] text-white p-4">
-              <a id="donate-link" href="https://buy.stripe.com/4gM00j9fA6Hua291mWbo400" target="_blank" 
-                class="bg-[#C90076] hover:bg-[#A00065] text-white font-bold py-2 px-4 rounded text-center transition">
+              <a id="donate-link-modal" href="https://buy.stripe.com/4gM00j9fA6Hua291mWbo400" target="_blank"
+                rel="noopener noreferrer" class="donate-link bg-[#C90076] hover:bg-[#A00065] text-white font-bold py-2 px-4 rounded text-center transition">
                 ☕ Support with donation
             </a>
               <br>
               <button id="close-changelog" class="text-white text-2xl cursor-pointer">&times;</button>
             </div>
             
-            <div class="p-4 overflow-y-auto max-h-[60vh]">
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2"></span>
-                  <span class="text-gray-700 font-medium">July 1, 2026</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Improved search speed for connecting flights: 
-                    1-stop and 2-stop flights search is now much smarter. 
-                    It skips unnecessary checks if a key part of the route 
-                    has no available flights, making searches significantly faster.</li>
-                  <li>Added "Custom Airport Groups" in Options: 
-                    You can now create and save your own lists of airports 
-                    (e.g., tag BER, WRO, and WAW as "HOME"). 
-                    You can use these custom tags to search flights from/to 
-                    multiple airports at once, exactly like the 
-                    built-in city groups (LON, MIL).</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.4.3</span>
-                  <span class="text-gray-700 font-medium">June 30, 2026</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Updated routesData with schedule until 2026-08-30</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.4.3</span>
-                  <span class="text-gray-700 font-medium">April 27, 2026</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Updated routesData with schedule until 2026-06-30</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.4.1</span>
-                  <span class="text-gray-700 font-medium">February 25, 2026</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Updated routesData with schedule until 2026-04-30</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.4.0</span>
-                  <span class="text-gray-700 font-medium">December 9, 2025</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Fixed the logic for dynamicUrl creation, allowing users to search for routes even if their subscription is no longer active. </li>
-                  <li>Updated routesData with schedule till 2026-02-28</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.3.6</span>
-                  <span class="text-gray-700 font-medium">November 26, 2025</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Updated routesData with schedule till 2025-12-31</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.3.5</span>
-                  <span class="text-gray-700 font-medium">October 24, 2025</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Fixed the issue while DST bookable dates were calculated incorrect</li>
-                  <li>Added missing emoji reflecting on Windows / Android in the toolbar</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.3.4</span>
-                  <span class="text-gray-700 font-medium">October 5, 2025</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Updated routesData with schedule till 2025-11-30</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.3.3</span>
-                  <span class="text-gray-700 font-medium">September 2, 2025</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Added missing emoji for about menu (for Windows/Android devices)</li>
-                  <li>Fixed error when multiple dates selected and the first date of array is < operationStartDate all of dates marked as invalid</li>
-                  <li>Updated routesData with schedule from 2025-09-01 till 2025-10-31</li>
-                </ul>
-              </div>
-
-              <div class="mb-4 pb-3 border-b">
-                <div class="flex items-center mb-2">
-                  <span id="version-display" class="bg-[#C90076] text-white text-xs font-bold px-2 py-1 rounded mr-2">v.3.3.2</span>
-                  <span class="text-gray-700 font-medium">July 31, 2025</span>
-                </div>
-                <h1 class="font-bold">Changelog</h1>
-                <ul class="list-disc pl-5 text-gray-700 space-y-1">
-                  <li>Added debug logger to Expert Settings</li>
-                  <li>Changed toolbar (replaced donation link to AYCF website)</li>
-                  <li>Bugfixes</li>
-                </ul>
-              </div>
-
-              <span class ="text-gray-500 text-xs">2025, Denys Shkodynskyi</span>
-            </div>
+            <div id="changelog-content" class="p-4 overflow-y-auto max-h-[60vh]"></div>
           </div>
         </div>
 
@@ -426,8 +187,8 @@
                     </div>
                     <p class="text-gray-600 mb-3">Help me keep it updated and improved. Your support matters!</p>
                     <div class="flex flex-col gap-2">
-                      <a id="donate-link" href="https://buy.stripe.com/4gM00j9fA6Hua291mWbo400" target="_blank" 
-                        class="bg-[#C90076] hover:bg-[#A00065] text-white font-bold py-2 px-4 rounded text-center transition">
+                      <a id="donate-link-reminder" href="https://buy.stripe.com/4gM00j9fA6Hua291mWbo400" target="_blank"
+                        rel="noopener noreferrer" class="donate-link bg-[#C90076] hover:bg-[#A00065] text-white font-bold py-2 px-4 rounded text-center transition">
                          ☕ Support with donation
                       </a>
                       <button id="leave-review" 

@@ -1,12 +1,16 @@
-ZIP_NAME=extension.zip
-IGNORE_FILES=.git/\* node_modules/\* Makefile makefile
+ZIP_NAME := extension.zip
+RUNTIME_PATHS := manifest.json index.html assets/css assets/emojis assets/icons assets/twemoji-init.js src LICENSE README.md
 
-all:
+.PHONY: all verify package clean
 
-	rm -f $(ZIP_NAME)
+all: package
 
-	find . -name ".DS_Store" -type f -delete
-	find . -name "screenshot.png" -type f -delete
-	find . -name ".vscode" -type d -delete
+verify:
+	npm run check
 
-	zip -r $(ZIP_NAME) . -x $(IGNORE_FILES)
+package: verify clean
+	zip -r "$(ZIP_NAME)" $(RUNTIME_PATHS) \
+		-x "*/.DS_Store" "src/libs/*.map"
+
+clean:
+	rm -f "$(ZIP_NAME)"

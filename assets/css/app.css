@@ -1,0 +1,62 @@
+#changelog-modal { animation: fadeIn 0.3s ease-out; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.changelog-content { max-height: 70vh; overflow-y: auto; }
+
+@keyframes subtlePink {
+  0%, 100% { background-color: #c90076; }
+  50% { background-color: #a30268; }
+}
+
+.support-animation { animation: subtlePink 10s infinite alternate ease-in-out; }
+.dropdown-enter { animation: fadeInSlide 0.3s ease-out forwards; }
+
+@keyframes fadeInSlide {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.notification-enter { animation: slideUpFadeIn 0.5s ease-out forwards; }
+.suggestions-enter { animation: fadeInDropdown 0.3s ease-out forwards; }
+
+@keyframes fadeInDropdown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.calendar-popup {
+  position: absolute;
+  z-index: 100;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 0.375rem;
+  box-shadow: 0 4px 6px rgb(0 0 0 / 10%);
+  padding: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
+#airport-suggestions-preferred { position: absolute; z-index: 1000; }
+#connection-radius-container.hidden { display: none !important; }
+
+#donation-reminder {
+  animation: slideIn 0.5s ease-out;
+  box-shadow: 0 10px 25px rgb(0 0 0 / 15%);
+  border-left: 4px solid #c90076;
+}
+
+@keyframes slideIn {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.reminder-hidden { animation: fadeOut 0.3s ease-in forwards; }
+
+@keyframes fadeOut {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(20px); opacity: 0; }
+}
