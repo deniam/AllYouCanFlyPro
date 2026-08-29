@@ -63,9 +63,15 @@ export function combineOneStopFlights(firstFlights, secondFlights, {
   const results = [];
   for (const first of firstFlights) {
     for (const second of secondFlights) {
+      const firstArrival = first?.calculatedDuration?.arrivalDate;
+      const secondDeparture = second?.calculatedDuration?.departureDate;
+      if (!(firstArrival instanceof Date) || Number.isNaN(firstArrival.getTime())
+        || !(secondDeparture instanceof Date) || Number.isNaN(secondDeparture.getTime())) {
+        continue;
+      }
       const gap = minutesBetween(
-        first.calculatedDuration.arrivalDate,
-        second.calculatedDuration.departureDate
+        firstArrival,
+        secondDeparture
       );
       if (gap < minConnection || gap > maxConnection) continue;
       const route = buildOneStopRoute(first, second, gap, airportLookup);
@@ -821,18 +827,35 @@ export function createConnectionsSearch({
         continue;
       }
       let segs = await getCachedResults(`${dep}-${arr}-${date}`);
+      let shouldRefreshCache = Array.isArray(segs) && segs.some(flight => {
+        const departure = flight?.calculatedDuration?.departureDate;
+        const arrival = flight?.calculatedDuration?.arrivalDate;
+        return !(departure instanceof Date) || Number.isNaN(departure.getTime())
+          || !(arrival instanceof Date) || Number.isNaN(arrival.getTime());
+      });
 
       if (!Array.isArray(segs)) {
         try {
           const result = await checkRouteSegment(dep, arr, date, queryOptions);
-          segs = Array.isArray(result) 
-            ? result.map(unifyRawFlight) 
-            : [];
-          await setCachedResults(`${dep}-${arr}-${date}`, segs);
+          segs = Array.isArray(result) ? result : [];
+          shouldRefreshCache = true;
         } catch (error) {
           console.error(`Error loading flights: ${error.message}`);
           segs = [];
         }
+      }
+      segs = segs.map(unifyRawFlight).filter(flight => {
+        const departure = flight?.calculatedDuration?.departureDate;
+        const arrival = flight?.calculatedDuration?.arrivalDate;
+        const valid = departure instanceof Date && !Number.isNaN(departure.getTime())
+          && arrival instanceof Date && !Number.isNaN(arrival.getTime());
+        if (!valid) {
+          debugLogger(`Skipping flight without valid timing for ${dep} → ${arr} on ${date}`);
+        }
+        return valid;
+      });
+      if (shouldRefreshCache) {
+        await setCachedResults(`${dep}-${arr}-${date}`, segs);
       }
       out.push(...segs);
     }

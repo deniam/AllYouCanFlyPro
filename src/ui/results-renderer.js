@@ -48,44 +48,63 @@ export function createResultsRenderer({
   let sortOption = "default";
   let tooltipListenerBound = false;
 
-  function segmentHtml(segment) {
+  function segmentHtml(segment, label = "", extraInfo = "") {
     const departureCode = segment.departureStationCode ?? segment.departureStation ?? "";
     const arrivalCode = segment.arrivalStationCode ?? segment.arrivalStation ?? "";
+    const inbound = label.toLowerCase().includes("inbound");
     return `
       <div class="flight-segment">
-        <div class="flex justify-between items-center mb-0">
-          <div class="text-xs font-semibold bg-gray-200 text-gray-800 px-2 py-1 rounded">${escapeHtml(segment.formattedFlightDate)}</div>
-          <div class="text-xs font-semibold bg-white border border-[#20006D] text-[#20006D] px-1 py-1 rounded">${escapeHtml(formatFlightCode(segment.flightCode))}</div>
+        <div class="flight-card-header">
+          ${label ? `<div class="flight-direction ${inbound ? "flight-direction--inbound" : ""}">${escapeHtml(label)}</div>` : ""}
+          <div class="flight-date">${escapeHtml(segment.formattedFlightDate)}</div>
+          ${extraInfo ? `<div class="flight-extra">${escapeHtml(extraInfo)}</div>` : ""}
+          <div class="flight-number">${escapeHtml(formatFlightCode(segment.flightCode))}</div>
         </div>
-        <div class="grid grid-cols-3 grid-rows-2 gap-0 items-center w-full py-1">
-          <div class="flex items-center gap-1 whitespace-normal">
-            <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 items-center relative" tabindex="0">
-              <span class="text-xl cursor-pointer">${escapeHtml(flagFor(departureCode))}</span>
-              <div class="tooltip absolute hidden top-full left-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 whitespace-nowrap">${escapeHtml(countryFor(departureCode))}</div>
-              <span class="text-[10px] font-bold text-gray-500">${escapeHtml(departureCode)}</span>
+        <div class="flight-route-row">
+          <div class="flight-endpoint flight-endpoint--departure">
+            <div class="flight-time-zone">
+              <span class="flight-time">${escapeHtml(segment.displayDeparture)}</span>
+              <span class="flight-time-offset">${escapeHtml(formatOffsetForDisplay(segment.departureOffset))}</span>
             </div>
-            <span class="text-base font-medium break-words">${escapeHtml(segment.departureStationText)}</span>
-          </div>
-          <div class="text-center text-[#20006D]" aria-hidden="true">━━━━ ✈ ━━━━</div>
-          <div class="flex justify-end items-center gap-1">
-            <span class="text-base font-medium text-right break-words">${escapeHtml(segment.arrivalStationText)}</span>
-            <div class="tooltip-trigger grid grid-cols-1 grid-rows-2 items-center relative" tabindex="0">
-              <span class="text-xl cursor-pointer">${escapeHtml(flagFor(arrivalCode))}</span>
-              <div class="tooltip absolute hidden top-full right-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 whitespace-nowrap">${escapeHtml(countryFor(arrivalCode))}</div>
-              <span class="text-[10px] font-bold text-gray-500">${escapeHtml(arrivalCode)}</span>
+            <div class="flight-airport">
+              <div class="flight-airport-name-row">
+                <span class="tooltip-trigger flight-flag relative" tabindex="0">
+                  <span class="cursor-pointer">${escapeHtml(flagFor(departureCode))}</span>
+                  <span class="tooltip absolute hidden top-full left-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 whitespace-nowrap">${escapeHtml(countryFor(departureCode))}</span>
+                </span>
+                <span class="flight-airport-name">${escapeHtml(segment.departureStationText)}</span>
+              </div>
+              <div class="flight-airport-code">${escapeHtml(departureCode)}</div>
             </div>
           </div>
-          <div class="flex items-center gap-1 mt-4"><span class="text-2xl font-bold">${escapeHtml(segment.displayDeparture)}</span><sup class="text-[10px]">${escapeHtml(formatOffsetForDisplay(segment.departureOffset))}</sup></div>
-          <div class="text-sm font-medium text-center">${escapeHtml(segment.calculatedDuration?.hours)}h ${escapeHtml(segment.calculatedDuration?.minutes)}m</div>
-          <div class="flex items-center justify-end gap-1 mt-4"><span class="text-2xl font-bold">${escapeHtml(segment.displayArrival)}</span><sup class="text-[10px]">${escapeHtml(formatOffsetForDisplay(segment.arrivalOffset))}</sup></div>
+          <div class="flight-route-middle">
+            <div class="flight-route-symbol" aria-hidden="true">━ ✈ ━</div>
+            <div class="flight-duration">${escapeHtml(segment.calculatedDuration?.hours)}h ${escapeHtml(segment.calculatedDuration?.minutes)}m</div>
+          </div>
+          <div class="flight-endpoint flight-endpoint--arrival">
+            <div class="flight-airport">
+              <div class="flight-airport-name-row">
+                <span class="flight-airport-name">${escapeHtml(segment.arrivalStationText)}</span>
+                <span class="tooltip-trigger flight-flag relative" tabindex="0">
+                  <span class="cursor-pointer">${escapeHtml(flagFor(arrivalCode))}</span>
+                  <span class="tooltip absolute hidden top-full right-0 bg-gray-800 text-white text-[8px] px-1 py-1 rounded shadow z-10 whitespace-nowrap">${escapeHtml(countryFor(arrivalCode))}</span>
+                </span>
+              </div>
+              <div class="flight-airport-code">${escapeHtml(arrivalCode)}</div>
+            </div>
+            <div class="flight-time-zone">
+              <span class="flight-time">${escapeHtml(segment.displayArrival)}</span>
+              <span class="flight-time-offset">${escapeHtml(formatOffsetForDisplay(segment.arrivalOffset))}</span>
+            </div>
+          </div>
         </div>
       </div>`;
   }
 
   function paymentHtml(segment) {
-    return `<div class="flex justify-between items-center mt-2">
-      <div class="text-left text-sm font-semibold text-gray-800">${escapeHtml(segment.currency)} ${escapeHtml(segment.displayPrice)}</div>
-      <button type="button" class="continue-payment-button px-1 py-1 bg-white text-[#C90076] border border-[#C90076] rounded-md font-bold shadow-md hover:text-white cursor-pointer" data-outbound-key="${escapeHtml(segment.key)}">Continue to customize</button>
+    return `<div class="flight-payment">
+      <div class="flight-price">${escapeHtml(segment.currency)} ${escapeHtml(segment.displayPrice)}</div>
+      <button type="button" class="continue-payment-button flight-continue-button" data-outbound-key="${escapeHtml(segment.key)}">Continue</button>
     </div>`;
   }
 
@@ -100,15 +119,9 @@ export function createResultsRenderer({
           - segment.calculatedDuration.arrivalDate) / 60000));
         connection = `<div class="text-center text-sm text-gray-500 my-2">Self-connection: ${Math.floor(minutes / 60)}h ${minutes % 60}m${escapeHtml(airportChangeText(flight, index))}</div>`;
       }
-      return `${segmentHtml(segment)}${paymentHtml(segment)}${connection}`;
+      return `${segmentHtml(segment, index === 0 ? label : "", index === 0 ? extraInfo : "")}${paymentHtml(segment)}${connection}`;
     }).join("");
-    const heading = label || extraInfo
-      ? `<div class="flex justify-between items-center mb-2">
-          <div class="text-xs font-semibold ${inbound ? "bg-[#20006D]" : "bg-[#C90076]"} text-white px-2 py-1 rounded">${escapeHtml(label)}</div>
-          <div class="text-xs font-semibold text-gray-700 px-2 py-1 rounded">${escapeHtml(extraInfo)}</div>
-        </div>`
-      : "";
-    return `<div class="border rounded-lg p-2.5 mb-2 ${inbound ? "bg-gray-300" : ""}">${heading}${body}</div>`;
+    return `<div class="flight-card ${inbound ? "flight-card--inbound" : ""}">${body}</div>`;
   }
 
   function bindTooltips() {
@@ -153,10 +166,10 @@ export function createResultsRenderer({
             - outbound.calculatedDuration.arrivalDate) / 60000));
           return routeHtml(flight, `Inbound Flight ${returnIndex + 1}`, `Stopover: ${Math.floor(minutes / 60)}h ${minutes % 60}m`);
         }).join("") ?? "";
-        list.insertAdjacentHTML("beforeend", `<div class="border rounded-lg p-2.5 mb-4">
+        list.insertAdjacentHTML("beforeend", `<div class="flight-trip-group">
           ${routeHtml(outbound, "Outbound Flight")}
-          ${count ? `<div class="text-center mt-2"><button type="button" class="return-toggle text-[#C90076] font-semibold" aria-expanded="false" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
-          <div id="${returnsId}" class="mt-2 hidden">${returns}</div>
+          ${count ? `<div class="flight-return-summary"><button type="button" class="return-toggle" aria-expanded="false" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
+          <div id="${returnsId}" class="flight-return-list hidden">${returns}</div>
         </div>`);
       });
       list.querySelectorAll(".return-toggle").forEach(button => button.addEventListener("click", () => {

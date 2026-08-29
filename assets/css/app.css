@@ -43,6 +43,312 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 #airport-suggestions-preferred { position: absolute; z-index: 1000; }
 #connection-radius-container.hidden { display: none !important; }
 
+/* Compact, responsive flight result cards. */
+.flight-trip-group,
+.flight-card,
+.flight-segment,
+.flight-route-row,
+.flight-endpoint,
+.flight-airport,
+.flight-airport-name-row,
+.flight-airport-name,
+.flight-card-header {
+  min-width: 0;
+}
+
+.flight-trip-group {
+  margin-bottom: 0.75rem;
+  border: 1px solid #111827;
+  border-radius: 0.6875rem;
+  padding: 0.4375rem;
+}
+
+.flight-card {
+  margin-bottom: 0.5rem;
+  border: 1px solid #111827;
+  border-radius: 0.5625rem;
+  background: #fff;
+  padding: 0.4375rem 0.5625rem;
+}
+
+.route-list > .flight-card { margin-bottom: 0.75rem; }
+.flight-trip-group > .flight-card:last-of-type,
+.flight-return-list > .flight-card:last-child { margin-bottom: 0; }
+.flight-card--inbound { background: #d1d5db; }
+
+.flight-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.5rem;
+}
+
+.flight-direction,
+.flight-date,
+.flight-extra,
+.flight-number {
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1rem;
+}
+
+.flight-direction {
+  border-radius: 0.375rem;
+  background: #c90076;
+  color: #fff;
+  padding: 0.3125rem 0.5rem;
+  white-space: nowrap;
+}
+
+.flight-direction--inbound { background: #20006d; }
+
+.flight-date {
+  overflow: hidden;
+  border-radius: 0.375rem;
+  background: #e5e7eb;
+  color: #1f2937;
+  padding: 0.25rem 0.4375rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flight-extra {
+  margin-left: auto;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.flight-number {
+  margin-left: auto;
+  border: 1px solid #20006d;
+  border-radius: 0.375rem;
+  background: #fff;
+  color: #20006d;
+  padding: 0.25rem 0.4375rem;
+  white-space: nowrap;
+}
+
+.flight-extra + .flight-number { margin-left: 0; }
+
+.flight-route-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5625rem;
+  margin-top: 0.5rem;
+}
+
+.flight-endpoint {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.flight-endpoint--arrival {
+  grid-template-columns: minmax(0, 1fr) auto;
+  text-align: right;
+}
+
+.flight-time-zone {
+  min-width: 3.625rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.flight-endpoint--arrival .flight-time-zone { text-align: right; }
+
+.flight-time {
+  display: block;
+  font-size: 1.3125rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.flight-time-offset {
+  display: block;
+  margin-top: 0.1875rem;
+  color: #475569;
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.flight-airport-name-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.flight-endpoint--arrival .flight-airport-name-row { justify-content: flex-end; }
+
+.flight-airport-name {
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.flight-flag {
+  display: inline-block;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+.flight-airport-code {
+  margin-top: 0.125rem;
+  color: #64748b;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.flight-route-middle {
+  min-width: 0;
+  text-align: center;
+}
+
+.flight-route-symbol {
+  overflow: hidden;
+  color: #20006d;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.flight-duration {
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.flight-payment {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  margin-top: 0.375rem;
+}
+
+.flight-price {
+  color: #374151;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.flight-continue-button {
+  min-height: 2.125rem;
+  border: 1px solid #c90076;
+  border-radius: 0.4375rem;
+  background: #fff;
+  color: #c90076;
+  padding: 0.375rem 0.6875rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1rem;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 12%);
+}
+
+.flight-continue-button:hover {
+  background: #c90076;
+  color: #fff;
+}
+
+.flight-return-summary {
+  padding: 0.4375rem 0;
+  text-align: center;
+}
+
+.flight-return-summary .return-toggle {
+  border: 0;
+  background: transparent;
+  color: #c90076;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.flight-return-list { margin-top: 0.125rem; }
+
+.flight-segment + .flight-payment + .text-center {
+  margin-block: 0.375rem;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 420px) {
+  .flight-trip-group { padding: 0.3125rem; }
+
+  .flight-card {
+    padding: 0.4375rem;
+  }
+
+  .flight-card-header { gap: 0.3125rem; }
+
+  .flight-direction,
+  .flight-date,
+  .flight-extra,
+  .flight-number {
+    font-size: 0.6875rem;
+  }
+
+  .flight-extra {
+    order: 4;
+    width: 100%;
+    margin-left: 0;
+    text-align: right;
+  }
+
+  .flight-number { margin-left: auto; }
+
+  .flight-route-row {
+    grid-template-columns: minmax(0, 1fr) 2.625rem minmax(0, 1fr);
+    gap: 0.3125rem;
+    margin-top: 0.4375rem;
+  }
+
+  .flight-endpoint {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+
+  .flight-endpoint--arrival {
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .flight-airport { order: 1; }
+
+  .flight-time-zone {
+    order: 2;
+    min-width: 0;
+  }
+
+  .flight-time { font-size: 1.1875rem; }
+
+  .flight-airport-name {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: 0.8125rem;
+    line-height: 1.12;
+  }
+
+  .flight-route-symbol { font-size: 0.6875rem; }
+  .flight-duration { font-size: 0.625rem; }
+
+  .flight-payment { justify-content: space-between; }
+
+  .flight-continue-button {
+    min-height: 2.5rem;
+    padding-inline: 0.875rem;
+  }
+}
+
 #donation-reminder {
   animation: slideIn 0.5s ease-out;
   box-shadow: 0 10px 25px rgb(0 0 0 / 15%);

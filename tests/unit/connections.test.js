@@ -17,6 +17,22 @@ const segment = (key, from, to, departure, arrival) => ({
   }
 });
 
+const rawSegment = (key, from, to, date, departure, arrival) => ({
+  key,
+  departureStation: from,
+  departureStationText: from,
+  arrivalStation: to,
+  arrivalStationText: to,
+  departureDate: date,
+  arrivalDate: date,
+  departureDateIso: date,
+  arrivalDateIso: date,
+  departure,
+  arrival,
+  departureOffsetText: "UTC",
+  arrivalOffsetText: "UTC"
+});
+
 describe("connection aggregation", () => {
   it("keeps only flights inside the connection window", () => {
     const first = segment("one", "AAA", "BBB", "2026-09-01T08:00:00Z", "2026-09-01T10:00:00Z");
@@ -28,6 +44,71 @@ describe("connection aggregation", () => {
     });
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ key: "one | two", totalConnectionTime: 120 });
+  });
+
+  it("ignores a segment without normalized timing instead of aborting the search", () => {
+    const valid = segment("valid", "BBB", "CCC", "2026-09-01T12:00:00Z", "2026-09-01T14:00:00Z");
+    const results = combineOneStopFlights([{ key: "invalid" }], [valid], {
+      minConnection: 90,
+      maxConnection: 300
+    });
+    expect(results).toEqual([]);
+  });
+
+  it("normalizes raw RT cache hits in an airport-change search", async () => {
+    const today = new Date();
+    const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const selectedDate = addDaysUTC(todayUtc, 1).toISOString().slice(0, 10);
+    const routes = [
+      { departureStation: "AAA", arrivalStations: [{ id: "BBB", flightDates: [selectedDate] }] },
+      { departureStation: "CCC", arrivalStations: [{ id: "DDD", flightDates: [selectedDate] }] }
+    ];
+    const catalog = createRouteCatalog(routes);
+    const cached = new Map([
+      [`AAA-BBB-${selectedDate}`, [rawSegment(
+        "first", "AAA", "BBB", selectedDate, "8:00 am", "10:00 am"
+      )]],
+      [`CCC-DDD-${selectedDate}`, [rawSegment(
+        "second", "CCC", "DDD", selectedDate, "12:00 pm", "2:00 pm"
+      )]]
+    ]);
+    const setCachedResults = vi.fn(async () => {});
+    const search = createConnectionsSearch({
+      isCancelled: () => false,
+      debugLogger: vi.fn(),
+      isDateAvailableForSegment: (origin, destination, date) =>
+        catalog.isDateAvailable(origin, destination, date),
+      getCachedResults: vi.fn(async key => cached.get(key) ?? null),
+      setCachedResults,
+      getUnifiedCacheKey: (origin, destination, date) => `${origin}-${destination}-${date}`,
+      checkRouteSegment: vi.fn(async () => []),
+      updateProgress: vi.fn(),
+      fetchDestinations: async () => routes,
+      routeCatalog: catalog,
+      airportLookup: {
+        BBB: { latitude: 0, longitude: 0 },
+        CCC: { latitude: 0, longitude: 1 }
+      },
+      appendRouteToDisplay: vi.fn(),
+      getSettings: () => ({
+        minConnectionTime: 90,
+        maxConnectionTime: 1440,
+        connectionRadius: 300,
+        allowChangeAirport: true
+      }),
+      getStopoverText: () => "One stop or fewer"
+    });
+
+    const results = await search(
+      ["AAA"], ["DDD"], selectedDate, 1, false, true, { preferredReturnDates: [] }
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      key: "first | second",
+      airportChange: { from: "BBB", to: "CCC" }
+    });
+    expect(setCachedResults).toHaveBeenCalledTimes(2);
   });
 
   it.each([
