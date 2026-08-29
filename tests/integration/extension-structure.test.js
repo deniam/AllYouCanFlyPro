@@ -31,6 +31,20 @@ describe("extension structure", () => {
     expect(document.querySelectorAll(".donate-link")).toHaveLength(2);
   });
 
+  it("exposes the accessible sorting controls without fare or airport-change ranking", () => {
+    expect(document.querySelector('label[for="sort-select"]')?.textContent).toBe("Sort by");
+    expect(document.getElementById("sort-direction-select")).not.toBeNull();
+    expect(document.getElementById("return-sort-select")).not.toBeNull();
+    expect(document.querySelector('label[for="return-sort-select"]')?.textContent).toBe("Return options");
+    expect([...document.querySelectorAll("#return-sort-select option")].map(option => option.textContent))
+      .toEqual(["Earliest departure", "Earliest arrival", "Shortest journey"]);
+    const values = [...document.querySelectorAll("#sort-select option")].map(option => option.value);
+    expect(values).toContain("arrivalAirport");
+    expect(values).toContain("transfers");
+    expect(values).not.toContain("price");
+    expect(values).not.toContain("airportChange");
+  });
+
   it("exposes the bounded request-concurrency setting", () => {
     const input = document.getElementById("max-concurrent-requests");
     expect(input?.getAttribute("min")).toBe("1");

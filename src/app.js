@@ -184,7 +184,11 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   const resultsContainer = document.getElementById("results-container");
   const resultsAndSortContainer = document.getElementById("results-and-sort-container");
   const totalResultsEl = document.getElementById("total-results");
+  const sortSelectLabel = document.getElementById("sort-select-label");
   const sortSelect = document.getElementById("sort-select");
+  const sortDirectionSelect = document.getElementById("sort-direction-select");
+  const returnSortControls = document.getElementById("return-sort-controls");
+  const returnSortSelect = document.getElementById("return-sort-select");
   const searchProgress = createSearchProgress({
     container: progressContainer,
     text: progressText,
@@ -192,7 +196,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     resultsContainer,
     timeoutStatus: document.getElementById("timeout-status")
   });
-  let currentSortOption = "default";
   const resultsRenderer = createResultsRenderer({
     list: document.querySelector(".route-list"),
     toolbar: resultsAndSortContainer,
@@ -203,6 +206,28 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     logger: debugLogger
   });
   const airportFields = createAirportFields({ setupAutocomplete });
+
+  const sortOptionsByTripType = Object.freeze({
+    oneway: Object.freeze([
+      ["default", "Search order"],
+      ["airport", "Departure airport"],
+      ["arrivalAirport", "Arrival airport"],
+      ["departure", "Departure date/time"],
+      ["arrival", "Arrival date/time"],
+      ["duration", "Total journey duration"],
+      ["transfers", "Fewest transfers"],
+      ["connections", "Least connection time"]
+    ]),
+    return: Object.freeze([
+      ["default", "Search order"],
+      ["airport", "Departure airport"],
+      ["arrivalAirport", "Arrival airport"],
+      ["departure", "Outbound departure"],
+      ["arrival", "Outbound arrival"],
+      ["duration", "Outbound journey duration"],
+      ["transfers", "Fewest outbound transfers"]
+    ])
+  });
 
     const settingSelectors = [
     '#min-connection-time',
@@ -224,24 +249,59 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     el.addEventListener(eventName, saveSettings);
   });
 
+  let currentSortOption = "default";
+  let currentSortDirection = "asc";
+  let currentReturnSortOption = "departure";
+
+  function updateSortControls(tripType) {
+    const options = sortOptionsByTripType[tripType] ?? sortOptionsByTripType.oneway;
+    const allowedOptions = new Set(options.map(([value]) => value));
+    if (!allowedOptions.has(currentSortOption)) currentSortOption = "default";
+
+    sortSelect.replaceChildren(...options.map(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      return option;
+    }));
+    sortSelect.value = currentSortOption;
+    sortDirectionSelect.value = currentSortDirection;
+    returnSortSelect.value = currentReturnSortOption;
+    sortSelectLabel.textContent = tripType === "return" ? "Sort outbound" : "Sort by";
+    returnSortControls.classList.toggle("hidden", tripType !== "return");
+    returnSortControls.classList.toggle("flex", tripType === "return");
+    syncRendererSortState();
+  }
+
+  function syncRendererSortState() {
+    resultsRenderer.setSortOption(currentSortOption);
+    resultsRenderer.setSortDirection(currentSortDirection);
+    resultsRenderer.setReturnSortOption(currentReturnSortOption);
+  }
+
+  function renderCurrentResults() {
+    syncRendererSortState();
+    if (appState.tripType === "return") {
+      if (appState.defaultResults.length) displayRoundTripResultsAll([...appState.defaultResults]);
+      else resultsRenderer.refreshRoundTrips();
+    } else {
+      displayGlobalResults([...appState.defaultResults]);
+    }
+  }
+
   sortSelect.addEventListener("change", () => {
     currentSortOption = sortSelect.value;
-    if (currentSortOption === "default") {
-      // Render using the preserved unsorted order.
-      if (appState.tripType === "return") {
-        displayRoundTripResultsAll(appState.defaultResults);
-      } else {
-        displayGlobalResults(appState.defaultResults);
-      }
-    } else {
-      // Work on a shallow copy of the default order so the original remains intact.
-      let sortedResults = [...appState.defaultResults];
-      if (appState.tripType === "return") {
-        displayRoundTripResultsAll(sortedResults);
-      } else {
-        displayGlobalResults(sortedResults);
-      }
-    }
+    renderCurrentResults();
+  });
+
+  sortDirectionSelect.addEventListener("change", () => {
+    currentSortDirection = sortDirectionSelect.value === "desc" ? "desc" : "asc";
+    renderCurrentResults();
+  });
+
+  returnSortSelect.addEventListener("change", () => {
+    currentReturnSortOption = returnSortSelect.value;
+    renderCurrentResults();
   });
 
   // ----------------------- Debugging --------------------------------
@@ -527,12 +587,12 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     
 
   function displayGlobalResults(results) {
-    resultsRenderer.setSortOption(currentSortOption);
+    syncRendererSortState();
     resultsRenderer.display(results);
   }
 
   function displayRoundTripResultsAll(results) {
-    resultsRenderer.setSortOption(currentSortOption);
+    syncRendererSortState();
     resultsRenderer.displayRoundTrips(results);
   }
 
@@ -626,6 +686,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     // Clear previous results and mark search as active.
     appState.results = [];
     appState.defaultResults = [];
+    resultsRenderer.reset();
     totalResultsEl.textContent = "Total results: 0";
     const searchSession = appState.beginSearch();
     selectPairedArrivalDate.reset();
@@ -669,7 +730,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     departureDates = departureInputRaw.split(",").map(d => d.trim()).filter(d => d !== "");
     debugLogger("Departure dates:", departureDates);
   
-    document.querySelector(".route-list").innerHTML = "";
     updateProgress(0, 1, "Initializing search");
   
     const stopoverText = document.getElementById("selected-stopover").textContent;
@@ -1118,6 +1178,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
         // If the trip type is "return", reset the return date when departure is cleared
         if (appState.tripType === "return") {
           appState.tripType = "oneway";
+          updateSortControls(appState.tripType);
           returnDateInput.value = "";
           returnDateContainer.style.display = "none";
           const returnCalendarPopup = document.getElementById("return-calendar-popup");
@@ -1207,6 +1268,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     tripTypeText.textContent = "Add Return Date";
     returnDateContainer.style.display = "none";
     tripTypeToggle.style.display = "block";
+    updateSortControls(appState.tripType);
     updateReturnDateButtonState();
   
     // "Add Return Date" button click handler
@@ -1216,6 +1278,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
         return;
       }
       appState.tripType = "return";
+      updateSortControls(appState.tripType);
       tripTypeToggle.style.display = "none";
       returnDateContainer.style.display = "block";
       const returnCalendarPopup = document.getElementById("return-calendar-popup");
@@ -1233,6 +1296,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     // "Remove Return Date" button click handler
     removeReturnDateBtn.addEventListener("click", () => {
       appState.tripType = "oneway";
+      updateSortControls(appState.tripType);
       returnDateContainer.style.display = "none";
       returnDateInput.value = "";
       const returnCalendarPopup = document.getElementById("return-calendar-popup");

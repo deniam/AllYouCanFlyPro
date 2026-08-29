@@ -1,27 +1,145 @@
 import { escapeHtml } from "./dom.js";
 import { formatOffsetForDisplay } from "../domain/flight-normalizer.js";
 
-export function sortResultsArray(results, option, airportName = code => code) {
-  if (!Array.isArray(results) || option === "default") return results;
-  const finalArrival = flight => {
-    const lastReturn = flight.returnFlights?.at(-1);
-    return new Date(lastReturn?.calculatedDuration?.arrivalDate
-      ?? flight.calculatedDuration.arrivalDate).getTime();
+function dateValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function numberValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function compareValues(left, right, direction = "asc") {
+  const leftMissing = left === null || left === undefined;
+  const rightMissing = right === null || right === undefined;
+  if (leftMissing && rightMissing) return 0;
+  if (leftMissing) return 1;
+  if (rightMissing) return -1;
+
+  const multiplier = direction === "desc" ? -1 : 1;
+  if (typeof left === "string" || typeof right === "string") {
+    return String(left).localeCompare(String(right), undefined, { sensitivity: "base" }) * multiplier;
+  }
+  if (left === right) return 0;
+  return (left < right ? -1 : 1) * multiplier;
+}
+
+function codeFromStation(value) {
+  if (value && typeof value === "object") return value.id ?? value.code ?? "";
+  return value ?? "";
+}
+
+function stationCode(flight, direction) {
+  const codeField = `${direction}StationCode`;
+  const stationField = `${direction}Station`;
+  return String(flight?.[codeField]
+    ?? codeFromStation(flight?.[stationField])
+    ?? "");
+}
+
+function stationName(flight, direction, airportName) {
+  const code = stationCode(flight, direction);
+  const text = flight?.[`${direction}StationText`];
+  return String(airportName(code) || text || code);
+}
+
+function departureTime(flight) {
+  return dateValue(flight?.calculatedDuration?.departureDate);
+}
+
+function arrivalTime(flight) {
+  return dateValue(flight?.calculatedDuration?.arrivalDate);
+}
+
+function journeyDuration(flight) {
+  return numberValue(flight?.calculatedDuration?.totalMinutes);
+}
+
+function transferCount(flight) {
+  if (Array.isArray(flight?.segments) && flight.segments.length) {
+    return Math.max(0, flight.segments.length - 1);
+  }
+  const match = String(flight?.stops ?? "").match(/(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function connectionTime(flight) {
+  return numberValue(flight?.totalConnectionTime) ?? 0;
+}
+
+function flightKey(flight) {
+  return String(flight?.key
+    ?? `${stationCode(flight, "departure")}-${stationCode(flight, "arrival")}|${departureTime(flight) ?? ""}`);
+}
+
+function compareWithKeys(left, right, keys, direction) {
+  for (const [getter, keyDirection = direction] of keys) {
+    const difference = compareValues(getter(left), getter(right), keyDirection);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function sortKeys(option, airportName, direction) {
+  const departureAirport = flight => stationName(flight, "departure", airportName);
+  const arrivalAirport = flight => stationName(flight, "arrival", airportName);
+  const departure = flight => departureTime(flight);
+  const arrival = flight => arrivalTime(flight);
+  const duration = flight => journeyDuration(flight);
+  const transfers = flight => transferCount(flight);
+  const connections = flight => connectionTime(flight);
+  const key = flight => flightKey(flight);
+
+  const common = {
+    departure,
+    airport: departureAirport,
+    arrivalAirport,
+    arrival,
+    duration,
+    transfers,
+    connections
   };
-  const tripDuration = flight => {
-    if (!flight.returnFlights?.length) return flight.calculatedDuration.totalMinutes;
-    return (finalArrival(flight) - new Date(flight.calculatedDuration.departureDate).getTime()) / 60000;
+  const secondary = {
+    departure: [departureAirport, transfers, key],
+    airport: [departure, transfers, key],
+    arrivalAirport: [departure, transfers, key],
+    arrival: [departure, departureAirport, transfers, key],
+    duration: [departure, departureAirport, transfers, key],
+    transfers: [departure, departureAirport, key],
+    connections: [duration, departure, departureAirport, transfers, key]
   };
-  const comparators = {
-    departure: (left, right) => new Date(left.calculatedDuration.departureDate)
-      - new Date(right.calculatedDuration.departureDate),
-    airport: (left, right) => airportName(left.route?.[0] ?? "")
-      .localeCompare(airportName(right.route?.[0] ?? "")),
-    arrival: (left, right) => finalArrival(left) - finalArrival(right),
-    duration: (left, right) => tripDuration(left) - tripDuration(right)
+  const primary = common[option];
+  if (!primary) return null;
+  return [[primary, direction], ...(secondary[option] ?? []).map(getter => [getter, getter === key ? "asc" : direction])];
+}
+
+export function sortResultsArray(results, option, airportName = code => code, direction = "asc") {
+  if (!Array.isArray(results)) return results;
+  const sorted = [...results];
+  if (option === "default") return sorted;
+  const keys = sortKeys(option, airportName, direction);
+  if (!keys) return sorted;
+  return sorted.sort((left, right) => compareWithKeys(left, right, keys, direction));
+}
+
+export function sortReturnFlightsArray(flights, option = "departure", direction = "asc") {
+  if (!Array.isArray(flights)) return flights;
+  const keysByOption = {
+    departure: [flight => departureTime(flight), flight => arrivalTime(flight), flight => flightKey(flight)],
+    arrival: [flight => arrivalTime(flight), flight => departureTime(flight), flight => flightKey(flight)],
+    duration: [flight => journeyDuration(flight), flight => departureTime(flight), flight => flightKey(flight)]
   };
-  results.sort(comparators[option] ?? (() => 0));
-  return results;
+  const keys = keysByOption[option] ?? keysByOption.departure;
+  return [...flights].sort((left, right) => compareWithKeys(
+    left,
+    right,
+    keys.map((getter, index) => [getter, index === keys.length - 1 ? "asc" : direction]),
+    direction
+  ));
 }
 
 function formatFlightCode(code) {
@@ -46,8 +164,11 @@ export function createResultsRenderer({
   logger = () => {}
 }) {
   let sortOption = "default";
+  let sortDirection = "asc";
+  let returnSortOption = "departure";
   let tooltipListenerBound = false;
   let roundTripListenerBound = false;
+  const roundTripEntries = new Map();
 
   function segmentHtml(segment, label = "", extraInfo = "") {
     const departureCode = segment.departureStationCode ?? segment.departureStation ?? "";
@@ -158,62 +279,74 @@ export function createResultsRenderer({
     bindTooltips();
   }
 
-  function roundTripGroupHtml(outbound, index) {
+  function expandedRoundTripKeys() {
+    return new Set([...list.querySelectorAll(".flight-trip-group")]
+      .filter(group => group.querySelector(".return-toggle")?.getAttribute("aria-expanded") === "true")
+      .map(group => group.dataset.roundtripKey));
+  }
+
+  function roundTripGroupHtml(outbound, index, expanded = false) {
     const returnsId = `return-list-${index}`;
-    const count = outbound.returnFlights?.length ?? 0;
-    const returns = outbound.returnFlights?.map((flight, returnIndex) => {
+    const availableReturns = sortReturnFlightsArray(outbound.returnFlights ?? [], returnSortOption, "asc");
+    const count = availableReturns.length;
+    const returns = availableReturns.map((flight, returnIndex) => {
       const minutes = Math.max(0, Math.round((flight.calculatedDuration.departureDate
         - outbound.calculatedDuration.arrivalDate) / 60000));
       return routeHtml(flight, `Inbound Flight ${returnIndex + 1}`, `Stopover: ${Math.floor(minutes / 60)}h ${minutes % 60}m`);
     }).join("") ?? "";
-    return `<div class="flight-trip-group" data-roundtrip-index="${index}">
+    const isExpanded = expanded && count > 0;
+    return `<div class="flight-trip-group" data-roundtrip-index="${index}" data-roundtrip-key="${escapeHtml(flightKey(outbound))}">
       ${routeHtml(outbound, "Outbound Flight")}
-      ${count ? `<div class="flight-return-summary"><button type="button" class="return-toggle" aria-expanded="false" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
-      <div id="${returnsId}" class="flight-return-list hidden">${returns}</div>
+      ${count ? `<div class="flight-return-summary"><button type="button" class="return-toggle" aria-expanded="${isExpanded}" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
+      <div id="${returnsId}" class="flight-return-list${isExpanded ? "" : " hidden"}">${returns}</div>
     </div>`;
   }
 
-  function updateRoundTripTotal() {
-    total.textContent = `Total results: ${list.querySelectorAll(".flight-trip-group").length}`;
+  function renderRoundTrips() {
+    const expanded = expandedRoundTripKeys();
+    const outbounds = sortResultsArray([...roundTripEntries.values()], sortOption, airportName, sortDirection);
+    prepare(outbounds);
+    bindRoundTripToggles();
+    outbounds.forEach((outbound, index) => list.insertAdjacentHTML(
+      "beforeend",
+      roundTripGroupHtml(outbound, index, expanded.has(flightKey(outbound)))
+    ));
   }
 
   return Object.freeze({
     setSortOption(value) {
       sortOption = value;
     },
+    setSortDirection(value) {
+      sortDirection = value === "desc" ? "desc" : "asc";
+    },
+    setReturnSortOption(value) {
+      returnSortOption = ["departure", "arrival", "duration"].includes(value)
+        ? value
+        : "departure";
+    },
     display(results) {
-      sortResultsArray(results, sortOption, airportName);
-      prepare(results);
-      list.insertAdjacentHTML("beforeend", results.map(result => routeHtml(result)).join(""));
-      logger("Rendered results", results.length);
+      const sortedResults = sortResultsArray(results, sortOption, airportName, sortDirection);
+      prepare(sortedResults);
+      list.insertAdjacentHTML("beforeend", sortedResults.map(result => routeHtml(result)).join(""));
+      logger("Rendered results", sortedResults.length);
     },
     displayRoundTrips(outbounds) {
-      sortResultsArray(outbounds, sortOption, airportName);
-      prepare(outbounds);
-      bindRoundTripToggles();
-      outbounds.forEach((outbound, index) => list.insertAdjacentHTML("beforeend", roundTripGroupHtml(outbound, index)));
+      roundTripEntries.clear();
+      outbounds.forEach(outbound => roundTripEntries.set(flightKey(outbound), outbound));
+      renderRoundTrips();
     },
-    upsertRoundTrip(outbound, index) {
-      bindRoundTripToggles();
-      const selector = `.flight-trip-group[data-roundtrip-index="${index}"]`;
-      const existing = list.querySelector(selector);
-      if (existing) {
-        const expanded = existing.querySelector(".return-toggle")?.getAttribute("aria-expanded") === "true";
-        existing.outerHTML = roundTripGroupHtml(outbound, index);
-        if (expanded) {
-          const replacement = list.querySelector(selector);
-          const toggle = replacement?.querySelector(".return-toggle");
-          toggle?.setAttribute("aria-expanded", "true");
-          replacement?.querySelector(".flight-return-list")?.classList.remove("hidden");
-        }
-      } else {
-        const groups = [...list.querySelectorAll(".flight-trip-group")];
-        const next = groups.find(group => Number(group.dataset.roundtripIndex) > index);
-        if (next) next.insertAdjacentHTML("beforebegin", roundTripGroupHtml(outbound, index));
-        else list.insertAdjacentHTML("beforeend", roundTripGroupHtml(outbound, index));
-      }
-      toolbar.classList.remove("hidden");
-      updateRoundTripTotal();
+    upsertRoundTrip(outbound) {
+      roundTripEntries.set(flightKey(outbound), outbound);
+      renderRoundTrips();
+    },
+    refreshRoundTrips() {
+      if (roundTripEntries.size) renderRoundTrips();
+    },
+    reset() {
+      roundTripEntries.clear();
+      list.replaceChildren();
+      toolbar.classList.add("hidden");
     }
   });
 }

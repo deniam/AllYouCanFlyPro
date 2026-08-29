@@ -357,23 +357,41 @@
         </div>
         <div class="w-full lg:w-1/2 lg:pl-5">
           <div id="results-container" class="relative bg-gray-100 rounded-lg shadow-md py-2 px-2 hidden">  
-            <div id="results-and-sort-container" class="flex justify-between items-center mb-4 hidden">
-              <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0">Total results: 0</p>
-              <button id="download-csv-button" class="flex justify-between p-1 items-center bg-[#20006D] gap-1 text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden">
-                &#x2B07; CSV
-              </button>
-              <div class="relative w-32">
-                <select id="sort-select" class="block w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 pr-10 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer appearance-none">
-                  <option value="default" selected>Default</option>
-                  <option value="airport">Departure Airport</option>
-                  <option value="departure">Departure Time</option>
-                  <option value="arrival">Arrival Time</option>
-                  <option value="duration">Trip Length</option>
-                </select>
-                <svg xmlns="http://www.w3.org/2000/svg" class="absolute right-2 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-600 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
-                </svg>
-              </div>      
+            <div id="results-and-sort-container" class="results-toolbar flex flex-wrap justify-between items-center gap-2 mb-4 hidden">
+              <p id="total-results" class="text-lg font-semibold text-[#20006D] mb-0 shrink-0">Total results: 0</p>
+              <div class="results-toolbar-controls flex flex-wrap items-center justify-end gap-2 min-w-0 ml-auto">
+                <button id="download-csv-button" class="flex justify-between p-1 items-center bg-[#20006D] gap-1 text-white rounded-lg hover:bg-[#1A005D] focus:ring-2 focus:ring-[#C90076] cursor-pointer hidden shrink-0">
+                  &#x2B07; CSV
+                </button>
+                <div class="results-sort-field flex items-center gap-1 min-w-0">
+                  <label id="sort-select-label" for="sort-select" class="text-sm font-medium text-gray-700 whitespace-nowrap">Sort by</label>
+                  <select id="sort-select" class="block w-full sm:w-auto min-w-0 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
+                    <option value="default" selected>Search order</option>
+                    <option value="airport">Departure airport</option>
+                    <option value="arrivalAirport">Arrival airport</option>
+                    <option value="departure">Departure date/time</option>
+                    <option value="arrival">Arrival date/time</option>
+                    <option value="duration">Total journey duration</option>
+                    <option value="transfers">Fewest transfers</option>
+                    <option value="connections">Least connection time</option>
+                  </select>
+                </div>
+                <div id="return-sort-controls" class="results-sort-field hidden items-center gap-1 min-w-0">
+                  <label for="return-sort-select" class="text-sm font-medium text-gray-700 whitespace-nowrap">Return options</label>
+                  <select id="return-sort-select" class="block w-full sm:w-auto min-w-0 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
+                    <option value="departure" selected>Earliest departure</option>
+                    <option value="arrival">Earliest arrival</option>
+                    <option value="duration">Shortest journey</option>
+                  </select>
+                </div>
+                <div class="results-sort-field flex items-center gap-1 min-w-0">
+                  <label for="sort-direction-select" class="text-sm font-medium text-gray-700 whitespace-nowrap">Order</label>
+                  <select id="sort-direction-select" aria-label="Sort direction" class="block w-full sm:w-auto min-w-0 bg-gray-100 border border-gray-300 text-gray-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#C90076] cursor-pointer">
+                    <option value="asc" selected>Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </div>
+              </div>
             </div>
             <div id="progress-container" class="bg-[#F5F5F5] text-[#20006D] rounded p-4 mb-4 hidden">
               <p id="progress-text" class="mb-2 font-medium"></p>

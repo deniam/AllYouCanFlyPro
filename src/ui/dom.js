@@ -18,6 +18,7 @@ export function getAppElements(root = document) {
     "search-button", "origin-multi", "destination-multi", "departure-date",
     "return-date", "results-container", "progress-container", "progress-text",
     "progress-bar", "notification-banner", "notification-text", "sort-select",
+    "sort-direction-select", "return-sort-controls", "return-sort-select",
     "selected-stopover", "changelog-modal", "changelog-content"
   ];
   return Object.freeze(Object.fromEntries(ids.map(id => [id, requireElement(id, root)])));

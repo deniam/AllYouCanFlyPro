@@ -179,6 +179,29 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 #airport-suggestions-preferred { position: absolute; z-index: 1000; }
 #connection-radius-container.hidden { display: none !important; }
 
+.results-toolbar-controls { flex: 1 1 auto; }
+.results-sort-field select { max-width: 16rem; }
+
+@media (max-width: 640px) {
+  .results-toolbar { align-items: stretch; }
+
+  .results-toolbar-controls {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .results-sort-field {
+    flex: 1 1 14rem;
+  }
+
+  .results-sort-field select {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
 /* Compact, responsive flight result cards. */
 .flight-trip-group,
 .flight-card,
