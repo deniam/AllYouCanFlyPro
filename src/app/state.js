@@ -23,9 +23,11 @@ export function createAppState() {
       this.searchSession.cancelled = true;
       this.searchSession.controller?.abort();
     },
-    finishSearch() {
+    finishSearch(session = this.searchSession) {
+      if (this.searchSession !== session) return false;
       this.searchSession.active = false;
       this.searchSession.controller = null;
+      return true;
     }
   };
 }

@@ -573,9 +573,30 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     logger: debugLogger
   });
 
+  function setSearchButtonIdle(button) {
+    button.disabled = false;
+    button.setAttribute("aria-label", "Search flights");
+    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none"
+          viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg> SEARCH`;
+  }
+
+  function setSearchButtonActive(button) {
+    button.disabled = false;
+    button.setAttribute("aria-label", "Stop search");
+    button.textContent = "STOP";
+  }
+
+  function setSearchButtonStopping(button) {
+    button.disabled = true;
+    button.setAttribute("aria-label", "Stopping search");
+    button.textContent = "STOPPING…";
+  }
+
   async function handleSearch() {
     debugLogger("Search initiated.");
-    await cleanupCache();
     const searchButton = document.getElementById("search-button");
   
     if (appState.searchSession.active) {
@@ -583,13 +604,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       appState.cancelSearch();
       resetCountdownTimers();
       requestThrottler.reset();
-      progressContainer.style.display = "none";
-      searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-              <path stroke-linecap="round" stroke-linejoin="round" 
-                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg> SEARCH`;
-      appState.finishSearch();
+      setSearchButtonStopping(searchButton);
       return;
     }
   
@@ -597,9 +612,11 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     appState.results = [];
     appState.defaultResults = [];
     totalResultsEl.textContent = "Total results: 0";
-    appState.beginSearch();
-    searchButton.textContent = "Stop Search";
+    const searchSession = appState.beginSearch();
+    setSearchButtonActive(searchButton);
     debugLogger("New search started. Resetting counters and UI.");
+
+    await cleanupCache();
   
     requestThrottler.reset();
   
@@ -608,12 +625,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       returnInputRaw = document.getElementById("return-date").value.trim();
       if (!returnInputRaw) {
         showNotification("Please select a return date for round-trip search.");
-        searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" 
-                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                </svg> SEARCH`;
-        appState.finishSearch();
+        setSearchButtonIdle(searchButton);
+        appState.finishSearch(searchSession);
         return;
       }
     }
@@ -621,8 +634,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     let originInputs = getMultiAirportValues("origin-multi");
     if (originInputs.length === 0) {
       showNotification("Please select a departure airport first.");
-      searchButton.innerHTML = "SEARCH";
-      appState.finishSearch();
+      setSearchButtonIdle(searchButton);
+      appState.finishSearch(searchSession);
       return;
     }
     let origins = originInputs.map(s => resolveAirport(s)).flat();
@@ -661,12 +674,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     // 1) Abort if either field is ANY and more then 2 transfers are allowed.
     if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
       showNotification("Search for routes with 'Anywhere' is available only for flights with up to one stop.");
-      searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-                  viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                    <path stroke-linecap="round" stroke-linejoin="round" 
-                      d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                  </svg> SEARCH`;
-      appState.finishSearch();
+      setSearchButtonIdle(searchButton);
+      appState.finishSearch(searchSession);
       hideProgress();
       return;
     }
@@ -674,12 +683,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     // 2) Abort if both fields are ANY and trip type is roundtrip.
     if (isOriginAnywhere && isDestinationAnywhere && appState.tripType === "return") {
       showNotification("Search for 'Anywhere to Anywhere' is available only for one-way direct flights.");
-      searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-                  viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                    <path stroke-linecap="round" stroke-linejoin="round" 
-                      d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                  </svg> SEARCH`;
-      appState.finishSearch();
+      setSearchButtonIdle(searchButton);
+      appState.finishSearch(searchSession);
       hideProgress();
       return;
     }
@@ -792,7 +797,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
           searchDirectRoutes(from, to, date, append, false, skipProgress, { preferredReturnDates }),
         searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress, preferredReturnDates }) =>
           searchConnectingRoutes(from, to, date, transfers, append, skipProgress, { preferredReturnDates })
-      }, appState.searchSession.controller?.signal, progress => {
+      }, searchSession.controller.signal, progress => {
         updateProgress(progress.current, progress.total, progress.message);
       });
 
@@ -818,15 +823,12 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       if (!wasCancelled && !searchFailed && appState.results.length === 0 && tripType === "oneway") {
         document.querySelector(".route-list").textContent = "There are no available flights on this route.";
       }
-      hideProgress();
-      searchButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" 
-            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-              <path stroke-linecap="round" stroke-linejoin="round" 
-                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg> SEARCH`;
-      appState.finishSearch();
-      updateCSVButtonVisibility();
-      debugLogger("Search process finished.");
+      if (appState.finishSearch(searchSession)) {
+        hideProgress();
+        setSearchButtonIdle(searchButton);
+        updateCSVButtonVisibility();
+        debugLogger("Search process finished.");
+      }
     }
   }
   
@@ -1119,6 +1121,10 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     // Search button event handler with validation for required fields
     const searchButton = document.getElementById("search-button");
     searchButton.addEventListener("click", () => {
+      if (appState.searchSession.active) {
+        handleSearch();
+        return;
+      }
       const errors = [];
       // Validate departure date
       if (!departureDateInput.value.trim()) {
