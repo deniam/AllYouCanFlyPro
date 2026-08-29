@@ -46,22 +46,22 @@ export function createCustomGroupsController({
     list.replaceChildren();
     if (!saved.length) {
       const empty = document.createElement("p");
-      empty.className = "text-xs text-gray-500 mb-2";
+      empty.className = "theme-text-muted text-xs mb-2";
       empty.textContent = "No custom groups yet.";
       list.append(empty);
       return;
     }
     for (const group of saved) {
       const row = document.createElement("div");
-      row.className = "flex items-center justify-between bg-white border border-gray-300 rounded px-2 py-1 mb-1 text-xs gap-1";
+      row.className = "theme-surface-raised theme-border flex items-center justify-between border rounded px-2 py-1 mb-1 text-xs gap-1";
       const key = document.createElement("span");
-      key.className = "font-semibold text-[#20006D] shrink-0";
+      key.className = "theme-brand-text font-semibold shrink-0";
       key.textContent = `[${group.key}]`;
       const name = document.createElement("span");
       name.className = "font-medium truncate flex-1";
       name.textContent = group.name;
       const codes = document.createElement("span");
-      codes.className = "text-gray-500 shrink-0";
+      codes.className = "theme-text-muted shrink-0";
       codes.textContent = group.airports.join(", ");
       const button = document.createElement("button");
       button.type = "button";

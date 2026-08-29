@@ -22,6 +22,7 @@ import { mountChangelog } from './ui/changelog.js';
 import { mountDonationReminder } from './ui/reminders.js';
 import { createSearchProgress } from './ui/search-progress.js';
 import { mountSettingsPanel } from './ui/settings-panel.js';
+import { createThemeController } from './ui/theme-controller.js';
 import { unifyRawFlight } from './domain/flight-normalizer.js';
 import { createDirectSearch } from './domain/search/direct.js';
 import { runSearch } from './domain/search/orchestrator.js';
@@ -45,6 +46,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   let CACHE_LIFETIME = initialSettings.cacheLifetimeHours * 60 * 60 * 1000;
   // 4 hours in ms
   let suppressDisplay = false; // Flag to delay UI updates in certain search types
+  let themeController;
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   let AIRPORTS = [];
   let COUNTRY_AIRPORTS = {};
@@ -1015,6 +1017,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     await initializationPromise;
     // ========== 1. Load settings from localStorage ==========
     const settings = settingsRepository.load();
+    themeController ??= createThemeController({ repository: settingsRepository });
     mountSettingsPanel({ settings, animate: animateElement });
     
     mountDonationReminder({ storage: localStorage });

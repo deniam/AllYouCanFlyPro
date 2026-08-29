@@ -33,4 +33,14 @@ describe("settings repository", () => {
     expect(settings.connectionRadius).toBe(2000);
     expect(listener).toHaveBeenCalledOnce();
   });
+
+  it.each(["auto", "light", "dark"])("stores the %s theme mode", mode => {
+    const repository = createSettingsRepository(memoryStorage());
+    expect(repository.update({ themeMode: mode }).themeMode).toBe(mode);
+  });
+
+  it("defaults invalid and missing theme modes to auto", () => {
+    expect(createSettingsRepository(memoryStorage()).load().themeMode).toBe("auto");
+    expect(createSettingsRepository(memoryStorage({ themeMode: "unknown" })).load().themeMode).toBe("auto");
+  });
 });

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>All You Can Fly Pro</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="./src/ui/theme-bootstrap.js"></script>
   <!-- Tailwind CSS -->
   <script src="./assets/css/tailwind_cdn_409.js"></script>
   <script src="./assets/emojis/twemoji.min.js"></script>
@@ -60,18 +61,18 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 40 300 70" preserveAspectRatio="xMidYMid meet">
               <defs>
                 <linearGradient id="lineGradient" gradientUnits="userSpaceOnUse" x1="20" y1="60" x2="280" y2="60">
-                  <stop offset="0" stop-color="#20006D" />
+                  <stop offset="0" stop-color="var(--theme-brand-text)" />
                   <stop offset="1" stop-color="#C90076" />
                 </linearGradient>
               </defs>
               <rect width="300" height="120" fill="transparent"/>
               <g transform="translate(20,20)">
                 <line x1="0" y1="40" x2="260" y2="40" stroke="url(#lineGradient)" stroke-width="4" stroke-linecap="round" />
-                <circle cx="0" cy="40" r="6" fill="#20006D" />
+                <circle cx="0" cy="40" r="6" fill="var(--theme-brand-text)" />
                 <circle cx="260" cy="40" r="6" fill="#C90076" />
-                <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="#20006D" />
+                <path d="M120 20 L140 40 L120 60 L125 40 Z" fill="var(--theme-brand-text)" />
               </g>
-              <text x="50%" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#20006D">
+              <text x="50%" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="var(--theme-brand-text)">
                 All You Can Fly Pro ✈️ 😎
               </text>
             </svg>
@@ -200,6 +201,24 @@
               <!-- Options Container -->
               <div class="mb-0">
                 <div id="options-container" class="mt-2 p-2 rounded-md border-2 border-[#20006D] hidden">
+                  <fieldset class="theme-setting mb-2 flex items-center justify-between gap-2 border-b pb-2">
+                    <legend class="sr-only">Appearance</legend>
+                    <span class="theme-text text-sm font-medium">Appearance</span>
+                    <div class="theme-mode-switch" role="radiogroup" aria-label="Color theme">
+                      <label class="theme-mode-option">
+                        <input type="radio" name="theme-mode" value="auto">
+                        <span>Auto</span>
+                      </label>
+                      <label class="theme-mode-option">
+                        <input type="radio" name="theme-mode" value="light">
+                        <span>Light</span>
+                      </label>
+                      <label class="theme-mode-option">
+                        <input type="radio" name="theme-mode" value="dark">
+                        <span>Dark</span>
+                      </label>
+                    </div>
+                  </fieldset>
                   <div class="flex items-center justify-between flex-nowrap pb-2 gap-1">
                 
                     <!-- Connection Time -->

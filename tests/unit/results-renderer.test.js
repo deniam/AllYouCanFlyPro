@@ -67,6 +67,8 @@ describe("results renderer", () => {
     expect(timeZone.querySelector(":scope > .flight-time-offset").textContent).toBe("UTC+2");
     expect(list.querySelector(".flight-airport-name").textContent)
       .toContain("Milan Malpensa International Airport");
+    expect(list.querySelector(".flight-route-row")).not.toBeNull();
+    expect(list.querySelector(".flight-card--inbound")).toBeNull();
     const button = list.querySelector(".continue-payment-button");
     expect(button.textContent).toBe("Continue");
     expect(button.dataset.outboundKey).toBe("flight-key");

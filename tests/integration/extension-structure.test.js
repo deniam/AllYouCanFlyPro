@@ -17,6 +17,16 @@ describe("extension structure", () => {
     expect(document.querySelector('link[href="assets/css/app.css"]')).not.toBeNull();
   });
 
+  it("loads the theme bootstrap before styles and exposes all theme modes", () => {
+    const headChildren = [...document.head.children];
+    const themeScript = document.querySelector('script[src="./src/ui/theme-bootstrap.js"]');
+    const stylesheet = document.querySelector('link[href="assets/css/app.css"]');
+    expect(themeScript).not.toBeNull();
+    expect(headChildren.indexOf(themeScript)).toBeLessThan(headChildren.indexOf(stylesheet));
+    expect([...document.querySelectorAll('input[name="theme-mode"]')].map(input => input.value))
+      .toEqual(["auto", "light", "dark"]);
+  });
+
   it("provides separate donation controls", () => {
     expect(document.querySelectorAll(".donate-link")).toHaveLength(2);
   });

@@ -8,7 +8,8 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   requestsFrequencyMs: 1800,
   pauseDurationSeconds: 15,
   cacheLifetimeHours: 4,
-  debugMode: false
+  debugMode: false,
+  themeMode: "auto"
 });
 
 const SCHEMA = Object.freeze({
@@ -21,7 +22,8 @@ const SCHEMA = Object.freeze({
   requestsFrequencyMs: { type: "number", min: 0, max: 60000 },
   pauseDurationSeconds: { type: "number", min: 0, max: 3600 },
   cacheLifetimeHours: { type: "number", min: 0.1, max: 720 },
-  debugMode: { type: "boolean" }
+  debugMode: { type: "boolean" },
+  themeMode: { type: "enum", values: ["auto", "light", "dark"] }
 });
 
 function parseValue(key, value) {
@@ -30,6 +32,7 @@ function parseValue(key, value) {
   if (value === null || value === undefined || value === "") return SETTINGS_DEFAULTS[key];
   if (rule.type === "boolean") return value === true || value === "true";
   if (rule.type === "string") return String(value);
+  if (rule.type === "enum") return rule.values.includes(value) ? value : SETTINGS_DEFAULTS[key];
   const number = Number(value);
   if (!Number.isFinite(number)) return SETTINGS_DEFAULTS[key];
   return Math.min(rule.max, Math.max(rule.min, number));

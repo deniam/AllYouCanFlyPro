@@ -16,7 +16,7 @@ function selectedDates() {
 function optionElement(label, onSelect) {
   const option = document.createElement("button");
   option.type = "button";
-  option.className = "flex w-full justify-between items-center px-1 py-1.5 cursor-pointer hover:bg-gray-100 text-left";
+  option.className = "theme-option theme-text flex w-full justify-between items-center px-1 py-1.5 cursor-pointer text-left";
   option.textContent = label;
   option.addEventListener("click", onSelect);
   return option;

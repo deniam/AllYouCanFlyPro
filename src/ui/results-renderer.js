@@ -117,7 +117,7 @@ export function createResultsRenderer({
       if (next) {
         const minutes = Math.max(0, Math.round((next.calculatedDuration.departureDate
           - segment.calculatedDuration.arrivalDate) / 60000));
-        connection = `<div class="text-center text-sm text-gray-500 my-2">Self-connection: ${Math.floor(minutes / 60)}h ${minutes % 60}m${escapeHtml(airportChangeText(flight, index))}</div>`;
+        connection = `<div class="theme-text-muted text-center text-sm my-2">Self-connection: ${Math.floor(minutes / 60)}h ${minutes % 60}m${escapeHtml(airportChangeText(flight, index))}</div>`;
       }
       return `${segmentHtml(segment, index === 0 ? label : "", index === 0 ? extraInfo : "")}${paymentHtml(segment)}${connection}`;
     }).join("");

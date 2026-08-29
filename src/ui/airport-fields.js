@@ -27,13 +27,13 @@ export function createAirportFields({ setupAutocomplete, maxRows = 3 }) {
     const input = document.createElement("input");
     input.type = "text";
     input.placeholder = fieldName === "origin" ? "Origin" : fieldName === "destination" ? "Destination" : "Enter Airport";
-    input.className = "block w-full bg-transparent border border-gray-300 text-gray-800 rounded-md px-1 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
+    input.className = "theme-text theme-border block w-full bg-transparent border rounded-md px-1 py-2 focus:outline-none focus:ring-2 focus:ring-[#C90076]";
     input.id = `${fieldName}-input-${++nextId}`;
     input.value = value;
     input.setAttribute("autocomplete", "off");
     const suggestions = document.createElement("div");
     suggestions.id = `${input.id}-suggestions`;
-    suggestions.className = "absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-20 text-gray-800 text-sm hidden";
+    suggestions.className = "theme-surface-raised theme-border theme-text absolute top-full left-0 right-0 border rounded-md shadow-lg z-20 text-sm hidden";
     wrapper.append(input, suggestions);
 
     const controls = document.createElement("div");

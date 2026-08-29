@@ -11,7 +11,7 @@ function button(label, ariaLabel) {
   element.type = "button";
   element.textContent = label;
   element.setAttribute("aria-label", ariaLabel);
-  element.className = "px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm";
+  element.className = "theme-surface theme-text px-2 py-1 rounded text-sm";
   return element;
 }
 
@@ -61,7 +61,7 @@ export function renderCalendarMonth(
   ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].forEach((label, index) => {
     const day = document.createElement("div");
     day.textContent = label;
-    day.classList.add(index > 4 ? "text-[#C90076]" : "text-[#20006D]", "font-semibold");
+    day.classList.add(index > 4 ? "theme-accent-text" : "theme-brand-text", "font-semibold");
     weekdays.appendChild(day);
   });
   popup.appendChild(weekdays);
@@ -80,15 +80,15 @@ export function renderCalendarMonth(
     const date = new Date(year, month, dayNumber);
     const dateText = `${year}-${String(month + 1).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`;
     const cell = button(String(dayNumber), dateText);
-    cell.className = "border rounded text-xs leading-tight flex items-center justify-center p-[2px]";
+    cell.className = "calendar-day border rounded text-xs leading-tight flex items-center justify-center p-[2px]";
     const disabled = date < minimum || date > maximum;
     cell.disabled = disabled;
-    if (disabled) cell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
+    if (disabled) cell.classList.add("calendar-day--disabled", "cursor-not-allowed");
     else {
       cell.classList.add("font-bold", "cursor-pointer");
       const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-      if (isWeekend && !selectedDates.has(dateText)) cell.classList.add("bg-pink-50");
-      if (selectedDates.has(dateText)) cell.classList.add("bg-blue-300");
+      if (isWeekend && !selectedDates.has(dateText)) cell.classList.add("calendar-day--weekend");
+      if (selectedDates.has(dateText)) cell.classList.add("calendar-day--selected");
       cell.addEventListener("click", event => {
         event.stopPropagation();
         if (selectedDates.has(dateText)) selectedDates.delete(dateText);

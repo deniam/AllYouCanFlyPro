@@ -1,4 +1,130 @@
-#changelog-modal { animation: fadeIn 0.3s ease-out; }
+:root {
+  --theme-page: #f9fafb;
+  --theme-surface: #f3f4f6;
+  --theme-surface-raised: #fff;
+  --theme-surface-muted: #e5e7eb;
+  --theme-surface-strong: #d1d5db;
+  --theme-input: #f9fafb;
+  --theme-text: #111827;
+  --theme-text-secondary: #374151;
+  --theme-text-muted: #64748b;
+  --theme-border: #d1d5db;
+  --theme-border-strong: #111827;
+  --theme-brand-text: #20006d;
+  --theme-accent-text: #c90076;
+  --theme-calendar-weekend: #fdf2f8;
+  --theme-calendar-selected: #93c5fd;
+  --theme-shadow: rgb(15 23 42 / 12%);
+  --theme-overlay: rgb(0 0 0 / 50%);
+}
+
+:root[data-theme="dark"] {
+  --theme-page: #0f172a;
+  --theme-surface: #111827;
+  --theme-surface-raised: #1e293b;
+  --theme-surface-muted: #273449;
+  --theme-surface-strong: #334155;
+  --theme-input: #172033;
+  --theme-text: #f8fafc;
+  --theme-text-secondary: #e2e8f0;
+  --theme-text-muted: #a8b4c7;
+  --theme-border: #475569;
+  --theme-border-strong: #64748b;
+  --theme-brand-text: #c4b5fd;
+  --theme-accent-text: #f472b6;
+  --theme-calendar-weekend: #3b172c;
+  --theme-calendar-selected: #1d4ed8;
+  --theme-shadow: rgb(0 0 0 / 35%);
+  --theme-overlay: rgb(2 6 23 / 75%);
+}
+
+html,
+body {
+  background: var(--theme-page);
+  color: var(--theme-text);
+}
+
+body,
+input,
+select,
+textarea,
+button {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+input:not([type="radio"]):not([type="checkbox"]),
+select,
+textarea {
+  border-color: var(--theme-border);
+  background-color: var(--theme-input);
+  color: var(--theme-text);
+}
+
+input::placeholder,
+textarea::placeholder { color: var(--theme-text-muted); }
+select option { background: var(--theme-surface-raised); color: var(--theme-text); }
+
+[data-theme] :where(.bg-gray-50) { background-color: var(--theme-page); }
+[data-theme] :where(.bg-gray-100, [class~="bg-[#F5F5F5]"]) { background-color: var(--theme-surface); }
+[data-theme] :where(.bg-white) { background-color: var(--theme-surface-raised); }
+[data-theme] :where(.bg-gray-200) { background-color: var(--theme-surface-muted); }
+[data-theme] :where(.bg-gray-300, .bg-gray-400) { background-color: var(--theme-surface-strong); }
+[data-theme] :where(.text-gray-800, .text-gray-700) { color: var(--theme-text); }
+[data-theme] :where(.text-gray-600, .text-gray-500) { color: var(--theme-text-muted); }
+[data-theme] :where(.border-gray-300) { border-color: var(--theme-border); }
+[data-theme="dark"] [class~="text-[#20006D]"] { color: var(--theme-brand-text); }
+[data-theme="dark"] [class~="text-[#C90076]"] { color: var(--theme-accent-text); }
+[data-theme="dark"] [class~="border-[#20006D]"] { border-color: var(--theme-brand-text); }
+[data-theme] [class~="hover:bg-gray-100"]:hover,
+[data-theme] [class~="hover:bg-gray-200"]:hover { background-color: var(--theme-surface-muted); }
+[data-theme] [class~="hover:bg-gray-300"]:hover { background-color: var(--theme-surface-strong); }
+
+.theme-text { color: var(--theme-text); }
+.theme-text-muted { color: var(--theme-text-muted); }
+.theme-brand-text { color: var(--theme-brand-text); }
+.theme-accent-text { color: var(--theme-accent-text); }
+.theme-surface { background: var(--theme-surface); }
+.theme-surface-raised { background: var(--theme-surface-raised); }
+.theme-border { border-color: var(--theme-border); }
+.theme-option:hover { background: var(--theme-surface-muted); }
+
+.theme-mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--theme-border);
+  border-radius: 0.5rem;
+  background: var(--theme-surface-muted);
+  padding: 0.125rem;
+}
+
+.theme-mode-option { position: relative; cursor: pointer; }
+.theme-mode-option input { position: absolute; opacity: 0; pointer-events: none; }
+.theme-mode-option span {
+  display: block;
+  min-width: 3.25rem;
+  border-radius: 0.375rem;
+  padding: 0.3125rem 0.5rem;
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.theme-mode-option input:checked + span {
+  background: var(--theme-surface-raised);
+  color: var(--theme-brand-text);
+  box-shadow: 0 1px 3px var(--theme-shadow);
+}
+
+.theme-mode-option input:focus-visible + span {
+  outline: 2px solid #c90076;
+  outline-offset: 1px;
+}
+
+.theme-setting { border-color: var(--theme-border); }
+
+#changelog-modal { animation: fadeIn 0.3s ease-out; background: var(--theme-overlay); }
 
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -31,13 +157,18 @@
 .calendar-popup {
   position: absolute;
   z-index: 100;
-  background: white;
-  border: 1px solid #ccc;
+  background: var(--theme-surface-raised);
+  border: 1px solid var(--theme-border);
   border-radius: 0.375rem;
-  box-shadow: 0 4px 6px rgb(0 0 0 / 10%);
+  box-shadow: 0 4px 6px var(--theme-shadow);
   padding: 0.5rem;
   margin-top: 0.25rem;
 }
+
+.calendar-day { border-color: var(--theme-border); background: var(--theme-surface-raised); color: var(--theme-text); }
+.calendar-day--disabled { background: var(--theme-surface-muted); color: var(--theme-text-muted); }
+.calendar-day--weekend { background: var(--theme-calendar-weekend); }
+.calendar-day--selected { background: var(--theme-calendar-selected); color: #fff; }
 
 img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 #airport-suggestions-preferred { position: absolute; z-index: 1000; }
@@ -58,23 +189,23 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 
 .flight-trip-group {
   margin-bottom: 0.75rem;
-  border: 1px solid #111827;
+  border: 1px solid var(--theme-border-strong);
   border-radius: 0.6875rem;
   padding: 0.4375rem;
 }
 
 .flight-card {
   margin-bottom: 0.5rem;
-  border: 1px solid #111827;
+  border: 1px solid var(--theme-border-strong);
   border-radius: 0.5625rem;
-  background: #fff;
+  background: var(--theme-surface-raised);
   padding: 0.4375rem 0.5625rem;
 }
 
 .route-list > .flight-card { margin-bottom: 0.75rem; }
 .flight-trip-group > .flight-card:last-of-type,
 .flight-return-list > .flight-card:last-child { margin-bottom: 0; }
-.flight-card--inbound { background: #d1d5db; }
+.flight-card--inbound { background: var(--theme-surface-strong); }
 
 .flight-card-header {
   display: flex;
@@ -105,8 +236,8 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 .flight-date {
   overflow: hidden;
   border-radius: 0.375rem;
-  background: #e5e7eb;
-  color: #1f2937;
+  background: var(--theme-surface-muted);
+  color: var(--theme-text);
   padding: 0.25rem 0.4375rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -114,16 +245,16 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 
 .flight-extra {
   margin-left: auto;
-  color: #475569;
+  color: var(--theme-text-muted);
   white-space: nowrap;
 }
 
 .flight-number {
   margin-left: auto;
-  border: 1px solid #20006d;
+  border: 1px solid var(--theme-brand-text);
   border-radius: 0.375rem;
-  background: #fff;
-  color: #20006d;
+  background: var(--theme-surface-raised);
+  color: var(--theme-brand-text);
   padding: 0.25rem 0.4375rem;
   white-space: nowrap;
 }
@@ -168,7 +299,7 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 .flight-time-offset {
   display: block;
   margin-top: 0.1875rem;
-  color: #475569;
+  color: var(--theme-text-muted);
   font-size: 0.625rem;
   font-weight: 600;
 }
@@ -197,7 +328,7 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 
 .flight-airport-code {
   margin-top: 0.125rem;
-  color: #64748b;
+  color: var(--theme-text-muted);
   font-size: 0.6875rem;
   font-weight: 700;
 }
@@ -209,7 +340,7 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 
 .flight-route-symbol {
   overflow: hidden;
-  color: #20006d;
+  color: var(--theme-brand-text);
   font-size: 0.875rem;
   white-space: nowrap;
 }
@@ -230,7 +361,7 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 }
 
 .flight-price {
-  color: #374151;
+  color: var(--theme-text-secondary);
   font-size: 0.8125rem;
   font-weight: 700;
   white-space: nowrap;
@@ -240,15 +371,15 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
   min-height: 2.125rem;
   border: 1px solid #c90076;
   border-radius: 0.4375rem;
-  background: #fff;
-  color: #c90076;
+  background: var(--theme-surface-raised);
+  color: var(--theme-accent-text);
   padding: 0.375rem 0.6875rem;
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1rem;
   white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 2px 4px rgb(0 0 0 / 12%);
+  box-shadow: 0 2px 4px var(--theme-shadow);
 }
 
 .flight-continue-button:hover {
@@ -264,7 +395,7 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 .flight-return-summary .return-toggle {
   border: 0;
   background: transparent;
-  color: #c90076;
+  color: var(--theme-accent-text);
   font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
@@ -351,7 +482,7 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 
 #donation-reminder {
   animation: slideIn 0.5s ease-out;
-  box-shadow: 0 10px 25px rgb(0 0 0 / 15%);
+  box-shadow: 0 10px 25px var(--theme-shadow);
   border-left: 4px solid #c90076;
 }
 

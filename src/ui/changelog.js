@@ -54,14 +54,14 @@ function createEntry(entry, currentVersion) {
     badge.dataset.currentVersion = "";
   }
   const date = document.createElement("span");
-  date.className = "text-gray-700 font-medium";
+  date.className = "theme-text font-medium";
   date.textContent = entry.date;
   heading.append(badge, date);
   const title = document.createElement("h2");
   title.className = "font-bold";
   title.textContent = "Changelog";
   const list = document.createElement("ul");
-  list.className = "list-disc pl-5 text-gray-700 space-y-1";
+  list.className = "theme-text list-disc pl-5 space-y-1";
   for (const text of entry.items) {
     const item = document.createElement("li");
     item.textContent = text;
@@ -74,7 +74,7 @@ function createEntry(entry, currentVersion) {
 export function mountChangelog({ modal, openButton, closeButton, content, version, entries = CHANGELOG }) {
   content.replaceChildren(...entries.map(entry => createEntry(entry, version)));
   const footer = document.createElement("span");
-  footer.className = "text-gray-500 text-xs";
+  footer.className = "theme-text-muted text-xs";
   footer.textContent = "2025, Denys Shkodynskyi";
   content.append(footer);
 
