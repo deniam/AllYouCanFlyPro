@@ -16,15 +16,22 @@ export function createPairedDateSelector({
   now = () => new Date(),
   bookingHorizonDays = DEFAULT_BOOKING_HORIZON_DAYS
 }) {
+  const reservations = new Set();
+  const reservationKey = (origin, destination, date) => `${origin}-${destination}-${date}`;
+
   async function firstUncached(origin, destination, dates) {
     for (const date of dates) {
+      const key = reservationKey(origin, destination, date);
+      if (reservations.has(key)) continue;
+      reservations.add(key);
       const cached = await getCached(origin, destination, date);
       if (!Array.isArray(cached)) return date;
+      reservations.delete(key);
     }
     return null;
   }
 
-  return async function selectPairedArrivalDate({
+  async function selectPairedArrivalDate({
     origin,
     destination,
     departureDate,
@@ -46,21 +53,41 @@ export function createPairedDateSelector({
       .sort();
 
     const uncachedPreferred = await firstUncached(destination, origin, preferred);
-    if (uncachedPreferred) return uncachedPreferred;
+    if (uncachedPreferred) {
+      reservations.add(reservationKey(destination, origin, uncachedPreferred));
+      return uncachedPreferred;
+    }
 
     const laterDates = reverseDates
       .filter(date => date > departureDate && date <= horizon)
       .sort();
     const uncachedLater = await firstUncached(destination, origin, laterDates);
-    if (uncachedLater) return uncachedLater;
+    if (uncachedLater) {
+      reservations.add(reservationKey(destination, origin, uncachedLater));
+      return uncachedLater;
+    }
 
     if (departureDate >= horizon && available.has(departureDate)) {
       const uncachedSameDay = await firstUncached(destination, origin, [departureDate]);
-      if (uncachedSameDay) return uncachedSameDay;
+      if (uncachedSameDay) {
+        reservations.add(reservationKey(destination, origin, uncachedSameDay));
+        return uncachedSameDay;
+      }
     }
 
-    return preferred[0]
-      ?? laterDates[0]
+    const fallback = preferred.find(date => !reservations.has(
+      reservationKey(destination, origin, date)
+    )) ?? laterDates.find(date => !reservations.has(
+      reservationKey(destination, origin, date)
+    )) ?? preferred[0] ?? laterDates[0]
       ?? (departureDate >= horizon && available.has(departureDate) ? departureDate : "");
+    if (fallback) reservations.add(reservationKey(destination, origin, fallback));
+    return fallback;
+  }
+
+  selectPairedArrivalDate.release = ({ origin, destination, arrivalDate }) => {
+    if (arrivalDate) reservations.delete(reservationKey(destination, origin, arrivalDate));
   };
+  selectPairedArrivalDate.reset = () => reservations.clear();
+  return selectPairedArrivalDate;
 }

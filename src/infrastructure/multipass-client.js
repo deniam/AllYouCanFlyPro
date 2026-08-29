@@ -8,18 +8,30 @@ const MULTIPASS_PATTERN = "https://multipass.wizzair.com/*";
 const SESSION_TTL_MS = 60 * 60 * 1000;
 // The observed availability endpoint uses 400 to represent no matching flights.
 const EMPTY_AVAILABILITY_STATUSES = new Set([400]);
+const RATE_LIMIT_DELAYS = Object.freeze({ 426: 60000, 429: 40000, 501: 15000 });
+
+export function parseRetryAfter(value, now = Date.now()) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  return Math.max(0, timestamp - now);
+}
 
 export function createMultipassClient({
   gateway,
   cache,
-  throttler,
+  scheduler,
   logger = () => {},
   sessionStorage = localStorage,
   fetchImpl = fetch,
-  onPause = () => {},
   maxAttempts = 2
 }) {
   let authenticationTabId = null;
+  let sessionPromise = null;
+  let refreshPromise = null;
+  const inFlightRequests = new Map();
 
   function readSession() {
     try {
@@ -89,7 +101,7 @@ export function createMultipassClient({
     return createdTab;
   }
 
-  async function ensureSession(signal) {
+  async function discoverSession(signal) {
     throwIfAborted(signal);
     const stored = readSession();
     const dynamicUrlTimestamp = stored.dynamicUrlTimestamp ?? stored.timestamp ?? 0;
@@ -133,23 +145,43 @@ export function createMultipassClient({
     return session;
   }
 
+  async function ensureSession(signal) {
+    const stored = readSession();
+    const dynamicUrlTimestamp = stored.dynamicUrlTimestamp ?? stored.timestamp ?? 0;
+    if (stored.dynamicUrl && Date.now() - dynamicUrlTimestamp < SESSION_TTL_MS) {
+      return stored;
+    }
+    if (!sessionPromise) {
+      sessionPromise = discoverSession(signal).finally(() => {
+        sessionPromise = null;
+      });
+    }
+    return sessionPromise;
+  }
+
   async function refreshSession(signal) {
-    clearSession();
-    const tab = await getMultipassTab(signal);
-    const completion = gateway.waitForTabComplete(tab.id, { signal });
-    await gateway.reloadTab(tab.id);
-    await completion;
-    return ensureSession(signal);
+    if (!refreshPromise) {
+      refreshPromise = (async () => {
+        clearSession();
+        const tab = await getMultipassTab(signal);
+        const completion = gateway.waitForTabComplete(tab.id, { signal });
+        await gateway.reloadTab(tab.id);
+        await completion;
+        return discoverSession(signal);
+      })().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    return refreshPromise;
   }
 
   async function requestFlights(segment, signal) {
     let lastError;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       throwIfAborted(signal);
-      await throttler.wait(signal);
       try {
         const session = await ensureSession(signal);
-        const response = await fetchImpl(session.dynamicUrl, {
+        const response = await scheduler.schedule(() => fetchImpl(session.dynamicUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...(session.headers ?? {}) },
           body: JSON.stringify({
@@ -161,14 +193,16 @@ export function createMultipassClient({
             intervalSubtype: null
           }),
           signal
-        });
+        }), signal);
 
         if (EMPTY_AVAILABILITY_STATUSES.has(response.status)) {
+          scheduler.recordSuccess();
           return { outbound: [], inbound: null };
         }
         if ([426, 429, 501].includes(response.status)) {
-          const waitMs = response.status === 426 ? 60000 : response.status === 429 ? 40000 : 15000;
-          onPause(waitMs, "rate-limit", response.status);
+          const retryAfter = response.headers.get("retry-after");
+          const waitMs = parseRetryAfter(retryAfter) ?? RATE_LIMIT_DELAYS[response.status];
+          scheduler.recordRateLimit(waitMs, response.status, retryAfter);
           throw new AppError(ErrorCode.RATE_LIMITED, `HTTP ${response.status}`, {
             status: response.status,
             retryable: true
@@ -200,6 +234,7 @@ export function createMultipassClient({
             `No flightsOutbound array for ${segment.origin} → ${segment.destination} on ${segment.date}; treating it as no availability`,
             payload
           );
+          scheduler.recordSuccess();
           return { outbound: [], inbound: null };
         }
         let inbound = null;
@@ -213,6 +248,7 @@ export function createMultipassClient({
             );
           }
         }
+        scheduler.recordSuccess();
         return { outbound: payload.flightsOutbound, inbound };
       } catch (error) {
         if (signal?.aborted) throw new AppError(ErrorCode.CANCELLED, "Search cancelled");
@@ -224,10 +260,9 @@ export function createMultipassClient({
           });
         lastError = normalized;
         if (!normalized.retryable || attempt === maxAttempts - 1) throw normalized;
-        const waitMs = normalized.code === ErrorCode.RATE_LIMITED
-          ? normalized.status === 426 ? 60000 : normalized.status === 429 ? 40000 : 15000
-          : 1000;
-        await abortableDelay(waitMs, signal);
+        if (normalized.code !== ErrorCode.RATE_LIMITED) {
+          await abortableDelay(1000, signal);
+        }
       }
     }
     throw lastError ?? new AppError(ErrorCode.INVALID_RESPONSE, "Flight request failed");
@@ -240,16 +275,26 @@ export function createMultipassClient({
       const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
       const cached = await cache.get(key);
       if (Array.isArray(cached)) return cached;
-      const { outbound, inbound } = await requestFlights(segment, signal);
-      const writes = [cache.put(key, outbound)];
-      if (segment.arrivalDate && Array.isArray(inbound)) {
-        writes.push(cache.put(
-          segmentCacheKey(segment.destination, segment.origin, segment.arrivalDate),
-          inbound
-        ));
+      const requestKey = `${key}|${segment.arrivalDate ?? ""}`;
+      if (inFlightRequests.has(requestKey)) return inFlightRequests.get(requestKey);
+      const request = (async () => {
+        const { outbound, inbound } = await requestFlights(segment, signal);
+        const writes = [cache.put(key, outbound)];
+        if (segment.arrivalDate && Array.isArray(inbound)) {
+          writes.push(cache.put(
+            segmentCacheKey(segment.destination, segment.origin, segment.arrivalDate),
+            inbound
+          ));
+        }
+        await Promise.all(writes);
+        return outbound;
+      })();
+      inFlightRequests.set(requestKey, request);
+      try {
+        return await request;
+      } finally {
+        if (inFlightRequests.get(requestKey) === request) inFlightRequests.delete(requestKey);
       }
-      await Promise.all(writes);
-      return outbound;
     },
     async continueBooking(subscriptionId, outboundKey, signal) {
       const tab = await gateway.createTab({ url: MULTIPASS_URL, active: true });

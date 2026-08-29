@@ -63,4 +63,29 @@ describe("search orchestrator", () => {
     expect(results[0].returnFlights.map(item => item.key)).toEqual(["direct-in"]);
     expect(searchConnections).toHaveBeenCalledTimes(2);
   });
+
+  it("loads independent inbound dates concurrently", async () => {
+    let active = 0;
+    let maximum = 0;
+    const returnDates = ["2026-09-02", "2026-09-03", "2026-09-04"];
+    const searchDirect = vi.fn(async ({ origins, date }) => {
+      if (origins[0] === "AAA") {
+        return [flight("out", "AAA", "BBB", "2026-09-01T08:00:00Z", "2026-09-01T10:00:00Z")];
+      }
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise(resolve => setTimeout(resolve, date === returnDates[0] ? 10 : 1));
+      active -= 1;
+      return [flight(date, "BBB", "AAA", `${date}T08:00:00Z`, `${date}T10:00:00Z`)];
+    });
+
+    const results = await runSearch({
+      origins: ["AAA"], destinations: ["BBB"], originalOrigins: ["AAA"],
+      departureDates: ["2026-09-01"], returnDates, tripType: "return",
+      maxConcurrentRequests: 3
+    }, { searchDirect, searchConnections: vi.fn() });
+
+    expect(maximum).toBe(3);
+    expect(results[0].returnFlights.map(item => item.key)).toEqual(returnDates);
+  });
 });

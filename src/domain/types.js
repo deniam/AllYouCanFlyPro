@@ -55,6 +55,7 @@
  * @property {number} maxConnectionMinutes
  * @property {boolean} allowAirportChange
  * @property {number} connectionRadiusKm
+ * @property {number=} maxConcurrentRequests
  */
 
 /**
@@ -79,8 +80,8 @@
  * @property {boolean} allowChangeAirport
  * @property {number} connectionRadius
  * @property {number} maxRequestsInRow
- * @property {number} requestsFrequencyMs
  * @property {number} pauseDurationSeconds
+ * @property {number} maxConcurrentRequests
  * @property {number} cacheLifetimeHours
  * @property {boolean} debugMode
  */

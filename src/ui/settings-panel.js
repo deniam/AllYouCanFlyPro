@@ -1,5 +1,20 @@
 const mountedButtons = new WeakSet();
 
+export function validateMaxConcurrentRequestsInput(input, error) {
+  const value = Number(input.value);
+  const tooHigh = Number.isFinite(value) && value >= 6;
+  const invalid = !Number.isFinite(value) || value < 1 || tooHigh;
+
+  input.classList.toggle("request-setting-invalid", invalid);
+  input.setAttribute("aria-invalid", String(invalid));
+  error.classList.toggle("hidden", !invalid);
+  error.textContent = tooHigh
+    ? "Maximum 5 simultaneous requests. The active limit remains 5."
+    : "Choose a value from 1 to 5.";
+
+  return Number.isFinite(value) ? Math.max(1, Math.min(5, value)) : 3;
+}
+
 export function mountSettingsPanel({ settings, animate = () => {} }) {
   const values = {
     "preferred-airport": settings.preferredAirport,
@@ -7,8 +22,8 @@ export function mountSettingsPanel({ settings, animate = () => {} }) {
     "max-connection-time": settings.maxConnectionTime,
     "connection-radius": settings.connectionRadius,
     "max-requests": settings.maxRequestsInRow,
-    "requests-frequency": settings.requestsFrequencyMs,
     "pause-duration": settings.pauseDurationSeconds,
+    "max-concurrent-requests": settings.maxConcurrentRequests,
     "cache-lifetime": settings.cacheLifetimeHours
   };
   for (const [id, value] of Object.entries(values)) document.getElementById(id).value = value;

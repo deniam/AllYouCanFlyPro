@@ -67,7 +67,11 @@ describe("paired round-trip cache integration", () => {
     const client = createMultipassClient({
       gateway,
       cache,
-      throttler: { wait: vi.fn(async () => {}) },
+      scheduler: {
+        schedule: vi.fn(async task => task()),
+        recordSuccess: vi.fn(),
+        recordRateLimit: vi.fn()
+      },
       sessionStorage: memoryStorage(),
       fetchImpl
     });
@@ -115,4 +119,3 @@ describe("paired round-trip cache integration", () => {
     expect(values.get(`BBB-AAA-${returnDate}`)).toEqual([expect.objectContaining({ key: "in" })]);
   });
 });
-

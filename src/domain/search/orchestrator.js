@@ -1,5 +1,6 @@
 import { deduplicateFlights, defaultFlightKey } from "./result-matcher.js";
 import { minutesBetween } from "../dates.js";
+import { mapConcurrentOrdered } from "./concurrency.js";
 
 function throwIfAborted(signal) {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Search cancelled", "AbortError");
@@ -30,7 +31,8 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
     tripType = "oneway",
     maxTransfers = 0,
     originalOrigins = origins,
-    minRoundTripGapMinutes = 360
+    minRoundTripGapMinutes = 360,
+    maxConcurrentRequests = 1
   } = request;
 
   const outbound = [];
@@ -75,25 +77,30 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
     }
   }
 
-  const inbound = [];
   let processed = 0;
   onProgress({ current: 0, total: queries.size, message: "Checking inbound flights" });
-  for (const query of queries.values()) {
-    throwIfAborted(signal);
-    inbound.push(...(await runLeg(
-      { ...query, maxTransfers },
-      dependencies,
-      signal,
-      false,
-      true
-    ) ?? []));
-    processed += 1;
-    onProgress({
-      current: processed,
-      total: queries.size,
-      message: `Checking inbound flights ${query.origins.join(",")} → ${query.destinations.join(",")} on ${query.date}`
-    });
-  }
+  const inboundGroups = await mapConcurrentOrdered(
+    queries.values(),
+    maxConcurrentRequests,
+    async query => {
+      throwIfAborted(signal);
+      const flights = await runLeg(
+        { ...query, maxTransfers },
+        dependencies,
+        signal,
+        false,
+        true
+      ) ?? [];
+      processed += 1;
+      onProgress({
+        current: processed,
+        total: queries.size,
+        message: `Checking inbound flights ${query.origins.join(",")} → ${query.destinations.join(",")} on ${query.date}`
+      });
+      return flights;
+    }
+  );
+  const inbound = inboundGroups.flat();
   const uniqueInbound = deduplicateFlights(inbound);
 
   for (const flight of uniqueOutbound) {

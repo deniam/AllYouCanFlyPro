@@ -30,4 +30,13 @@ describe("extension structure", () => {
   it("provides separate donation controls", () => {
     expect(document.querySelectorAll(".donate-link")).toHaveLength(2);
   });
+
+  it("exposes the bounded request-concurrency setting", () => {
+    const input = document.getElementById("max-concurrent-requests");
+    expect(input?.getAttribute("min")).toBe("1");
+    expect(input?.getAttribute("max")).toBe("5");
+    expect(input?.getAttribute("value")).toBe("3");
+    expect(document.getElementById("max-concurrent-requests-error")).not.toBeNull();
+    expect(document.getElementById("requests-frequency")).toBeNull();
+  });
 });

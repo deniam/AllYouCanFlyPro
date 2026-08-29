@@ -3,7 +3,7 @@ import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames
 import { createRouteCatalog } from './domain/route-catalog.js';
 import { getDatabase } from './infrastructure/database.js';
 import { createFlightCache, segmentCacheKey } from './infrastructure/cache-repository.js';
-import { createRequestThrottler } from './infrastructure/request-throttler.js';
+import { createRequestScheduler } from './infrastructure/request-throttler.js';
 import { appState } from './app/state.js';
 import { createSettingsRepository } from './infrastructure/settings-repository.js';
 import { createExtensionGateway } from './infrastructure/extension-api.js';
@@ -21,7 +21,10 @@ import { createCustomGroupsController } from './ui/custom-groups.js';
 import { mountChangelog } from './ui/changelog.js';
 import { mountDonationReminder } from './ui/reminders.js';
 import { createSearchProgress } from './ui/search-progress.js';
-import { mountSettingsPanel } from './ui/settings-panel.js';
+import {
+  mountSettingsPanel,
+  validateMaxConcurrentRequestsInput
+} from './ui/settings-panel.js';
 import { createThemeController } from './ui/theme-controller.js';
 import { unifyRawFlight } from './domain/flight-normalizer.js';
 import { createDirectSearch } from './domain/search/direct.js';
@@ -59,8 +62,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   const allowChange = document.getElementById('allow-change-airport').checked;
   const connectionRadius = document.getElementById('connection-radius').value;
   const maxReq = document.getElementById('max-requests').value;
-  const reqFrequency = document.getElementById('requests-frequency').value;
   const pauseDur = document.getElementById('pause-duration').value;
+  const maxConcurrentRequests = validateMaxConcurrentRequests();
   const cacheLife = document.getElementById('cache-lifetime').value;
   settingsRepository.update({
     minConnectionTime: minConnection,
@@ -69,8 +72,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     allowChangeAirport: allowChange,
     connectionRadius,
     maxRequestsInRow: maxReq,
-    requestsFrequencyMs: reqFrequency,
     pauseDurationSeconds: pauseDur,
+    maxConcurrentRequests,
     cacheLifetimeHours: cacheLife
   });
   if (debug) {
@@ -81,8 +84,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       allowChangeAirport: allowChange,
       connectionRadius,
       maxRequestsInRow: maxReq,
-      requestsFrequencyMs: reqFrequency,
       pauseDurationSeconds: pauseDur,
+      maxConcurrentRequests,
       cacheLifetimeHours: cacheLife
     });
   }
@@ -209,8 +212,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     '#allow-change-airport',
     '#connection-radius',
     '#max-requests',
-    '#requests-frequency',
     '#pause-duration',
+    '#max-concurrent-requests',
     '#cache-lifetime'
   ];
 
@@ -279,20 +282,20 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     searchProgress.resetCountdown();
   }
 
-  function showTimeoutCountdown(waitTimeMs) {
-    searchProgress.showCountdown(waitTimeMs);
+  function showTimeoutCountdown(waitTimeMs, rateLimited = false) {
+    searchProgress.showCountdown(waitTimeMs, rateLimited);
   }
 
-  const requestThrottler = createRequestThrottler(
+  const requestScheduler = createRequestScheduler(
     () => settingsRepository.load(),
-    waitTimeMs => showTimeoutCountdown(waitTimeMs)
+    (waitTimeMs, reason) => showTimeoutCountdown(waitTimeMs, reason === "rate-limit"),
+    debugLogger
   );
   const multipassClient = createMultipassClient({
     gateway: extensionGateway,
     cache: flightCache,
-    throttler: requestThrottler,
-    logger: debugLogger,
-    onPause: waitTimeMs => showTimeoutCountdown(waitTimeMs)
+    scheduler: requestScheduler,
+    logger: debugLogger
   });
   const selectPairedArrivalDate = createPairedDateSelector({
     routeCatalog,
@@ -300,17 +303,23 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       flightCache.get(segmentCacheKey(origin, destination, date))
   });
 
-  function updateThrottleSettings() {
+  function validateMaxConcurrentRequests() {
+    const input = document.getElementById("max-concurrent-requests");
+    const error = document.getElementById("max-concurrent-requests-error");
+    return validateMaxConcurrentRequestsInput(input, error);
+  }
+
+  function updateRequestSettings() {
     const maxRequestsInRow = parseInt(document.getElementById("max-requests").value, 10);
-    const requestsFrequencyMs = parseInt(document.getElementById("requests-frequency").value, 10);
     const pauseDur = parseInt(document.getElementById("pause-duration").value, 10);
+    const maxConcurrentRequests = validateMaxConcurrentRequests();
     settingsRepository.update({
       maxRequestsInRow,
-      requestsFrequencyMs,
-      pauseDurationSeconds: pauseDur
+      pauseDurationSeconds: pauseDur,
+      maxConcurrentRequests
     });
-    requestThrottler.reset();
-    debugLogger(`Throttle settings updated: Max Requests = ${maxRequestsInRow}, Requests Frequency = ${requestsFrequencyMs}ms, Pause Duration = ${pauseDur}s`);
+    requestScheduler.settingsChanged();
+    debugLogger(`Request settings updated: Batch = ${maxRequestsInRow}, Pause = ${pauseDur}s, Max Concurrency = ${maxConcurrentRequests}`);
   }
   function updateCacheLifetimeSetting() {
     const hours = parseFloat(document.getElementById("cache-lifetime").value);
@@ -490,10 +499,14 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       `Availability request ${origin} → ${destination} on ${date}`,
       arrivalDate ? `(paired with ${destination} → ${origin} on ${arrivalDate})` : "(outbound only)"
     );
-    return multipassClient.getFlights(
-      { origin, destination, date, arrivalDate },
-      appState.searchSession.controller?.signal
-    );
+    try {
+      return await multipassClient.getFlights(
+        { origin, destination, date, arrivalDate },
+        appState.searchSession.controller?.signal
+      );
+    } finally {
+      selectPairedArrivalDate.release({ origin, destination, arrivalDate });
+    }
   }
 
     // ---------------- Global Results Display Functions ----------------
@@ -572,6 +585,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     normalizeFlight: unifyRawFlight,
     appendResult: appendRouteToDisplay,
     updateProgress,
+    getConcurrency: () => settingsRepository.load().maxConcurrentRequests,
     logger: debugLogger
   });
 
@@ -605,7 +619,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       debugLogger("Search already active. Cancelling current search.");
       appState.cancelSearch();
       resetCountdownTimers();
-      requestThrottler.reset();
+      requestScheduler.resetBatch();
       setSearchButtonStopping(searchButton);
       return;
     }
@@ -615,12 +629,13 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     appState.defaultResults = [];
     totalResultsEl.textContent = "Total results: 0";
     const searchSession = appState.beginSearch();
+    selectPairedArrivalDate.reset();
     setSearchButtonActive(searchButton);
     debugLogger("New search started. Resetting counters and UI.");
 
     await cleanupCache();
   
-    requestThrottler.reset();
+    requestScheduler.resetBatch();
   
     let returnInputRaw = "";
     if (appState.tripType === "return") {
@@ -793,7 +808,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
         departureDates,
         returnDates,
         tripType,
-        maxTransfers
+        maxTransfers,
+        maxConcurrentRequests: settingsRepository.load().maxConcurrentRequests
       }, {
         searchDirect: ({ origins: from, destinations: to, date, append, skipProgress, preferredReturnDates }) =>
           searchDirectRoutes(from, to, date, append, false, skipProgress, { preferredReturnDates }),
@@ -1157,9 +1173,9 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     });
   
     // Other event handlers for throttle and options
-    document.getElementById("max-requests").addEventListener("change", updateThrottleSettings);
-    document.getElementById("requests-frequency").addEventListener("change", updateThrottleSettings);
-    document.getElementById("pause-duration").addEventListener("change", updateThrottleSettings);
+    document.getElementById("max-requests").addEventListener("change", updateRequestSettings);
+    document.getElementById("pause-duration").addEventListener("change", updateRequestSettings);
+    document.getElementById("max-concurrent-requests").addEventListener("change", updateRequestSettings);
     document.getElementById("cache-lifetime").addEventListener("change", updateCacheLifetimeSetting);
     document.getElementById("clear-cache-button").addEventListener("click", handleClearCache);
     document.getElementById("swap-button").addEventListener("click", swapInputs);

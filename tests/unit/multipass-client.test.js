@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMultipassClient } from "../../src/infrastructure/multipass-client.js";
+import {
+  createMultipassClient,
+  parseRetryAfter
+} from "../../src/infrastructure/multipass-client.js";
 import { ErrorCode } from "../../src/infrastructure/errors.js";
 
 function memoryStorage() {
@@ -35,19 +38,23 @@ function createHarness(overrides = {}) {
       return { success: true };
     })
   };
-  const throttler = { wait: vi.fn().mockResolvedValue(undefined) };
+  const scheduler = {
+    schedule: vi.fn(async task => task()),
+    recordSuccess: vi.fn(),
+    recordRateLimit: vi.fn()
+  };
   const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
     flightsOutbound: [{ key: "flight-1" }]
   }), { status: 200, headers: { "content-type": "application/json" } }));
   const client = createMultipassClient({
     gateway,
     cache,
-    throttler,
+    scheduler,
     sessionStorage: memoryStorage(),
     fetchImpl,
     ...overrides
   });
-  return { client, cache, gateway, throttler, fetchImpl };
+  return { client, cache, gateway, scheduler, fetchImpl };
 }
 
 describe("MultipassClient", () => {
@@ -68,6 +75,54 @@ describe("MultipassClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("coalesces identical in-flight availability requests", async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const { client, fetchImpl } = createHarness();
+    fetchImpl.mockImplementation(async () => {
+      await gate;
+      return new Response(JSON.stringify({ flightsOutbound: [{ key: "shared" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const segment = { origin: "AAA", destination: "BBB", date: "2026-08-28" };
+    const first = client.getFlights(segment);
+    const second = client.getFlights(segment);
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    release();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      [{ key: "shared" }],
+      [{ key: "shared" }]
+    ]);
+  });
+
+  it("keeps different RT arrival dates as separate in-flight requests", async () => {
+    const { client, fetchImpl } = createHarness();
+    fetchImpl.mockImplementation(async () => new Response(JSON.stringify({
+      flightsOutbound: [{ key: "flight-1" }],
+      flightsInbound: []
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    await Promise.all([
+      client.getFlights({
+        origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
+      }),
+      client.getFlights({
+        origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-30"
+      })
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces concurrent cold-session discovery", async () => {
+    const { client, gateway } = createHarness();
+    await Promise.all([client.ensureSession(), client.ensureSession(), client.ensureSession()]);
+    const dynamicUrlRequests = gateway.sendMessage.mock.calls.filter(
+      ([, message]) => message.action === "getDynamicUrl"
+    );
+    expect(dynamicUrlRequests).toHaveLength(1);
+  });
+
   it("normalizes unexpected HTTP failures", async () => {
     const { client, fetchImpl } = createHarness({ maxAttempts: 1 });
     fetchImpl.mockResolvedValue(new Response("failed", { status: 503 }));
@@ -86,7 +141,7 @@ describe("MultipassClient", () => {
   });
 
   it("treats the observed 400 response as empty availability", async () => {
-    const { client, cache, fetchImpl } = createHarness({ maxAttempts: 1 });
+    const { client, cache, fetchImpl, scheduler } = createHarness({ maxAttempts: 1 });
     fetchImpl.mockResolvedValue(new Response("", { status: 400 }));
     await expect(client.getFlights({
       origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
@@ -94,6 +149,7 @@ describe("MultipassClient", () => {
       .resolves.toEqual([]);
     expect(cache.put).toHaveBeenCalledTimes(1);
     expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
+    expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
   });
 
   it("requests and caches both sides of a paired RT response", async () => {
@@ -186,10 +242,18 @@ describe("MultipassClient", () => {
   });
 
   it.each([426, 429, 501])("normalizes HTTP %s as rate limiting", async status => {
-    const { client, fetchImpl } = createHarness({ maxAttempts: 1 });
-    fetchImpl.mockResolvedValue(new Response("", { status }));
+    const { client, fetchImpl, scheduler } = createHarness({ maxAttempts: 1 });
+    fetchImpl.mockResolvedValue(new Response("", {
+      status,
+      headers: status === 429 ? { "retry-after": "7" } : undefined
+    }));
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .rejects.toMatchObject({ code: ErrorCode.RATE_LIMITED, status });
+    expect(scheduler.recordRateLimit).toHaveBeenCalledWith(
+      status === 429 ? 7000 : expect.any(Number),
+      status,
+      status === 429 ? "7" : null
+    );
   });
 
   it("normalizes network failures", async () => {
@@ -208,5 +272,14 @@ describe("MultipassClient", () => {
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .rejects.toMatchObject({ code: ErrorCode.AUTH_REQUIRED });
     expect(gateway.reloadTab).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Retry-After parser", () => {
+  it("supports seconds and HTTP dates", () => {
+    expect(parseRetryAfter("7", 0)).toBe(7000);
+    expect(parseRetryAfter("Thu, 01 Jan 2026 00:00:10 GMT", Date.UTC(2026, 0, 1)))
+      .toBe(10000);
+    expect(parseRetryAfter("invalid", 0)).toBeNull();
   });
 });

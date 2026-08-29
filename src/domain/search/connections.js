@@ -6,6 +6,19 @@ import {
   candidateHasValidFlightDates,
   findCandidateRoutes
 } from "./candidate-builder.js";
+import { mapConcurrentOrdered } from "./concurrency.js";
+import { ErrorCode } from "../../infrastructure/errors.js";
+
+const FATAL_SEARCH_ERRORS = new Set([
+  ErrorCode.AUTH_REQUIRED,
+  ErrorCode.CANCELLED,
+  ErrorCode.TAB_UNAVAILABLE,
+  ErrorCode.CONTENT_SCRIPT_UNAVAILABLE
+]);
+
+function rethrowFatalSearchError(error) {
+  if (FATAL_SEARCH_ERRORS.has(error?.code) || error?.name === "AbortError") throw error;
+}
 
 export function buildOneStopRoute(first, second, gapMinutes, airportLookup = {}) {
   const departureDate = first.calculatedDuration?.departureDate;
@@ -156,6 +169,7 @@ export function createConnectionsSearch({
           debugLogger(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
           await setCachedResults(cacheKey, flights);
         } catch (error) {
+          rethrowFatalSearchError(error);
           console.error(`   Error fetching flights for ${segOrigin} -> ${segDestination} on ${dateStr}: ${error.message}`);
           flights = [];
           return [];
@@ -191,15 +205,18 @@ export function createConnectionsSearch({
       }
       
       // Iterate over all found flights for this offset.
-      for (let flight of flights) {
-        debugLogger(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
-        // Recursively process the next segment, passing the date adjusted by the current offset.
-        const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData, queryOptions);
-        // For each found option, add the current flight at the beginning.
-        for (let chain of nextChains) {
-          validChains.push([flight, ...chain]);
+      const flightChains = await mapConcurrentOrdered(
+        flights,
+        getSettings().maxConcurrentRequests ?? 1,
+        async flight => {
+          debugLogger(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
+          // Recursively process the next segment, passing the date adjusted by the current offset.
+          const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData, queryOptions);
+          // For each found option, add the current flight at the beginning.
+          return nextChains.map(chain => [flight, ...chain]);
         }
-      }
+      );
+      validChains.push(...flightChains.flat());
     }
     
     if (validChains.length === 0) {
@@ -271,6 +288,7 @@ export function createConnectionsSearch({
               debugLogger(`   Fetched ${flights.length} flights from server for ${origin} -> ${destination} on ${selectedDate}`);
               await setCachedResults(cacheKey, flights);
               } catch (error) {
+                rethrowFatalSearchError(error);
                 console.error(`Error loading flights: ${error.message}`);
                 flights = [];
               }
@@ -390,16 +408,17 @@ export function createConnectionsSearch({
 
     // Choose the grouping whose keys cover more candidates on average.
     const groupByFirst = byFirstLeg.size <= bySecondLeg.size;
+    const concurrency = getSettings().maxConcurrentRequests ?? 1;
 
     if (groupByFirst) {
-      for (const [, group] of byFirstLeg) {
-        if (isCancelled()) break;
+      const groupedResults = await mapConcurrentOrdered(byFirstLeg.values(), concurrency, async group => {
+        if (isCancelled()) return [];
         const { origin, B } = group[0];
         const flights1 = await loadFlights(origin, B, selectedDate, [0], queryOptions);
         if (!flights1.length) {
           routeCounter += group.length;
           updateProgress(routeCounter, totalRoutes, `No flights: ${origin} → ${B}`);
-          continue;
+          return [];
         }
         // Deduplicate second legs within this first-leg group.
         const bySecondInGroup = new Map();
@@ -408,8 +427,11 @@ export function createConnectionsSearch({
           if (!bySecondInGroup.has(k2)) bySecondInGroup.set(k2, []);
           bySecondInGroup.get(k2).push(cand);
         }
-        for (const [, subGroup] of bySecondInGroup) {
-          if (isCancelled()) break;
+        const subResults = await mapConcurrentOrdered(
+          bySecondInGroup.values(),
+          concurrency,
+          async subGroup => {
+          if (isCancelled()) return [];
           const { N, destination } = subGroup[0];
           routeCounter += subGroup.length;
           updateProgress(routeCounter, totalRoutes,
@@ -418,20 +440,24 @@ export function createConnectionsSearch({
               : `Checking route: ${origin} → ${B} → ${destination}`
           );
           const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets, queryOptions);
-          if (!flights2.length) continue;
+          if (!flights2.length) return [];
           debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
-          combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
-        }
-      }
+          const matches = [];
+          combineAndAppend(flights1, flights2, minConnection, maxConnection, matches, shouldAppend);
+          return matches;
+        });
+        return subResults.flat();
+      });
+      results.push(...groupedResults.flat());
     } else {
-      for (const [, group] of bySecondLeg) {
-        if (isCancelled()) break;
+      const groupedResults = await mapConcurrentOrdered(bySecondLeg.values(), concurrency, async group => {
+        if (isCancelled()) return [];
         const { N, destination } = group[0];
         const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets, queryOptions);
         if (!flights2.length) {
           routeCounter += group.length;
           updateProgress(routeCounter, totalRoutes, `No flights: ${N} → ${destination}`);
-          continue;
+          return [];
         }
         // Deduplicate first legs within this second-leg group.
         const byFirstInGroup = new Map();
@@ -440,8 +466,11 @@ export function createConnectionsSearch({
           if (!byFirstInGroup.has(k1)) byFirstInGroup.set(k1, []);
           byFirstInGroup.get(k1).push(cand);
         }
-        for (const [, subGroup] of byFirstInGroup) {
-          if (isCancelled()) break;
+        const subResults = await mapConcurrentOrdered(
+          byFirstInGroup.values(),
+          concurrency,
+          async subGroup => {
+          if (isCancelled()) return [];
           const { origin, B } = subGroup[0];
           routeCounter += subGroup.length;
           updateProgress(routeCounter, totalRoutes,
@@ -450,11 +479,15 @@ export function createConnectionsSearch({
               : `Checking route: ${origin} → ${B} → ${destination}`
           );
           const flights1 = await loadFlights(origin, B, selectedDate, [0], queryOptions);
-          if (!flights1.length) continue;
+          if (!flights1.length) return [];
           debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
-          combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
-        }
-      }
+          const matches = [];
+          combineAndAppend(flights1, flights2, minConnection, maxConnection, matches, shouldAppend);
+          return matches;
+        });
+        return subResults.flat();
+      });
+      results.push(...groupedResults.flat());
     }
 
     debugLogger(
@@ -679,6 +712,22 @@ export function createConnectionsSearch({
       ? cand => `${cand.B}|${cand.D}`
       : cand => `${cand.O}|${cand.A}`;
 
+    // Warm independent outer-leg cache entries in parallel. The grouped pass
+    // below remains deterministic and retains its empty-leg pruning behavior.
+    await mapConcurrentOrdered(
+      outerMap.values(),
+      getSettings().maxConcurrentRequests ?? 1,
+      async outerGroup => {
+        if (isCancelled()) return [];
+        if (outerGroupByFirst) {
+          const { O, A } = outerGroup[0];
+          return loadFlights(O, A, selectedDate, [0], queryOptions);
+        }
+        const { B, D } = outerGroup[0];
+        return loadFlights(B, D, selectedDate, allowedOffsets, queryOptions);
+      }
+    );
+
     for (const [, outerGroup] of outerMap) {
       if (isCancelled()) break;
 
@@ -707,6 +756,20 @@ export function createConnectionsSearch({
         innerMap.get(k).push(cand);
       }
 
+      await mapConcurrentOrdered(
+        innerMap.values(),
+        getSettings().maxConcurrentRequests ?? 1,
+        async innerGroup => {
+          if (isCancelled()) return [];
+          if (outerGroupByFirst) {
+            const { B, D } = innerGroup[0];
+            return loadFlights(B, D, selectedDate, allowedOffsets, queryOptions);
+          }
+          const { O, A } = innerGroup[0];
+          return loadFlights(O, A, selectedDate, [0], queryOptions);
+        }
+      );
+
       for (const [, innerGroup] of innerMap) {
         if (isCancelled()) break;
 
@@ -734,6 +797,16 @@ export function createConnectionsSearch({
           if (!byMidLeg.has(km)) byMidLeg.set(km, []);
           byMidLeg.get(km).push(cand);
         }
+
+        await mapConcurrentOrdered(
+          byMidLeg.values(),
+          getSettings().maxConcurrentRequests ?? 1,
+          async midGroup => {
+            if (isCancelled()) return [];
+            const { X, Y } = midGroup[0];
+            return loadFlights(X, Y, selectedDate, allowedOffsets, queryOptions);
+          }
+        );
 
         for (const [, midGroup] of byMidLeg) {
           if (isCancelled()) break;
@@ -819,20 +892,22 @@ export function createConnectionsSearch({
 
 
   async function loadFlights(dep, arr, baseDate, offsets, queryOptions = {}) {
-    const out = [];
-    for (const off of offsets) {
-      const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off).toISOString().slice(0,10);
-      if (arr == null) {
-        debugLogger(`Bad params to loadFlights(): ${dep}→${arr}`);
-        continue;
-      }
-      let segs = await getCachedResults(`${dep}-${arr}-${date}`);
-      let shouldRefreshCache = Array.isArray(segs) && segs.some(flight => {
-        const departure = flight?.calculatedDuration?.departureDate;
-        const arrival = flight?.calculatedDuration?.arrivalDate;
-        return !(departure instanceof Date) || Number.isNaN(departure.getTime())
-          || !(arrival instanceof Date) || Number.isNaN(arrival.getTime());
-      });
+    const batches = await mapConcurrentOrdered(
+      offsets,
+      getSettings().maxConcurrentRequests ?? 1,
+      async off => {
+        const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off).toISOString().slice(0,10);
+        if (arr == null) {
+          debugLogger(`Bad params to loadFlights(): ${dep}→${arr}`);
+          return [];
+        }
+        let segs = await getCachedResults(`${dep}-${arr}-${date}`);
+        let shouldRefreshCache = Array.isArray(segs) && segs.some(flight => {
+          const departure = flight?.calculatedDuration?.departureDate;
+          const arrival = flight?.calculatedDuration?.arrivalDate;
+          return !(departure instanceof Date) || Number.isNaN(departure.getTime())
+            || !(arrival instanceof Date) || Number.isNaN(arrival.getTime());
+        });
 
       if (!Array.isArray(segs)) {
         try {
@@ -840,6 +915,7 @@ export function createConnectionsSearch({
           segs = Array.isArray(result) ? result : [];
           shouldRefreshCache = true;
         } catch (error) {
+          rethrowFatalSearchError(error);
           console.error(`Error loading flights: ${error.message}`);
           segs = [];
         }
@@ -857,9 +933,10 @@ export function createConnectionsSearch({
       if (shouldRefreshCache) {
         await setCachedResults(`${dep}-${arr}-${date}`, segs);
       }
-      out.push(...segs);
-    }
-    return out;
+        return segs;
+      }
+    );
+    return batches.flat();
   }
 
 
@@ -1030,12 +1107,12 @@ export function createConnectionsSearch({
     const total = candidateRoutes.length;
     if (!skipProgress) updateProgress(0, total, "Processing routes");
   
-    const aggregatedResults = [];
-    for (const candidate of candidateRoutes) {
-      if (isCancelled()) break;
-      processed++;
-      if (!skipProgress) updateProgress(processed, total, `Checking ${candidate.join("→")}`);
-  
+    const candidateResults = await mapConcurrentOrdered(
+      candidateRoutes,
+      getSettings().maxConcurrentRequests ?? 1,
+      async candidate => {
+        if (isCancelled()) return [];
+
       const chains = await processSegment(
         candidate,
         0,
@@ -1050,6 +1127,7 @@ export function createConnectionsSearch({
         queryOptions
       );
   
+      const aggregatedResults = [];
       for (const chain of chains) {
         // Build your aggregated route object exactly as before…
         const firstDep = chain[0].calculatedDuration.departureDate;
@@ -1093,9 +1171,13 @@ export function createConnectionsSearch({
         if (shouldAppend) appendRouteToDisplay(aggregatedRoute);
         aggregatedResults.push(aggregatedRoute);
       }
-    }
-  
-    return aggregatedResults;
+        processed++;
+        if (!skipProgress) updateProgress(processed, total, `Checked ${candidate.join("→")}`);
+        return aggregatedResults;
+      }
+    );
+
+    return candidateResults.flat();
   }
 
   return searchConnectingRoutes;

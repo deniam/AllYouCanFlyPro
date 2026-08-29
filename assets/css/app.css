@@ -18,6 +18,11 @@
   --theme-overlay: rgb(0 0 0 / 50%);
 }
 
+.request-setting-invalid {
+  border-color: #dc2626 !important;
+  box-shadow: inset 0 -2px 0 #dc2626;
+}
+
 :root[data-theme="dark"] {
   --theme-page: #0f172a;
   --theme-surface: #111827;

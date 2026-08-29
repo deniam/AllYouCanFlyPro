@@ -5,8 +5,8 @@ export const SETTINGS_DEFAULTS = Object.freeze({
   allowChangeAirport: false,
   connectionRadius: 100,
   maxRequestsInRow: 50,
-  requestsFrequencyMs: 1800,
   pauseDurationSeconds: 15,
+  maxConcurrentRequests: 3,
   cacheLifetimeHours: 4,
   debugMode: false,
   themeMode: "auto"
@@ -19,8 +19,8 @@ const SCHEMA = Object.freeze({
   allowChangeAirport: { type: "boolean" },
   connectionRadius: { type: "number", min: 0, max: 2000 },
   maxRequestsInRow: { type: "number", min: 1, max: 10000 },
-  requestsFrequencyMs: { type: "number", min: 0, max: 60000 },
   pauseDurationSeconds: { type: "number", min: 0, max: 3600 },
+  maxConcurrentRequests: { type: "number", min: 1, max: 5 },
   cacheLifetimeHours: { type: "number", min: 0.1, max: 720 },
   debugMode: { type: "boolean" },
   themeMode: { type: "enum", values: ["auto", "light", "dark"] }

@@ -169,4 +169,78 @@ describe("connection aggregation", () => {
     expect(checkRouteSegment).toHaveBeenCalledTimes(path.length - 1);
     for (const call of checkRouteSegment.mock.calls) expect(call[3]).toBe(queryOptions);
   });
+
+  it.each([
+    { maxTransfers: 1, middlePrefix: "B" },
+    { maxTransfers: 2, middlePrefix: "C" }
+  ])("processes independent candidate chains concurrently with $maxTransfers transfers", async ({
+    maxTransfers, middlePrefix
+  }) => {
+    const today = new Date();
+    const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const selectedDate = addDaysUTC(todayUtc, 1).toISOString().slice(0, 10);
+    const paths = [1, 2, 3].map(index => maxTransfers === 1
+      ? ["AAA", `B${index}`, "DDD"]
+      : ["AAA", `B${index}`, `${middlePrefix}${index}`, "DDD"]);
+    const routesByOrigin = new Map();
+    for (const path of paths) {
+      for (let index = 0; index < path.length - 1; index++) {
+        const route = routesByOrigin.get(path[index]) ?? {
+          departureStation: path[index],
+          arrivalStations: []
+        };
+        route.arrivalStations.push({ id: path[index + 1], flightDates: [selectedDate] });
+        routesByOrigin.set(path[index], route);
+      }
+    }
+    const routes = [...routesByOrigin.values()];
+    const catalog = createRouteCatalog(routes);
+    let active = 0;
+    let maximum = 0;
+    const checkRouteSegment = vi.fn(async (origin, destination) => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise(resolve => setTimeout(resolve, 2));
+      active -= 1;
+      const path = paths.find(candidate => candidate.includes(origin) && candidate.includes(destination));
+      const legIndex = path.indexOf(origin);
+      const departureHour = 8 + legIndex * 4;
+      return [segment(
+        `${origin}-${destination}`, origin, destination,
+        `${selectedDate}T${String(departureHour).padStart(2, "0")}:00:00Z`,
+        `${selectedDate}T${String(departureHour + 2).padStart(2, "0")}:00:00Z`
+      )];
+    });
+    const search = createConnectionsSearch({
+      isCancelled: () => false,
+      debugLogger: vi.fn(),
+      isDateAvailableForSegment: (origin, destination, date) =>
+        catalog.isDateAvailable(origin, destination, date),
+      getCachedResults: vi.fn(async () => null),
+      setCachedResults: vi.fn(async () => {}),
+      getUnifiedCacheKey: (origin, destination, date) => `${origin}-${destination}-${date}`,
+      checkRouteSegment,
+      updateProgress: vi.fn(),
+      fetchDestinations: async () => routes,
+      routeCatalog: catalog,
+      airportLookup: {},
+      appendRouteToDisplay: vi.fn(),
+      getSettings: () => ({
+        minConnectionTime: 60,
+        maxConnectionTime: 300,
+        connectionRadius: 0,
+        allowChangeAirport: false,
+        maxConcurrentRequests: 3
+      }),
+      getStopoverText: () => maxTransfers === 1
+        ? "One stop or fewer"
+        : "Two stops or fewer (overnight)"
+    });
+
+    const results = await search(
+      ["AAA"], ["DDD"], selectedDate, maxTransfers, false, true, { preferredReturnDates: [] }
+    );
+    expect(results).toHaveLength(3);
+    expect(maximum).toBe(3);
+  });
 });

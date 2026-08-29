@@ -62,4 +62,16 @@ describe("paired arrival date selector", () => {
       preferredReturnDates: ["2026-08-31"]
     })).resolves.toBe("");
   });
+
+  it("reserves different reverse dates for parallel requests and releases them", async () => {
+    const { select } = selector({ reverseDates: ["2026-08-30", "2026-08-31"] });
+    const request = {
+      origin: "AAA", destination: "BBB", departureDate: "2026-08-30",
+      preferredReturnDates: ["2026-08-30", "2026-08-31"]
+    };
+    const [first, second] = await Promise.all([select(request), select(request)]);
+    expect([first, second]).toEqual(["2026-08-30", "2026-08-31"]);
+    select.release({ origin: "AAA", destination: "BBB", arrivalDate: first });
+    await expect(select(request)).resolves.toBe(first);
+  });
 });

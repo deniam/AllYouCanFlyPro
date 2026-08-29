@@ -50,4 +50,35 @@ describe("direct search", () => {
     await search(["AAA"], ["BBB"], "2026-09-01", true, false, false, queryOptions);
     expect(fetchFlights).toHaveBeenCalledWith("AAA", "BBB", "2026-09-01", queryOptions);
   });
+
+  it("loads independent route pairs concurrently and preserves result order", async () => {
+    let active = 0;
+    let maximum = 0;
+    const origins = ["A1", "A2", "A3", "A4"];
+    const search = createDirectSearch({
+      fetchRoutes: async () => origins.map(origin => ({
+        departureStation: origin,
+        arrivalStations: [{ id: "BBB", flightDates: ["2026-09-01"] }]
+      })),
+      getPreviousResults: () => [],
+      isCancelled: () => false,
+      getCached: async () => null,
+      setCached: vi.fn(async () => {}),
+      fetchFlights: vi.fn(async origin => {
+        active += 1;
+        maximum = Math.max(maximum, active);
+        await new Promise(resolve => setTimeout(resolve, origin === "A1" ? 10 : 1));
+        active -= 1;
+        return [{ key: origin }];
+      }),
+      normalizeFlight: value => value,
+      appendResult: vi.fn(),
+      updateProgress: vi.fn(),
+      getConcurrency: () => 3
+    });
+
+    const results = await search(origins, ["BBB"], "2026-09-01");
+    expect(maximum).toBe(3);
+    expect(results.map(result => result.key)).toEqual(origins);
+  });
 });

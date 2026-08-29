@@ -1,3 +1,6 @@
+import { ErrorCode } from "../../infrastructure/errors.js";
+import { mapConcurrentOrdered } from "./concurrency.js";
+
 /**
  * Creates the direct-flight search stage without coupling it to the DOM or the
  * WebExtensions platform.
@@ -12,6 +15,7 @@ export function createDirectSearch({
   normalizeFlight,
   appendResult,
   updateProgress,
+  getConcurrency = () => 1,
   logger = () => {}
 }) {
   return async function searchDirectRoutes(
@@ -61,28 +65,35 @@ export function createDirectSearch({
       }
     }
 
-    const results = [];
     let processed = 0;
     if (!skipProgress) updateProgress(0, pairs.length, "Checking direct flights");
 
-    for (const pair of pairs) {
-      if (isCancelled()) break;
-      processed += 1;
-      if (!skipProgress) {
-        updateProgress(processed, pairs.length, `Checking ${pair.origin} → ${pair.destination} on ${selectedDate}`);
-      }
-      if (reverse && !allowedReversePairs.has(`${pair.origin}-${pair.destination}`)) continue;
+    const pairResults = await mapConcurrentOrdered(pairs, getConcurrency(), async pair => {
+      if (isCancelled()) return [];
+      if (reverse && !allowedReversePairs.has(`${pair.origin}-${pair.destination}`)) return [];
 
-      let flights = await getCached(pair.origin, pair.destination, selectedDate);
-      if (!flights) {
-        flights = await fetchFlights(pair.origin, pair.destination, selectedDate, queryOptions);
-        if (!Array.isArray(flights)) flights = [];
-        await setCached(pair.origin, pair.destination, selectedDate, flights);
+      let flights;
+      try {
+        flights = await getCached(pair.origin, pair.destination, selectedDate);
+        if (!flights) {
+          flights = await fetchFlights(pair.origin, pair.destination, selectedDate, queryOptions);
+          if (!Array.isArray(flights)) flights = [];
+          await setCached(pair.origin, pair.destination, selectedDate, flights);
+        }
+      } catch (error) {
+        if ([ErrorCode.AUTH_REQUIRED, ErrorCode.CANCELLED].includes(error?.code)) throw error;
+        logger(`Skipping ${pair.origin} → ${pair.destination} after request error: ${error?.message ?? error}`);
+        flights = [];
       }
       flights = flights.map(normalizeFlight);
       if (shouldAppend) flights.forEach(appendResult);
-      results.push(...flights);
-    }
+      processed += 1;
+      if (!skipProgress) {
+        updateProgress(processed, pairs.length, `Checked ${pair.origin} → ${pair.destination} on ${selectedDate}`);
+      }
+      return flights;
+    });
+    const results = pairResults.flat();
     logger(`Direct flight search complete. Found ${results.length} flights.`);
     return results;
   };
