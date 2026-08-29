@@ -92,7 +92,7 @@ export function createConnectionsSearch({
   getSettings,
   getStopoverText
 }) {
-  async function processSegment(candidate, index, currentDate, previousFlight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData) {
+  async function processSegment(candidate, index, currentDate, previousFlight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData, queryOptions) {
     if (index >= candidate.length - 1) {
       // Base case: return one option – an empty array.
       return [[]];
@@ -145,7 +145,7 @@ export function createConnectionsSearch({
         debugLogger(`   Cache hit: ${flights.length} flights found for ${segOrigin} -> ${segDestination} on ${dateStr}`);
       } else {
         try {
-          flights = await checkRouteSegment(segOrigin, segDestination, dateStr);
+          flights = await checkRouteSegment(segOrigin, segDestination, dateStr, queryOptions);
           flights = flights.map(unifyRawFlight);
           debugLogger(`   Fetched ${flights.length} flights from server for ${segOrigin} -> ${segDestination} on ${dateStr}`);
           await setCachedResults(cacheKey, flights);
@@ -188,7 +188,7 @@ export function createConnectionsSearch({
       for (let flight of flights) {
         debugLogger(`   Considering flight ${flight.flightCode} for segment ${segOrigin} -> ${segDestination}: Departure: ${flight.calculatedDuration.departureDate.toISOString()}, Arrival: ${flight.calculatedDuration.arrivalDate.toISOString()}`);
         // Recursively process the next segment, passing the date adjusted by the current offset.
-        const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData);
+        const nextChains = await processSegment(candidate, index + 1, addDaysUTC(currentDate, offset), flight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData, queryOptions);
         // For each found option, add the current flight at the beginning.
         for (let chain of nextChains) {
           validChains.push([flight, ...chain]);
@@ -223,7 +223,8 @@ export function createConnectionsSearch({
     maxConnection,
     connectionRadiusKm,
     allowedOffsets,
-    shouldAppend
+    shouldAppend,
+    queryOptions
   ) {
     debugLogger("[DEBUG] airport-change search start", {
       origins,
@@ -259,7 +260,7 @@ export function createConnectionsSearch({
           let flights = await getCachedResults(cacheKey);
           if (!flights) {
             try {
-              flights = await checkRouteSegment(origin, destination, selectedDate);
+              flights = await checkRouteSegment(origin, destination, selectedDate, queryOptions);
               flights = flights.map(unifyRawFlight);
               debugLogger(`   Fetched ${flights.length} flights from server for ${origin} -> ${destination} on ${selectedDate}`);
               await setCachedResults(cacheKey, flights);
@@ -388,7 +389,7 @@ export function createConnectionsSearch({
       for (const [, group] of byFirstLeg) {
         if (isCancelled()) break;
         const { origin, B } = group[0];
-        const flights1 = await loadFlights(origin, B, selectedDate, [0]);
+        const flights1 = await loadFlights(origin, B, selectedDate, [0], queryOptions);
         if (!flights1.length) {
           routeCounter += group.length;
           updateProgress(routeCounter, totalRoutes, `No flights: ${origin} → ${B}`);
@@ -410,7 +411,7 @@ export function createConnectionsSearch({
               ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}`
               : `Checking route: ${origin} → ${B} → ${destination}`
           );
-          const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
+          const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets, queryOptions);
           if (!flights2.length) continue;
           debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
           combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
@@ -420,7 +421,7 @@ export function createConnectionsSearch({
       for (const [, group] of bySecondLeg) {
         if (isCancelled()) break;
         const { N, destination } = group[0];
-        const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets);
+        const flights2 = await loadFlights(N, destination, selectedDate, allowedOffsets, queryOptions);
         if (!flights2.length) {
           routeCounter += group.length;
           updateProgress(routeCounter, totalRoutes, `No flights: ${N} → ${destination}`);
@@ -442,7 +443,7 @@ export function createConnectionsSearch({
               ? `Checking route: ${origin} → ${B} ⇄ ${N} → ${destination}`
               : `Checking route: ${origin} → ${B} → ${destination}`
           );
-          const flights1 = await loadFlights(origin, B, selectedDate, [0]);
+          const flights1 = await loadFlights(origin, B, selectedDate, [0], queryOptions);
           if (!flights1.length) continue;
           debugLogger(`Found ${flights1.length} for ${origin}→${B} and ${flights2.length} for ${N}→${destination}`);
           combineAndAppend(flights1, flights2, minConnection, maxConnection, results, shouldAppend);
@@ -485,7 +486,8 @@ export function createConnectionsSearch({
     maxConnection,
     connectionRadiusKm,
     allowedOffsets,
-    shouldAppend = true
+    shouldAppend = true,
+    queryOptions = {}
   ) {
     const results    = [];
     const routesData = await fetchDestinations();
@@ -678,10 +680,10 @@ export function createConnectionsSearch({
       let fOuter;
       if (outerGroupByFirst) {
         const { O, A } = outerGroup[0];
-        fOuter = await loadFlights(O, A, selectedDate, [0]);
+        fOuter = await loadFlights(O, A, selectedDate, [0], queryOptions);
       } else {
         const { B, D } = outerGroup[0];
-        fOuter = await loadFlights(B, D, selectedDate, allowedOffsets);
+        fOuter = await loadFlights(B, D, selectedDate, allowedOffsets, queryOptions);
       }
       if (!fOuter.length) {
         processedCandidates += outerGroup.length;
@@ -705,10 +707,10 @@ export function createConnectionsSearch({
         let fInner;
         if (outerGroupByFirst) {
           const { B, D } = innerGroup[0];
-          fInner = await loadFlights(B, D, selectedDate, allowedOffsets);
+          fInner = await loadFlights(B, D, selectedDate, allowedOffsets, queryOptions);
         } else {
           const { O, A } = innerGroup[0];
-          fInner = await loadFlights(O, A, selectedDate, [0]);
+          fInner = await loadFlights(O, A, selectedDate, [0], queryOptions);
         }
         if (!fInner.length) {
           processedCandidates += innerGroup.length;
@@ -738,7 +740,7 @@ export function createConnectionsSearch({
             `Checking route: ${O} → ${A} ⇄ ${X} → ${Y} ⇄ ${B} → ${D}`;
           updateProgress(processedCandidates, totalCandidates, progressMessage);
 
-          const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets);
+          const f2 = await loadFlights(X, Y, selectedDate, allowedOffsets, queryOptions);
           if (!f2.length) continue;
 
           for (let flight1 of f1) {
@@ -810,7 +812,7 @@ export function createConnectionsSearch({
   }
 
 
-  async function loadFlights(dep, arr, baseDate, offsets) {
+  async function loadFlights(dep, arr, baseDate, offsets, queryOptions = {}) {
     const out = [];
     for (const off of offsets) {
       const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off).toISOString().slice(0,10);
@@ -822,7 +824,7 @@ export function createConnectionsSearch({
 
       if (!Array.isArray(segs)) {
         try {
-          const result = await checkRouteSegment(dep, arr, date);
+          const result = await checkRouteSegment(dep, arr, date, queryOptions);
           segs = Array.isArray(result) 
             ? result.map(unifyRawFlight) 
             : [];
@@ -855,7 +857,8 @@ export function createConnectionsSearch({
     selectedDate,
     maxTransfers,
     shouldAppend = true,
-    skipProgress = false
+    skipProgress = false,
+    queryOptions = {}
   ) {
     debugLogger("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
@@ -943,7 +946,7 @@ export function createConnectionsSearch({
         connectionRadius,
         allowedOffsets,
         shouldAppend,
-        true // skipProgress
+        queryOptions
       );
       results.push(...oneStopResults || []);
       if (isCancelled()) return results;
@@ -957,7 +960,8 @@ export function createConnectionsSearch({
         maxConnection,
         connectionRadius,
         allowedOffsets,
-        shouldAppend
+        shouldAppend,
+        queryOptions
       );
       results.push(...twoStopResults || []);
       debugLogger(`Found ${results.length} two-stop routes with airport change`);
@@ -981,7 +985,8 @@ export function createConnectionsSearch({
         maxConnection,
         connectionRadius,
         allowedOffsets,
-        true
+        shouldAppend,
+        queryOptions
       );
       debugLogger(`Found ${results.length} routes with airport change`);
       return results;
@@ -1018,7 +1023,8 @@ export function createConnectionsSearch({
         maxConnection,
         allowedOffsets[allowedOffsets.length - 1], // max offset
         selectedDate,
-        routesData
+        routesData,
+        queryOptions
       );
   
       for (const chain of chains) {

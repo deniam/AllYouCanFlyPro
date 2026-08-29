@@ -26,6 +26,7 @@ import { unifyRawFlight } from './domain/flight-normalizer.js';
 import { createDirectSearch } from './domain/search/direct.js';
 import { runSearch } from './domain/search/orchestrator.js';
 import { createConnectionsSearch } from './domain/search/connections.js';
+import { createPairedDateSelector } from './domain/search/paired-date-selector.js';
 // ----------------------- Global Settings -----------------------
   const settingsRepository = createSettingsRepository(localStorage);
   const extensionGateway = createExtensionGateway();
@@ -291,6 +292,11 @@ import { createConnectionsSearch } from './domain/search/connections.js';
     logger: debugLogger,
     onPause: waitTimeMs => showTimeoutCountdown(waitTimeMs)
   });
+  const selectPairedArrivalDate = createPairedDateSelector({
+    routeCatalog,
+    getCached: (origin, destination, date) =>
+      flightCache.get(segmentCacheKey(origin, destination, date))
+  });
 
   function updateThrottleSettings() {
     const maxRequestsInRow = parseInt(document.getElementById("max-requests").value, 10);
@@ -471,9 +477,19 @@ import { createConnectionsSearch } from './domain/search/connections.js';
     return true;
   }
 
-  async function checkRouteSegment(origin, destination, date) {
+  async function checkRouteSegment(origin, destination, date, queryOptions = {}) {
+    const arrivalDate = await selectPairedArrivalDate({
+      origin,
+      destination,
+      departureDate: date,
+      preferredReturnDates: queryOptions.preferredReturnDates ?? []
+    });
+    debugLogger(
+      `Availability request ${origin} → ${destination} on ${date}`,
+      arrivalDate ? `(paired with ${destination} → ${origin} on ${arrivalDate})` : "(outbound only)"
+    );
     return multipassClient.getFlights(
-      { origin, destination, date },
+      { origin, destination, date, arrivalDate },
       appState.searchSession.controller?.signal
     );
   }
@@ -772,10 +788,10 @@ import { createConnectionsSearch } from './domain/search/connections.js';
         tripType,
         maxTransfers
       }, {
-        searchDirect: ({ origins: from, destinations: to, date, append, skipProgress }) =>
-          searchDirectRoutes(from, to, date, append, false, skipProgress),
-        searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress }) =>
-          searchConnectingRoutes(from, to, date, transfers, append, skipProgress)
+        searchDirect: ({ origins: from, destinations: to, date, append, skipProgress, preferredReturnDates }) =>
+          searchDirectRoutes(from, to, date, append, false, skipProgress, { preferredReturnDates }),
+        searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress, preferredReturnDates }) =>
+          searchConnectingRoutes(from, to, date, transfers, append, skipProgress, { preferredReturnDates })
       }, appState.searchSession.controller?.signal, progress => {
         updateProgress(progress.current, progress.total, progress.message);
       });

@@ -29,6 +29,10 @@ Record browser/device version, installation type, date, tester and result for ev
 - [ ] Allowed airport change inside the configured radius.
 - [ ] Round trip with valid and invalid minimum return gaps.
 - [ ] Multiple departure and return dates retain stable result ordering.
+- [ ] Direct round trip with one outbound and one return date uses one availability request.
+- [ ] One-way search sends the nearest valid reverse `flightDates` date and warms its cache key.
+- [ ] One-stop and two-stop searches reuse paired reverse segments without losing non-mirrored routes.
+- [ ] Paired HTTP 400 caches only outbound absence; a found connecting outbound still triggers inbound search.
 - [ ] A second search does not duplicate results, listeners or API calls.
 
 ## Cancellation and errors

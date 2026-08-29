@@ -28,4 +28,26 @@ describe("direct search", () => {
     expect(fetchFlights).not.toHaveBeenCalled();
     expect(append).toHaveBeenCalledOnce();
   });
+
+  it("passes paired-query options to every API cache miss", async () => {
+    const fetchFlights = vi.fn(async () => []);
+    const search = createDirectSearch({
+      fetchRoutes: async () => [{
+        departureStation: "AAA",
+        arrivalStations: [{ id: "BBB", flightDates: ["2026-09-01"] }]
+      }],
+      getPreviousResults: () => [],
+      isCancelled: () => false,
+      getCached: async () => null,
+      setCached: vi.fn(),
+      fetchFlights,
+      normalizeFlight: value => value,
+      appendResult: vi.fn(),
+      updateProgress: vi.fn()
+    });
+    const queryOptions = { preferredReturnDates: ["2026-09-02"] };
+
+    await search(["AAA"], ["BBB"], "2026-09-01", true, false, false, queryOptions);
+    expect(fetchFlights).toHaveBeenCalledWith("AAA", "BBB", "2026-09-01", queryOptions);
+  });
 });

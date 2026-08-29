@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { combineOneStopFlights } from "../../src/domain/search/connections.js";
+import { describe, expect, it, vi } from "vitest";
+import { combineOneStopFlights, createConnectionsSearch } from "../../src/domain/search/connections.js";
+import { createRouteCatalog } from "../../src/domain/route-catalog.js";
+import { addDaysUTC } from "../../src/domain/dates.js";
 
 const segment = (key, from, to, departure, arrival) => ({
   key,
@@ -26,5 +28,64 @@ describe("connection aggregation", () => {
     });
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ key: "one | two", totalConnectionTime: 120 });
+  });
+
+  it.each([
+    { maxTransfers: 1, path: ["AAA", "BBB", "DDD"], stopover: "One stop or fewer" },
+    { maxTransfers: 2, path: ["AAA", "BBB", "CCC", "DDD"], stopover: "Two stops or fewer (overnight)" }
+  ])("passes paired-query options through every segment with $maxTransfers transfers", async ({
+    maxTransfers, path, stopover
+  }) => {
+    const today = new Date();
+    const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const selectedDate = addDaysUTC(todayUtc, 1).toISOString().slice(0, 10);
+    const routes = path.slice(0, -1).map((origin, index) => ({
+      departureStation: origin,
+      arrivalStations: [{ id: path[index + 1], flightDates: [selectedDate] }]
+    }));
+    const catalog = createRouteCatalog(routes);
+    const starts = [8, 12, 16];
+    const flights = new Map(path.slice(0, -1).map((origin, index) => {
+      const destination = path[index + 1];
+      const departure = new Date(`${selectedDate}T${String(starts[index]).padStart(2, "0")}:00:00Z`);
+      const arrival = new Date(departure.getTime() + 2 * 60 * 60 * 1000);
+      return [`${origin}-${destination}`, segment(
+        `${origin}-${destination}`, origin, destination,
+        departure.toISOString(), arrival.toISOString()
+      )];
+    }));
+    const checkRouteSegment = vi.fn(async (origin, destination) => [
+      flights.get(`${origin}-${destination}`)
+    ]);
+    const search = createConnectionsSearch({
+      isCancelled: () => false,
+      debugLogger: vi.fn(),
+      isDateAvailableForSegment: (origin, destination, date) =>
+        catalog.isDateAvailable(origin, destination, date),
+      getCachedResults: vi.fn(async () => null),
+      setCachedResults: vi.fn(async () => {}),
+      getUnifiedCacheKey: (origin, destination, date) => `${origin}-${destination}-${date}`,
+      checkRouteSegment,
+      updateProgress: vi.fn(),
+      fetchDestinations: async () => routes,
+      routeCatalog: catalog,
+      airportLookup: {},
+      appendRouteToDisplay: vi.fn(),
+      getSettings: () => ({
+        minConnectionTime: 60,
+        maxConnectionTime: 300,
+        connectionRadius: 0,
+        allowChangeAirport: false
+      }),
+      getStopoverText: () => stopover
+    });
+    const queryOptions = { preferredReturnDates: [selectedDate] };
+
+    const results = await search(
+      [path[0]], [path.at(-1)], selectedDate, maxTransfers, false, true, queryOptions
+    );
+    expect(results).toHaveLength(1);
+    expect(checkRouteSegment).toHaveBeenCalledTimes(path.length - 1);
+    for (const call of checkRouteSegment.mock.calls) expect(call[3]).toBe(queryOptions);
   });
 });

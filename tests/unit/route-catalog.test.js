@@ -14,6 +14,7 @@ describe("route catalog", () => {
   it("honours explicit flight dates", () => {
     expect(catalog.isDateAvailable("AAA", "BBB", "2026-08-28")).toBe(true);
     expect(catalog.isDateAvailable("AAA", "BBB", "2026-08-30")).toBe(false);
+    expect(catalog.getFlightDates("AAA", "BBB")).toEqual(["2026-08-28", "2026-08-29"]);
   });
 
   it("treats a missing flightDates property as unrestricted", () => {

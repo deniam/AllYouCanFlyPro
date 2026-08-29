@@ -77,6 +77,16 @@ export function createRouteCatalog(routes) {
         ...(originsByDestination.get(String(destination).toUpperCase()) ?? [])
       ]);
     },
+    getFlightDates(origin, destination) {
+      const arrival = getArrival(
+        String(origin).toUpperCase(),
+        String(destination).toUpperCase()
+      );
+      if (!arrival || typeof arrival !== "object" || !Array.isArray(arrival.flightDates)) {
+        return Object.freeze([]);
+      }
+      return Object.freeze([...arrival.flightDates]);
+    },
     isDateAvailable(origin, destination, date) {
       const arrival = getArrival(
         String(origin).toUpperCase(),

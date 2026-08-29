@@ -86,10 +86,60 @@ describe("MultipassClient", () => {
   });
 
   it("treats the observed 400 response as empty availability", async () => {
-    const { client, fetchImpl } = createHarness({ maxAttempts: 1 });
+    const { client, cache, fetchImpl } = createHarness({ maxAttempts: 1 });
     fetchImpl.mockResolvedValue(new Response("", { status: 400 }));
-    await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
+    await expect(client.getFlights({
+      origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
+    }))
       .resolves.toEqual([]);
+    expect(cache.put).toHaveBeenCalledTimes(1);
+    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
+  });
+
+  it("requests and caches both sides of a paired RT response", async () => {
+    const { client, cache, fetchImpl } = createHarness();
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({
+      flightsOutbound: [{ key: "out" }],
+      flightsInbound: [{ key: "in" }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await expect(client.getFlights({
+      origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
+    })).resolves.toEqual([{ key: "out" }]);
+    const request = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(request).toMatchObject({
+      flightType: "RT", origin: "AAA", destination: "BBB",
+      departure: "2026-08-28", arrival: "2026-08-29"
+    });
+    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", [{ key: "out" }]);
+    expect(cache.put).toHaveBeenCalledWith("BBB-AAA-2026-08-29", [{ key: "in" }]);
+  });
+
+  it("negative-caches a valid empty inbound response", async () => {
+    const { client, cache, fetchImpl } = createHarness();
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({
+      flightsOutbound: [{ key: "out" }],
+      flightsInbound: []
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await client.getFlights({
+      origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
+    });
+    expect(cache.put).toHaveBeenCalledWith("BBB-AAA-2026-08-29", []);
+  });
+
+  it("does not cache a malformed or missing inbound response", async () => {
+    const logger = vi.fn();
+    const { client, cache } = createHarness({ logger });
+
+    await client.getFlights({
+      origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
+    });
+    expect(cache.put).toHaveBeenCalledTimes(1);
+    expect(logger).toHaveBeenCalledWith(
+      expect.stringContaining("reverse availability was not cached"),
+      expect.any(Object)
+    );
   });
 
   it("treats a JSON response without flightsOutbound as empty availability", async () => {

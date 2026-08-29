@@ -162,13 +162,15 @@ export function createMultipassClient({
             origin: segment.origin,
             destination: segment.destination,
             departure: segment.date,
-            arrival: "",
+            arrival: segment.arrivalDate ?? "",
             intervalSubtype: null
           }),
           signal
         });
 
-        if (EMPTY_AVAILABILITY_STATUSES.has(response.status)) return [];
+        if (EMPTY_AVAILABILITY_STATUSES.has(response.status)) {
+          return { outbound: [], inbound: null };
+        }
         if ([426, 429, 501].includes(response.status)) {
           const waitMs = response.status === 426 ? 60000 : response.status === 429 ? 40000 : 15000;
           onPause(waitMs, "rate-limit", response.status);
@@ -203,9 +205,20 @@ export function createMultipassClient({
             `No flightsOutbound array for ${segment.origin} → ${segment.destination} on ${segment.date}; treating it as no availability`,
             payload
           );
-          return [];
+          return { outbound: [], inbound: null };
         }
-        return payload.flightsOutbound;
+        let inbound = null;
+        if (segment.arrivalDate) {
+          if (Array.isArray(payload.flightsInbound)) {
+            inbound = payload.flightsInbound;
+          } else {
+            logger(
+              `No flightsInbound array for ${segment.destination} → ${segment.origin} on ${segment.arrivalDate}; reverse availability was not cached`,
+              payload
+            );
+          }
+        }
+        return { outbound: payload.flightsOutbound, inbound };
       } catch (error) {
         if (signal?.aborted) throw new AppError(ErrorCode.CANCELLED, "Search cancelled");
         const normalized = error instanceof AppError
@@ -231,10 +244,17 @@ export function createMultipassClient({
     async getFlights(segment, signal) {
       const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
       const cached = await cache.get(key);
-      if (cached) return cached;
-      const flights = await requestFlights(segment, signal);
-      await cache.put(key, flights);
-      return flights;
+      if (Array.isArray(cached)) return cached;
+      const { outbound, inbound } = await requestFlights(segment, signal);
+      const writes = [cache.put(key, outbound)];
+      if (segment.arrivalDate && Array.isArray(inbound)) {
+        writes.push(cache.put(
+          segmentCacheKey(segment.destination, segment.origin, segment.arrivalDate),
+          inbound
+        ));
+      }
+      await Promise.all(writes);
+      return outbound;
     },
     async continueBooking(subscriptionId, outboundKey, signal) {
       const tab = await gateway.createTab({ url: MULTIPASS_URL, active: true });

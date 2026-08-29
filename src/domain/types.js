@@ -35,6 +35,14 @@
 /** @typedef {NormalizedFlight & {returnFlights?: NormalizedFlight[]}} SearchResult */
 
 /**
+ * @typedef {Object} AvailabilitySegmentRequest
+ * @property {string} origin
+ * @property {string} destination
+ * @property {string} date
+ * @property {string=} arrivalDate Optional reverse-segment date for a paired RT request.
+ */
+
+/**
  * @typedef {Object} SearchRequest
  * @property {string[]} origins
  * @property {string[]} destinations

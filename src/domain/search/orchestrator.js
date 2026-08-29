@@ -37,7 +37,13 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
   for (const date of departureDates) {
     throwIfAborted(signal);
     const flights = await runLeg(
-      { origins, destinations, date, maxTransfers },
+      {
+        origins,
+        destinations,
+        date,
+        maxTransfers,
+        preferredReturnDates: tripType === "return" ? returnDates : []
+      },
       dependencies,
       signal,
       true

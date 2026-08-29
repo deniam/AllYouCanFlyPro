@@ -20,7 +20,8 @@ export function createDirectSearch({
     selectedDate,
     shouldAppend = true,
     reverse = false,
-    skipProgress = false
+    skipProgress = false,
+    queryOptions = {}
   ) {
     let allowedReversePairs = null;
     if (reverse && getPreviousResults().length) {
@@ -74,7 +75,7 @@ export function createDirectSearch({
 
       let flights = await getCached(pair.origin, pair.destination, selectedDate);
       if (!flights) {
-        flights = await fetchFlights(pair.origin, pair.destination, selectedDate);
+        flights = await fetchFlights(pair.origin, pair.destination, selectedDate, queryOptions);
         if (!Array.isArray(flights)) flights = [];
         await setCached(pair.origin, pair.destination, selectedDate, flights);
       }
