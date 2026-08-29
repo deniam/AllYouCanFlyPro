@@ -19,6 +19,12 @@ function createHarness(overrides = {}) {
   const gateway = {
     queryTabs: vi.fn().mockResolvedValue([{ id: 7, status: "complete" }]),
     createTab: vi.fn().mockResolvedValue({ id: 8, status: "loading" }),
+    updateTab: vi.fn().mockResolvedValue(undefined),
+    createWindow: vi.fn().mockResolvedValue({
+      id: 3,
+      tabs: [{ id: 8, windowId: 3, status: "loading" }]
+    }),
+    focusWindow: vi.fn().mockResolvedValue(undefined),
     reloadTab: vi.fn().mockResolvedValue(undefined),
     waitForTabComplete: vi.fn().mockResolvedValue(undefined),
     injectContentScript: vi.fn().mockResolvedValue(undefined),
@@ -84,6 +90,49 @@ describe("MultipassClient", () => {
     fetchImpl.mockResolvedValue(new Response("", { status: 400 }));
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .resolves.toEqual([]);
+  });
+
+  it("treats a JSON response without flightsOutbound as empty availability", async () => {
+    const { client, cache, fetchImpl } = createHarness({ maxAttempts: 1 });
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ message: "no flights" }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
+      .resolves.toEqual([]);
+    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
+  });
+
+  it("opens Multipass in a focused window when no Multipass tab exists", async () => {
+    const { client, gateway } = createHarness();
+    gateway.queryTabs
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 8, windowId: 3, status: "complete" }]);
+
+    await expect(client.ensureSession()).resolves.toMatchObject({
+      dynamicUrl: "https://example.test/availability/id"
+    });
+    expect(gateway.createWindow).toHaveBeenCalledWith({
+      url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets",
+      focused: true
+    });
+  });
+
+  it("opens a focused authentication window when session discovery times out", async () => {
+    const { client, gateway } = createHarness();
+    gateway.sendMessage.mockImplementation(async (_tabId, message) => {
+      if (message.action === "ping") return { success: true };
+      if (message.action === "getDynamicUrl") {
+        return { error: "Dynamic URL was not found before timeout" };
+      }
+      return { success: true };
+    });
+
+    await expect(client.ensureSession()).rejects.toMatchObject({ code: ErrorCode.AUTH_REQUIRED });
+    expect(gateway.createWindow).toHaveBeenCalledWith({
+      url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets",
+      focused: true
+    });
   });
 
   it.each([426, 429, 501])("normalizes HTTP %s as rate limiting", async status => {

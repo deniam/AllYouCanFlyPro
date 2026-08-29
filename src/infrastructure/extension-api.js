@@ -50,6 +50,24 @@ export function createExtensionGateway(api = globalThis.chrome ?? globalThis.bro
     return callbackCall(callback => api.tabs.create(createProperties, callback));
   }
 
+  async function updateTab(tabId, updateProperties) {
+    requireApi("tabs.update", api?.tabs?.update);
+    if (api.tabs.update.length < 3) return api.tabs.update(tabId, updateProperties);
+    return callbackCall(callback => api.tabs.update(tabId, updateProperties, callback));
+  }
+
+  async function createWindow(createData) {
+    requireApi("windows.create", api?.windows?.create);
+    if (api.windows.create.length < 2) return api.windows.create(createData);
+    return callbackCall(callback => api.windows.create(createData, callback));
+  }
+
+  async function focusWindow(windowId) {
+    requireApi("windows.update", api?.windows?.update);
+    if (api.windows.update.length < 3) return api.windows.update(windowId, { focused: true });
+    return callbackCall(callback => api.windows.update(windowId, { focused: true }, callback));
+  }
+
   async function reloadTab(tabId) {
     requireApi("tabs.reload", api?.tabs?.reload);
     if (api.tabs.reload.length < 3) return api.tabs.reload(tabId, {});
@@ -113,6 +131,9 @@ export function createExtensionGateway(api = globalThis.chrome ?? globalThis.bro
   return Object.freeze({
     queryTabs,
     createTab,
+    updateTab,
+    createWindow,
+    focusWindow,
     reloadTab,
     sendMessage,
     waitForTabComplete,

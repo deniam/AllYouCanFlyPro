@@ -759,6 +759,7 @@ import { createConnectionsSearch } from './domain/search/connections.js';
     const originalOrigins = originInputs.map(value => resolveAirport(value)).flat();
     const returnDates = returnInputRaw.split(",").map(value => value.trim()).filter(Boolean);
     let wasCancelled = false;
+    let searchFailed = false;
 
     try {
       suppressDisplay = tripType === "return";
@@ -790,13 +791,15 @@ import { createConnectionsSearch } from './domain/search/connections.js';
         wasCancelled = true;
         debugLogger("Search cancelled.");
       } else {
+        searchFailed = true;
         const resultsList = document.querySelector(".route-list");
         resultsList.textContent = `Error: ${error.message}`;
+        if (error?.code === ErrorCode.AUTH_REQUIRED) showNotification(error.message);
         console.error("Search error:", error);
       }
     } finally {
       suppressDisplay = false;
-      if (!wasCancelled && appState.results.length === 0 && tripType === "oneway") {
+      if (!wasCancelled && !searchFailed && appState.results.length === 0 && tripType === "oneway") {
         document.querySelector(".route-list").textContent = "There are no available flights on this route.";
       }
       hideProgress();

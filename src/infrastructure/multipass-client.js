@@ -19,6 +19,8 @@ export function createMultipassClient({
   onPause = () => {},
   maxAttempts = 2
 }) {
+  let authenticationTabId = null;
+
   function readSession() {
     try {
       return JSON.parse(sessionStorage.getItem("wizz_page_data") || "{}");
@@ -55,9 +57,15 @@ export function createMultipassClient({
 
   async function getMultipassTab(signal, { create = true } = {}) {
     let tabs = await gateway.queryTabs({ url: MULTIPASS_PATTERN });
-    let tab = tabs?.[0];
+    let tab = tabs?.find(item => item.id === authenticationTabId) ?? tabs?.[0];
     if (!tab && create) {
-      tab = await gateway.createTab({ url: MULTIPASS_URL, active: false });
+      const createdWindow = await gateway.createWindow({ url: MULTIPASS_URL, focused: true });
+      tab = createdWindow?.tabs?.[0];
+      if (!tab) {
+        tabs = await gateway.queryTabs({ url: MULTIPASS_PATTERN });
+        tab = tabs?.[0];
+      }
+      authenticationTabId = tab?.id ?? null;
     }
     if (!tab) throw new AppError(ErrorCode.TAB_UNAVAILABLE, "No Multipass tab found");
     if (tab.status !== "complete") {
@@ -67,6 +75,23 @@ export function createMultipassClient({
     }
     await ensureContentScript(tab.id, signal);
     return tab;
+  }
+
+  async function showAuthenticationWindow() {
+    const tabs = await gateway.queryTabs({ url: MULTIPASS_PATTERN });
+    const authenticationTab = tabs?.find(tab => tab.id === authenticationTabId);
+    if (authenticationTab) {
+      await gateway.updateTab(authenticationTab.id, { active: true });
+      if (authenticationTab.windowId != null) {
+        await gateway.focusWindow(authenticationTab.windowId);
+      }
+      return authenticationTab;
+    }
+
+    const createdWindow = await gateway.createWindow({ url: MULTIPASS_URL, focused: true });
+    const createdTab = createdWindow?.tabs?.[0];
+    authenticationTabId = createdTab?.id ?? null;
+    return createdTab;
   }
 
   async function ensureSession(signal) {
@@ -82,7 +107,11 @@ export function createMultipassClient({
       action: MessageAction.GET_DYNAMIC_URL
     });
     if (dynamicResponse?.error) {
-      throw new AppError(ErrorCode.AUTH_REQUIRED, dynamicResponse.error, { retryable: true });
+      await showAuthenticationWindow();
+      throw new AppError(
+        ErrorCode.AUTH_REQUIRED,
+        "Please sign in to Multipass in the window that was opened, keep the tab active, and start the search again"
+      );
     }
     if (!dynamicResponse?.dynamicUrl) {
       throw new AppError(ErrorCode.INVALID_RESPONSE, "Dynamic availability URL is missing");
@@ -169,8 +198,12 @@ export function createMultipassClient({
         }
 
         const payload = await response.json();
-        if (!Array.isArray(payload.flightsOutbound)) {
-          throw new AppError(ErrorCode.INVALID_RESPONSE, "flightsOutbound is missing");
+        if (!Array.isArray(payload?.flightsOutbound)) {
+          logger(
+            `No flightsOutbound array for ${segment.origin} → ${segment.destination} on ${segment.date}; treating it as no availability`,
+            payload
+          );
+          return [];
         }
         return payload.flightsOutbound;
       } catch (error) {
