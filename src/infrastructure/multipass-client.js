@@ -59,8 +59,7 @@ export function createMultipassClient({
     let tabs = await gateway.queryTabs({ url: MULTIPASS_PATTERN });
     let tab = tabs?.find(item => item.id === authenticationTabId) ?? tabs?.[0];
     if (!tab && create) {
-      const createdWindow = await gateway.createWindow({ url: MULTIPASS_URL, focused: true });
-      tab = createdWindow?.tabs?.[0];
+      tab = await gateway.createTab({ url: MULTIPASS_URL, active: true });
       if (!tab) {
         tabs = await gateway.queryTabs({ url: MULTIPASS_PATTERN });
         tab = tabs?.[0];
@@ -77,19 +76,15 @@ export function createMultipassClient({
     return tab;
   }
 
-  async function showAuthenticationWindow() {
+  async function showAuthenticationTab() {
     const tabs = await gateway.queryTabs({ url: MULTIPASS_PATTERN });
     const authenticationTab = tabs?.find(tab => tab.id === authenticationTabId);
     if (authenticationTab) {
       await gateway.updateTab(authenticationTab.id, { active: true });
-      if (authenticationTab.windowId != null) {
-        await gateway.focusWindow(authenticationTab.windowId);
-      }
       return authenticationTab;
     }
 
-    const createdWindow = await gateway.createWindow({ url: MULTIPASS_URL, focused: true });
-    const createdTab = createdWindow?.tabs?.[0];
+    const createdTab = await gateway.createTab({ url: MULTIPASS_URL, active: true });
     authenticationTabId = createdTab?.id ?? null;
     return createdTab;
   }
@@ -107,10 +102,10 @@ export function createMultipassClient({
       action: MessageAction.GET_DYNAMIC_URL
     });
     if (dynamicResponse?.error) {
-      await showAuthenticationWindow();
+      await showAuthenticationTab();
       throw new AppError(
         ErrorCode.AUTH_REQUIRED,
-        "Please sign in to Multipass in the window that was opened, keep the tab active, and start the search again"
+        "Please sign in to Multipass in the tab that was opened, keep the tab active, and start the search again"
       );
     }
     if (!dynamicResponse?.dynamicUrl) {

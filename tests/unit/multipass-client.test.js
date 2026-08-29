@@ -153,7 +153,7 @@ describe("MultipassClient", () => {
     expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
   });
 
-  it("opens Multipass in a focused window when no Multipass tab exists", async () => {
+  it("opens Multipass in an active tab when no Multipass tab exists", async () => {
     const { client, gateway } = createHarness();
     gateway.queryTabs
       .mockResolvedValueOnce([])
@@ -162,13 +162,13 @@ describe("MultipassClient", () => {
     await expect(client.ensureSession()).resolves.toMatchObject({
       dynamicUrl: "https://example.test/availability/id"
     });
-    expect(gateway.createWindow).toHaveBeenCalledWith({
+    expect(gateway.createTab).toHaveBeenCalledWith({
       url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets",
-      focused: true
+      active: true
     });
   });
 
-  it("opens a focused authentication window when session discovery times out", async () => {
+  it("opens an active authentication tab when session discovery times out", async () => {
     const { client, gateway } = createHarness();
     gateway.sendMessage.mockImplementation(async (_tabId, message) => {
       if (message.action === "ping") return { success: true };
@@ -179,9 +179,9 @@ describe("MultipassClient", () => {
     });
 
     await expect(client.ensureSession()).rejects.toMatchObject({ code: ErrorCode.AUTH_REQUIRED });
-    expect(gateway.createWindow).toHaveBeenCalledWith({
+    expect(gateway.createTab).toHaveBeenCalledWith({
       url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets",
-      focused: true
+      active: true
     });
   });
 
