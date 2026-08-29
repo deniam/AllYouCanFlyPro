@@ -1,4 +1,3 @@
-import { routesData } from './data/routes.js';
 import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames } from './data/airports.js';
 import { createRouteCatalog } from './domain/route-catalog.js';
 import { getDatabase } from './infrastructure/database.js';
@@ -7,6 +6,7 @@ import { createRequestScheduler } from './infrastructure/request-throttler.js';
 import { appState } from './app/state.js';
 import { createSettingsRepository } from './infrastructure/settings-repository.js';
 import { createExtensionGateway } from './infrastructure/extension-api.js';
+import { loadRoutesDataset } from './infrastructure/routes-data-repository.js';
 import { ErrorCode } from './infrastructure/errors.js';
 import { downloadBlob } from './ui/dom.js';
 import { createNotifier } from './ui/notifications.js';
@@ -34,6 +34,14 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
 // ----------------------- Global Settings -----------------------
   const settingsRepository = createSettingsRepository(localStorage);
   const extensionGateway = createExtensionGateway();
+  const loadedRoutesDataset = await loadRoutesDataset({
+    storageGet: key => extensionGateway.storageGet(key),
+    storageSet: value => extensionGateway.storageSet(value),
+    storageGetBytesInUse: key => extensionGateway.storageGetBytesInUse(key),
+    fallbackLoader: async () => (await import('./data/routes.js')).routesData,
+    logger: (...args) => console.warn('[AYCF routes]', ...args)
+  });
+  const routesData = loadedRoutesDataset.routes;
   const initialSettings = settingsRepository.load();
   // Throttle and caching parameters (loaded from localStorage if available)
   let debug = initialSettings.debugMode;
@@ -90,8 +98,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   }
 }
 
-    // IndexedDB is used only for the API response cache. Static routes stay in
-    // the packaged module and are indexed once in memory.
+    // IndexedDB is used only for API response caching. The selected route
+    // dataset (remote cache or packaged fallback) is indexed once in memory.
     const db = getDatabase();
     const flightCache = createFlightCache(db, () => CACHE_LIFETIME);
     const routeCatalog = createRouteCatalog(routesData);

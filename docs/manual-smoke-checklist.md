@@ -6,7 +6,10 @@ Record browser/device version, installation type, date, tester and result for ev
 
 - [ ] Clean install opens the extension page from the toolbar action.
 - [ ] Upgrade over 3.5.0 preserves settings, custom groups and usable cache entries.
-- [ ] Static routes are not copied to IndexedDB during startup.
+- [ ] A changed Pages manifest downloads and applies the validated remote routes dataset.
+- [ ] An unchanged manifest reuses the single `chrome.storage.local` dataset without downloading `routes.json`.
+- [ ] Offline startup uses the last valid cache; a clean offline install uses the packaged fallback.
+- [ ] Invalid JSON, checksum mismatch and storage quota failure preserve the last valid dataset.
 - [ ] Reopening the page does not duplicate listeners or UI components.
 
 ## Multipass tab lifecycle

@@ -34,12 +34,12 @@ describe("settings repository", () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 
-  it("stores and clamps the maximum request concurrency", () => {
+  it("stores request concurrency without an upper limit", () => {
     const repository = createSettingsRepository(memoryStorage());
     expect(repository.load().maxConcurrentRequests).toBe(3);
     expect(repository.update({ maxConcurrentRequests: 2 }).maxConcurrentRequests).toBe(2);
     expect(repository.update({ maxConcurrentRequests: 5 }).maxConcurrentRequests).toBe(5);
-    expect(repository.update({ maxConcurrentRequests: 99 }).maxConcurrentRequests).toBe(5);
+    expect(repository.update({ maxConcurrentRequests: 99 }).maxConcurrentRequests).toBe(99);
     expect(repository.update({ maxConcurrentRequests: 0 }).maxConcurrentRequests).toBe(1);
   });
 

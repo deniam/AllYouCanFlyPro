@@ -34,11 +34,17 @@ describe("extension gateway", () => {
     const api = {
       runtime: { getManifest: () => ({ version: "3.5.0" }) },
       tabs: { query: vi.fn(async () => [{ id: 1, status: "complete" }]) },
-      storage: { local: { get: vi.fn(async () => ({ ready: true })) } }
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ ready: true })),
+          getBytesInUse: vi.fn(async () => 1234)
+        }
+      }
     };
     const gateway = createExtensionGateway(api);
     await expect(gateway.queryTabs({})).resolves.toHaveLength(1);
     await expect(gateway.storageGet("ready")).resolves.toEqual({ ready: true });
+    await expect(gateway.storageGetBytesInUse("ready")).resolves.toBe(1234);
     expect(gateway.getManifestVersion()).toBe("3.5.0");
   });
 

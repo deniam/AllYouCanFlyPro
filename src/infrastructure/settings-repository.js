@@ -20,7 +20,7 @@ const SCHEMA = Object.freeze({
   connectionRadius: { type: "number", min: 0, max: 2000 },
   maxRequestsInRow: { type: "number", min: 1, max: 10000 },
   pauseDurationSeconds: { type: "number", min: 0, max: 3600 },
-  maxConcurrentRequests: { type: "number", min: 1, max: 5 },
+  maxConcurrentRequests: { type: "number", min: 1 },
   cacheLifetimeHours: { type: "number", min: 0.1, max: 720 },
   debugMode: { type: "boolean" },
   themeMode: { type: "enum", values: ["auto", "light", "dark"] }
@@ -35,7 +35,8 @@ function parseValue(key, value) {
   if (rule.type === "enum") return rule.values.includes(value) ? value : SETTINGS_DEFAULTS[key];
   const number = Number(value);
   if (!Number.isFinite(number)) return SETTINGS_DEFAULTS[key];
-  return Math.min(rule.max, Math.max(rule.min, number));
+  const minimum = Math.max(rule.min, number);
+  return rule.max === undefined ? minimum : Math.min(rule.max, minimum);
 }
 
 export function createSettingsRepository(storage = localStorage) {

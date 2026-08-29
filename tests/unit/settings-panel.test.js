@@ -14,22 +14,22 @@ function fields(value) {
 }
 
 describe("maximum concurrent request validation", () => {
-  it("accepts five concurrent requests", () => {
-    const { input, error } = fields(5);
+  it("accepts more than five concurrent requests", () => {
+    const { input, error } = fields(99);
 
-    expect(validateMaxConcurrentRequestsInput(input, error)).toBe(5);
+    expect(validateMaxConcurrentRequestsInput(input, error)).toBe(99);
     expect(input.getAttribute("aria-invalid")).toBe("false");
     expect(input.classList.contains("request-setting-invalid")).toBe(false);
     expect(error.classList.contains("hidden")).toBe(true);
   });
 
-  it("marks six or more requests red and explains the active limit", () => {
-    const { input, error } = fields(6);
+  it("marks values below one red", () => {
+    const { input, error } = fields(0);
 
-    expect(validateMaxConcurrentRequestsInput(input, error)).toBe(5);
+    expect(validateMaxConcurrentRequestsInput(input, error)).toBe(1);
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(input.classList.contains("request-setting-invalid")).toBe(true);
     expect(error.classList.contains("hidden")).toBe(false);
-    expect(error.textContent).toContain("Maximum 5");
+    expect(error.textContent).toContain("at least 1");
   });
 });

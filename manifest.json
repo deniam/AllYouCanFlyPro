@@ -9,7 +9,8 @@
       "scripting"
     ],
     "host_permissions": [
-      "https://multipass.wizzair.com/*"
+      "https://multipass.wizzair.com/*",
+      "https://deniam.github.io/*"
     ],
     "action": {
       "default_icon": {

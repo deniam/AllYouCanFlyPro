@@ -160,6 +160,13 @@ export function createExtensionGateway(api = globalThis.chrome ?? globalThis.bro
       else await callbackCall(callback => api.storage.local.remove(key, callback));
       return true;
     },
+    async storageGetBytesInUse(key = null) {
+      if (!api?.storage?.local?.getBytesInUse) return null;
+      if (api.storage.local.getBytesInUse.length < 2) {
+        return api.storage.local.getBytesInUse(key);
+      }
+      return callbackCall(callback => api.storage.local.getBytesInUse(key, callback));
+    },
     async injectContentScript(tabId) {
       requireApi("scripting.executeScript", api?.scripting?.executeScript);
       return api.scripting.executeScript({

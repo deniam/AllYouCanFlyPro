@@ -1,6 +1,6 @@
 # All You Can Fly Pro
 
-All You Can Fly Pro is a Manifest V3 browser extension for Wizz Air All You Can Fly subscribers. It searches direct and connecting availability, supports multiple airports and dates, round trips, custom airport groups, CSV export, and continuation to booking.
+All You Can Fly Pro is a browser extension for Wizz Air All You Can Fly subscribers. It searches direct and connecting availability, supports multiple airports and dates, round trips, custom airport groups, CSV export, and continuation to booking.
 
 The primary target is desktop Google Chrome. The unpacked extension is also tested manually in Orion on iPhone and iPad. Orion's WebExtensions support is incomplete, so runtime dependencies are packaged locally and platform access is isolated behind compatibility adapters.
 
@@ -30,7 +30,7 @@ Important boundaries:
 - Domain modules do not access the DOM, `chrome.*`, storage, or IndexedDB.
 - Extension-page platform calls go through `extension-api.js`.
 - `background.js` and `content.js` remain classic scripts for Orion compatibility.
-- Static routes are indexed in memory and are not copied into IndexedDB at startup.
+- Routes are loaded from a validated GitHub Pages dataset, cached in `chrome.storage.local`, and indexed once in memory. The packaged dataset is a lazy offline fallback.
 - IndexedDB `FlightSearchCache/cache` and existing localStorage keys remain backward compatible with 3.5.0.
 - Search cancellation uses `AbortController`; throttle, retry, tab waits and session discovery have finite lifetimes.
 
@@ -61,11 +61,11 @@ For Orion on iOS/iPadOS, enable extension support in Orion, import the unpacked/
 
 ## Updating route data
 
-1. Replace the exported dataset in `src/data/routes.js` without changing its `routesData` export.
-2. Do not write the dataset to IndexedDB or introduce a remote runtime fetch.
-3. Run `npm run check`.
-4. Test airport resolution, date filtering, Anywhere and connecting routes.
-5. Record the covered schedule range in the changelog data in `src/ui/changelog.js`.
+1. Run the sibling `Wizz Air Routes And Dates Scanner` project with the required `--from`/`--to` range.
+2. Review its topology and validation report, then rerun with `--publish` to update the `routes-data` GitHub Pages branch.
+3. The extension downloads a changed dataset manifest on startup, validates the JSON and SHA-256, and replaces its single local cache entry.
+4. Update `src/data/routes.js` separately only when refreshing the packaged offline fallback for an application release.
+5. Run `npm run check` and test airport resolution, date filtering, Anywhere, connecting routes, offline cache and packaged fallback behavior.
 
 ## Manual platform matrix
 

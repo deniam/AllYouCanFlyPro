@@ -45,10 +45,10 @@ describe("extension structure", () => {
     expect(values).not.toContain("airportChange");
   });
 
-  it("exposes the bounded request-concurrency setting", () => {
+  it("exposes the request-concurrency setting without an upper bound", () => {
     const input = document.getElementById("max-concurrent-requests");
     expect(input?.getAttribute("min")).toBe("1");
-    expect(input?.getAttribute("max")).toBe("5");
+    expect(input?.getAttribute("max")).toBeNull();
     expect(input?.getAttribute("value")).toBe("3");
     expect(document.getElementById("max-concurrent-requests-error")).not.toBeNull();
     expect(document.getElementById("requests-frequency")).toBeNull();

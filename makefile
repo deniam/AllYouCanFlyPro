@@ -1,4 +1,6 @@
-ZIP_NAME := extension.zip
+VERSION := $(shell node -e "console.log(JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')).version)")
+ZIP_VERSION := $(subst .,_,$(VERSION))
+ZIP_NAME := AllYouCanFlyPro_ver_$(ZIP_VERSION).zip
 RUNTIME_PATHS := manifest.json index.html assets/css assets/emojis assets/icons assets/twemoji-init.js src LICENSE README.md
 
 .PHONY: all verify package clean
@@ -13,4 +15,4 @@ package: verify clean
 		-x "*/.DS_Store" "src/libs/*.map"
 
 clean:
-	rm -f "$(ZIP_NAME)"
+	rm -f "$(ZIP_NAME)" extension.zip

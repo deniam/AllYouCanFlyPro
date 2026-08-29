@@ -2,17 +2,14 @@ const mountedButtons = new WeakSet();
 
 export function validateMaxConcurrentRequestsInput(input, error) {
   const value = Number(input.value);
-  const tooHigh = Number.isFinite(value) && value >= 6;
-  const invalid = !Number.isFinite(value) || value < 1 || tooHigh;
+  const invalid = !Number.isFinite(value) || value < 1;
 
   input.classList.toggle("request-setting-invalid", invalid);
   input.setAttribute("aria-invalid", String(invalid));
   error.classList.toggle("hidden", !invalid);
-  error.textContent = tooHigh
-    ? "Maximum 5 simultaneous requests. The active limit remains 5."
-    : "Choose a value from 1 to 5.";
+  error.textContent = "Choose at least 1 simultaneous request.";
 
-  return Number.isFinite(value) ? Math.max(1, Math.min(5, value)) : 3;
+  return Number.isFinite(value) ? Math.max(1, value) : 3;
 }
 
 export function mountSettingsPanel({ settings, animate = () => {} }) {

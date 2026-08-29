@@ -44,7 +44,7 @@ describe("request scheduler", () => {
     const gates = Array.from({ length: 7 }, deferred);
     let active = 0;
     let maximum = 0;
-    const scheduler = createRequestScheduler(() => schedulerSettings({ maxConcurrentRequests: 5 }));
+    const scheduler = createRequestScheduler(() => schedulerSettings({ maxConcurrentRequests: 99 }));
     const requests = gates.map(gate => scheduler.schedule(async () => {
       active += 1;
       maximum = Math.max(maximum, active);
@@ -52,11 +52,11 @@ describe("request scheduler", () => {
       active -= 1;
     }));
 
-    await vi.waitFor(() => expect(scheduler.getState().activeRequests).toBe(5));
-    expect(maximum).toBe(5);
+    await vi.waitFor(() => expect(scheduler.getState().activeRequests).toBe(7));
+    expect(maximum).toBe(7);
     gates.forEach(gate => gate.resolve());
     await Promise.all(requests);
-    expect(maximum).toBe(5);
+    expect(maximum).toBe(7);
   });
 
   it("starts available slots immediately and applies the batch pause", async () => {
