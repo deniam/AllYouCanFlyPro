@@ -48,7 +48,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   const MAX_LOG_ENTRIES = 1000;
   let CACHE_LIFETIME = initialSettings.cacheLifetimeHours * 60 * 60 * 1000;
   // 4 hours in ms
-  let suppressDisplay = false; // Flag to delay UI updates in certain search types
   let themeController;
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   let AIRPORTS = [];
@@ -517,12 +516,12 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   function appendRouteToDisplay(routeObj) {
     appState.results.push(routeObj);
     appState.defaultResults.push(routeObj);
-    if (!suppressDisplay) {
-      if (appState.tripType === "return") {
-        displayRoundTripResultsAll(appState.results);
-      } else {
-        displayGlobalResults(appState.results);
-      }
+    if (appState.tripType === "return") {
+      // Round-trip results are rendered by runSearch when an inbound match
+      // becomes available. Do not show incomplete outbound-only cards.
+      if (routeObj.returnFlights?.length) displayRoundTripResultsAll(appState.results);
+    } else {
+      displayGlobalResults(appState.results);
     }
   }
     
@@ -800,7 +799,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     let searchFailed = false;
 
     try {
-      suppressDisplay = tripType === "return";
       const results = await runSearch({
         origins,
         destinations,
@@ -814,14 +812,17 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
         searchDirect: ({ origins: from, destinations: to, date, append, skipProgress, preferredReturnDates }) =>
           searchDirectRoutes(from, to, date, append, false, skipProgress, { preferredReturnDates }),
         searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress, preferredReturnDates }) =>
-          searchConnectingRoutes(from, to, date, transfers, append, skipProgress, { preferredReturnDates })
+          searchConnectingRoutes(from, to, date, transfers, append, skipProgress, { preferredReturnDates }),
+        onRoundTripResult: (flight, index) => {
+          if (searchSession.controller.signal.aborted || appState.searchSession !== searchSession) return;
+          resultsRenderer.upsertRoundTrip(flight, index);
+        }
       }, searchSession.controller.signal, progress => {
         updateProgress(progress.current, progress.total, progress.message);
       });
 
       appState.results = results;
       appState.defaultResults = [...results];
-      suppressDisplay = false;
       if (tripType === "return") displayRoundTripResultsAll(results);
       else displayGlobalResults(results);
       debugLogger(`Search complete. Valid results: ${results.length}`);
@@ -837,7 +838,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
         console.error("Search error:", error);
       }
     } finally {
-      suppressDisplay = false;
       if (!wasCancelled && !searchFailed && appState.results.length === 0 && tripType === "oneway") {
         document.querySelector(".route-list").textContent = "There are no available flights on this route.";
       }

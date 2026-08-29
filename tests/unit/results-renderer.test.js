@@ -107,6 +107,36 @@ describe("results renderer", () => {
     expect(returnList.classList.contains("hidden")).toBe(false);
   });
 
+  it("updates one streamed round-trip group without losing its expanded state", () => {
+    const { list, renderer, total } = setupRenderer();
+    const inbound = segment({
+      key: "return-key",
+      departureStationCode: "SSH",
+      departureStationText: "Sharm El Sheikh International Airport",
+      arrivalStationCode: "PMO",
+      arrivalStationText: "Palermo Falcone Borsellino Airport",
+      calculatedDuration: {
+        hours: 3,
+        minutes: 20,
+        totalMinutes: 200,
+        departureDate: new Date("2026-09-01T21:35:00Z"),
+        arrivalDate: new Date("2026-09-02T00:55:00Z")
+      }
+    });
+    const secondInbound = { ...inbound, key: "return-key-2" };
+    const outbound = segment({ returnFlights: [inbound] });
+
+    renderer.upsertRoundTrip(outbound, 3);
+    list.querySelector(".return-toggle").click();
+    renderer.upsertRoundTrip({ ...outbound, returnFlights: [inbound, secondInbound] }, 3);
+
+    expect(list.querySelectorAll(".flight-trip-group")).toHaveLength(1);
+    expect(list.querySelector(".return-toggle").textContent).toContain("2 inbound flights found");
+    expect(list.querySelector(".return-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(list.querySelector(".flight-return-list").classList.contains("hidden")).toBe(false);
+    expect(total.textContent).toBe("Total results: 1");
+  });
+
   it("uses the compact layout for every segment of a connecting route", () => {
     const { list, renderer } = setupRenderer();
     const first = segment();

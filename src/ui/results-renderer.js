@@ -47,6 +47,7 @@ export function createResultsRenderer({
 }) {
   let sortOption = "default";
   let tooltipListenerBound = false;
+  let roundTripListenerBound = false;
 
   function segmentHtml(segment, label = "", extraInfo = "") {
     const departureCode = segment.departureStationCode ?? segment.departureStation ?? "";
@@ -138,11 +139,42 @@ export function createResultsRenderer({
     });
   }
 
+  function bindRoundTripToggles() {
+    if (roundTripListenerBound) return;
+    roundTripListenerBound = true;
+    list.addEventListener("click", event => {
+      const button = event.target.closest(".return-toggle");
+      if (!button) return;
+      const expanded = button.getAttribute("aria-expanded") === "true";
+      button.setAttribute("aria-expanded", String(!expanded));
+      document.getElementById(button.getAttribute("aria-controls"))?.classList.toggle("hidden", expanded);
+    });
+  }
+
   function prepare(results) {
     toolbar.classList.remove("hidden");
     total.textContent = `Total results: ${results.length}`;
     list.replaceChildren();
     bindTooltips();
+  }
+
+  function roundTripGroupHtml(outbound, index) {
+    const returnsId = `return-list-${index}`;
+    const count = outbound.returnFlights?.length ?? 0;
+    const returns = outbound.returnFlights?.map((flight, returnIndex) => {
+      const minutes = Math.max(0, Math.round((flight.calculatedDuration.departureDate
+        - outbound.calculatedDuration.arrivalDate) / 60000));
+      return routeHtml(flight, `Inbound Flight ${returnIndex + 1}`, `Stopover: ${Math.floor(minutes / 60)}h ${minutes % 60}m`);
+    }).join("") ?? "";
+    return `<div class="flight-trip-group" data-roundtrip-index="${index}">
+      ${routeHtml(outbound, "Outbound Flight")}
+      ${count ? `<div class="flight-return-summary"><button type="button" class="return-toggle" aria-expanded="false" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
+      <div id="${returnsId}" class="flight-return-list hidden">${returns}</div>
+    </div>`;
+  }
+
+  function updateRoundTripTotal() {
+    total.textContent = `Total results: ${list.querySelectorAll(".flight-trip-group").length}`;
   }
 
   return Object.freeze({
@@ -158,25 +190,30 @@ export function createResultsRenderer({
     displayRoundTrips(outbounds) {
       sortResultsArray(outbounds, sortOption, airportName);
       prepare(outbounds);
-      outbounds.forEach((outbound, index) => {
-        const returnsId = `return-list-${index}`;
-        const count = outbound.returnFlights?.length ?? 0;
-        const returns = outbound.returnFlights?.map((flight, returnIndex) => {
-          const minutes = Math.max(0, Math.round((flight.calculatedDuration.departureDate
-            - outbound.calculatedDuration.arrivalDate) / 60000));
-          return routeHtml(flight, `Inbound Flight ${returnIndex + 1}`, `Stopover: ${Math.floor(minutes / 60)}h ${minutes % 60}m`);
-        }).join("") ?? "";
-        list.insertAdjacentHTML("beforeend", `<div class="flight-trip-group">
-          ${routeHtml(outbound, "Outbound Flight")}
-          ${count ? `<div class="flight-return-summary"><button type="button" class="return-toggle" aria-expanded="false" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
-          <div id="${returnsId}" class="flight-return-list hidden">${returns}</div>
-        </div>`);
-      });
-      list.querySelectorAll(".return-toggle").forEach(button => button.addEventListener("click", () => {
-        const expanded = button.getAttribute("aria-expanded") === "true";
-        button.setAttribute("aria-expanded", String(!expanded));
-        document.getElementById(button.getAttribute("aria-controls"))?.classList.toggle("hidden", expanded);
-      }));
+      bindRoundTripToggles();
+      outbounds.forEach((outbound, index) => list.insertAdjacentHTML("beforeend", roundTripGroupHtml(outbound, index)));
+    },
+    upsertRoundTrip(outbound, index) {
+      bindRoundTripToggles();
+      const selector = `.flight-trip-group[data-roundtrip-index="${index}"]`;
+      const existing = list.querySelector(selector);
+      if (existing) {
+        const expanded = existing.querySelector(".return-toggle")?.getAttribute("aria-expanded") === "true";
+        existing.outerHTML = roundTripGroupHtml(outbound, index);
+        if (expanded) {
+          const replacement = list.querySelector(selector);
+          const toggle = replacement?.querySelector(".return-toggle");
+          toggle?.setAttribute("aria-expanded", "true");
+          replacement?.querySelector(".flight-return-list")?.classList.remove("hidden");
+        }
+      } else {
+        const groups = [...list.querySelectorAll(".flight-trip-group")];
+        const next = groups.find(group => Number(group.dataset.roundtripIndex) > index);
+        if (next) next.insertAdjacentHTML("beforebegin", roundTripGroupHtml(outbound, index));
+        else list.insertAdjacentHTML("beforeend", roundTripGroupHtml(outbound, index));
+      }
+      toolbar.classList.remove("hidden");
+      updateRoundTripTotal();
     }
   });
 }

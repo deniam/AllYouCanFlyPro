@@ -34,6 +34,7 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
     minRoundTripGapMinutes = 360,
     maxConcurrentRequests = 1
   } = request;
+  const onRoundTripResult = dependencies.onRoundTripResult ?? (() => {});
 
   const outbound = [];
   for (const date of departureDates) {
@@ -58,6 +59,10 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
     return `${route}|${departure instanceof Date ? departure.getTime() : departure}`;
   });
   if (tripType === "oneway") return uniqueOutbound;
+
+  uniqueOutbound.forEach(flight => {
+    flight.returnFlights = [];
+  });
 
   const originAnywhere = originalOrigins.length === 1 && originalOrigins[0] === "ANY";
   const queries = new Map();
@@ -91,6 +96,37 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
         false,
         true
       ) ?? [];
+      throwIfAborted(signal);
+
+      // Process each completed inbound response immediately. The ordered map
+      // still preserves the final result order, while this side effect lets
+      // the UI show valid round trips as soon as they are discovered.
+      for (const [index, outbound] of uniqueOutbound.entries()) {
+        const matchingFlights = flights.filter(candidate => {
+          const inboundOrigin = code(candidate.departureStation);
+          const inboundDestination = code(candidate.arrivalStation);
+          const outboundOrigin = code(outbound.departureStation);
+          const outboundDestination = code(outbound.arrivalStation);
+          const stationsMatch = originAnywhere
+            ? destinations.includes(inboundOrigin) && inboundDestination === outboundOrigin
+            : inboundOrigin === outboundDestination && originalOrigins.includes(inboundDestination);
+          const outboundArrival = outbound.calculatedDuration?.arrivalDate;
+          const inboundDeparture = candidate.calculatedDuration?.departureDate;
+          return stationsMatch
+            && outboundArrival instanceof Date
+            && inboundDeparture instanceof Date
+            && minutesBetween(outboundArrival, inboundDeparture) >= minRoundTripGapMinutes;
+        });
+        const existingKeys = new Set(outbound.returnFlights.map(defaultFlightKey));
+        const newFlights = deduplicateFlights(matchingFlights)
+          .filter(candidate => !existingKeys.has(defaultFlightKey(candidate)));
+        if (!newFlights.length) continue;
+
+        const wasVisible = outbound.returnFlights.length > 0;
+        outbound.returnFlights.push(...newFlights);
+        onRoundTripResult(outbound, index, { isUpdate: wasVisible });
+      }
+
       processed += 1;
       onProgress({
         current: processed,
