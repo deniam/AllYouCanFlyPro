@@ -86,7 +86,8 @@ export function renderCalendarMonth(
     if (disabled) cell.classList.add("bg-gray-200", "cursor-not-allowed", "text-gray-500");
     else {
       cell.classList.add("font-bold", "cursor-pointer");
-      if (date.getDay() === 0 || date.getDay() === 6) cell.classList.add("bg-pink-50");
+      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+      if (isWeekend && !selectedDates.has(dateText)) cell.classList.add("bg-pink-50");
       if (selectedDates.has(dateText)) cell.classList.add("bg-blue-300");
       cell.addEventListener("click", event => {
         event.stopPropagation();

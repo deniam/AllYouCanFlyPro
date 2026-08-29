@@ -40,7 +40,7 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
       { origins, destinations, date, maxTransfers },
       dependencies,
       signal,
-      false
+      true
     );
     outbound.push(...(flights ?? []));
   }
