@@ -50,13 +50,14 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   let debug = initialSettings.debugMode;
   let debugLog = [];
   let originalConsoleWarn = console.warn;
+  let scheduleDebugLogDisplayUpdate = () => {};
     if (debug) {
       console.warn = function(...args) {
         debugLogger('WARN:', ...args);
         originalConsoleWarn.apply(console, args);
       };
     }
-  const MAX_LOG_ENTRIES = 1000;
+  const MAX_LOG_ENTRIES = 500;
   let CACHE_LIFETIME = initialSettings.cacheLifetimeHours * 60 * 60 * 1000;
   // 4 hours in ms
   let themeController;
@@ -341,6 +342,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       if (debugLog.length > MAX_LOG_ENTRIES) {
           debugLog.shift();
       }
+      scheduleDebugLogDisplayUpdate();
   }
 
   // ----------------------- UI Helper Functions -----------------------
@@ -1412,26 +1414,37 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       });
 
       function updateDebugLogDisplay() {
-        if (debugLogTextarea) {
-        const isScrolledToBottom = 
-          debugLogTextarea.scrollTop + debugLogTextarea.clientHeight >= 
-          debugLogTextarea.scrollHeight - 1;
+        if (!debugLogTextarea) return;
+        const nextValue = debugLog.join('\n');
+        if (debugLogTextarea.value === nextValue) return;
 
+        const isScrolledToBottom =
+          debugLogTextarea.scrollTop + debugLogTextarea.clientHeight >=
+          debugLogTextarea.scrollHeight - 1;
         const oldScrollTop = debugLogTextarea.scrollTop;
-        
-        debugLogTextarea.value = debugLog.join('\n');
-        
+
+        debugLogTextarea.value = nextValue;
+
         if (!isScrolledToBottom) {
           debugLogTextarea.scrollTop = oldScrollTop;
         } else {
           debugLogTextarea.scrollTop = debugLogTextarea.scrollHeight;
         }
       }
-      }
+
+      let debugDisplayFrame = null;
+      scheduleDebugLogDisplayUpdate = () => {
+        if (debugDisplayFrame !== null) return;
+        const schedule = window.requestAnimationFrame
+          ? callback => window.requestAnimationFrame(callback)
+          : callback => setTimeout(callback, 0);
+        debugDisplayFrame = schedule(() => {
+          debugDisplayFrame = null;
+          updateDebugLogDisplay();
+        });
+      };
 
       debugLog = [];
-
-      setInterval(updateDebugLogDisplay, 500);
 
       mountChangelog({
         modal: document.getElementById("changelog-modal"),
