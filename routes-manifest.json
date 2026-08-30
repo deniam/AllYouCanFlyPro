@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "2026-08-30T11:09:31.919Z",
+  "generatedAt": "2026-08-30T11:09:31.919Z",
+  "apiVersion": "29.14.0",
+  "scanRange": {
+    "from": "2026-11-01",
+    "to": "2027-01-01"
+  },
+  "routeCount": 186,
+  "connectionCount": 2327,
+  "flightDateCount": 132989,
+  "serializedBytes": 1997677,
+  "sha256": "b4caa32ebac7517f61c67dd935d5c85a483b2385c0a741d90280b6ea23f33557"
+}
