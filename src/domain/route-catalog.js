@@ -4,12 +4,17 @@ function stationCode(station) {
   return typeof station === "object" ? station?.id : station;
 }
 
+function routeKey(origin, destination) {
+  return `${String(origin ?? "").toUpperCase()}-${String(destination ?? "").toUpperCase()}`;
+}
+
 /**
  * Builds all static route and airport indexes once. The returned facade does not
  * mutate the packaged route dataset.
  * @param {Route[]} routes
  */
-export function createRouteCatalog(routes) {
+export function createRouteCatalog(routes, { excludedRoutes = [] } = {}) {
+  const excluded = new Set(excludedRoutes.map(key => String(key).toUpperCase()));
   const byOrigin = new Map();
   const byOriginAndDestination = new Map();
   const originsByDestination = new Map();
@@ -47,7 +52,29 @@ export function createRouteCatalog(routes) {
 
   for (const [key, value] of byOrigin) byOrigin.set(key, Object.freeze([...value]));
 
+  function isRouteExcluded(origin, destination) {
+    return excluded.has(routeKey(origin, destination));
+  }
+
+  function activeRoute(route) {
+    const origin = stationCode(route.departureStation);
+    const arrivalStations = (route.arrivalStations ?? [])
+      .filter(arrival => !isRouteExcluded(origin, stationCode(arrival)));
+    if (!arrivalStations.length) return null;
+    if (arrivalStations.length === (route.arrivalStations ?? []).length) return route;
+    return { ...route, arrivalStations };
+  }
+
+  function activeRoutesFrom(origin) {
+    return Object.freeze(
+      (byOrigin.get(String(origin).toUpperCase()) ?? [])
+        .map(activeRoute)
+        .filter(Boolean)
+    );
+  }
+
   function getArrival(origin, destination) {
+    if (isRouteExcluded(origin, destination)) return null;
     const route = byOriginAndDestination.get(origin)?.get(destination);
     if (!route) return null;
     return route.arrivalStations.find(item => stationCode(item) === destination) ?? null;
@@ -60,9 +87,10 @@ export function createRouteCatalog(routes) {
       return airportsByCode.get(String(code).toUpperCase()) ?? null;
     },
     getRoutesFrom(origin) {
-      return byOrigin.get(String(origin).toUpperCase()) ?? Object.freeze([]);
+      return activeRoutesFrom(origin);
     },
     getRoute(origin, destination) {
+      if (isRouteExcluded(origin, destination)) return null;
       return byOriginAndDestination
         .get(String(origin).toUpperCase())
         ?.get(String(destination).toUpperCase()) ?? null;
@@ -70,12 +98,24 @@ export function createRouteCatalog(routes) {
     getDestinations(origin) {
       return Object.freeze([
         ...(byOriginAndDestination.get(String(origin).toUpperCase())?.keys() ?? [])
-      ]);
+      ].filter(destination => !isRouteExcluded(origin, destination)));
+    },
+    getActiveRoutes() {
+      return Object.freeze(routes.map(activeRoute).filter(Boolean));
+    },
+    isRouteExcluded(origin, destination) {
+      return isRouteExcluded(origin, destination);
+    },
+    excludeRoute(origin, destination) {
+      const key = routeKey(origin, destination);
+      if (excluded.has(key)) return false;
+      excluded.add(key);
+      return true;
     },
     getOrigins(destination) {
       return Object.freeze([
         ...(originsByDestination.get(String(destination).toUpperCase()) ?? [])
-      ]);
+      ].filter(origin => !isRouteExcluded(origin, destination)));
     },
     getFlightDates(origin, destination) {
       const arrival = getArrival(

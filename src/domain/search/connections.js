@@ -106,6 +106,7 @@ export function createConnectionsSearch({
   updateProgress,
   fetchDestinations,
   routeCatalog,
+  isRouteExcluded = () => false,
   airportLookup,
   appendRouteToDisplay,
   getSettings,
@@ -119,6 +120,10 @@ export function createConnectionsSearch({
     
     const segOrigin = candidate[index];
     const segDestination = candidate[index + 1];
+    if (isRouteExcluded(segOrigin, segDestination)) {
+      debugLogger(`Skipping excluded route ${segOrigin} -> ${segDestination}`);
+      return [];
+    }
     let validChains = [];
     
     debugLogger(`--> Processing segment: ${segOrigin} -> ${segDestination}`);
@@ -899,6 +904,10 @@ export function createConnectionsSearch({
         const date = addDaysUTC(new Date(`${baseDate}T00:00:00Z`), off).toISOString().slice(0,10);
         if (arr == null) {
           debugLogger(`Bad params to loadFlights(): ${dep}→${arr}`);
+          return [];
+        }
+        if (isRouteExcluded(dep, arr)) {
+          debugLogger(`Skipping excluded route ${dep} → ${arr}`);
           return [];
         }
         let segs = await getCachedResults(`${dep}-${arr}-${date}`);

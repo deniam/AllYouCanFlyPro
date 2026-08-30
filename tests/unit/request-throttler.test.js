@@ -44,7 +44,7 @@ describe("request scheduler", () => {
     const gates = Array.from({ length: 7 }, deferred);
     let active = 0;
     let maximum = 0;
-    const scheduler = createRequestScheduler(() => schedulerSettings({ maxConcurrentRequests: 99 }));
+    const scheduler = createRequestScheduler(() => schedulerSettings({ maxConcurrentRequests: 50 }));
     const requests = gates.map(gate => scheduler.schedule(async () => {
       active += 1;
       maximum = Math.max(maximum, active);

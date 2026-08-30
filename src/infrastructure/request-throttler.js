@@ -18,7 +18,7 @@ export function abortableDelay(milliseconds, signal) {
 }
 
 function configuredConcurrency(settings) {
-  return Math.max(1, Number(settings.maxConcurrentRequests) || 1);
+  return Math.max(1, Math.min(50, Number(settings.maxConcurrentRequests) || 1));
 }
 
 /**

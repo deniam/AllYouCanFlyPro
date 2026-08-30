@@ -314,15 +314,18 @@
                     <div class="grid grid-cols-2 gap-1">
                       <div>
                         <label class="block text-gray-700 font-medium mb-1">Requests per Batch:</label>
-                        <input type="number" id="max-requests" value="50" min="1"
+                        <input type="number" id="max-requests" value="1000" min="1"
                           class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
                       </div>
                       <div>
                         <label class="block text-gray-700 font-medium mb-1">Max Concurrent Requests:</label>
-                        <input type="number" id="max-concurrent-requests" value="3" min="1"
+                        <input type="number" id="max-concurrent-requests" value="15" min="1" max="50"
                           class="w-full bg-gray-100 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#C90076]">
                         <p id="max-concurrent-requests-error" class="hidden mt-1 text-xs text-red-600">
-                          Choose at least 1 simultaneous request.
+                          Choose a value from 1 to 50.
+                        </p>
+                        <p id="max-concurrent-requests-warning" class="hidden mt-1 text-xs text-amber-700">
+                          Warning: increasing this value may cause temporary search restrictions for your account.
                         </p>
                       </div>
                       <div>

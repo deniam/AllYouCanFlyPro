@@ -33,4 +33,22 @@ describe("route catalog", () => {
     expect(dated.isDateAvailable("AAA", "BBB", "2026-09-10")).toBe(true);
     expect(dated.isDateAvailable("AAA", "CCC", "2026-09-10")).toBe(false);
   });
+
+  it("removes excluded routes from active catalog views", () => {
+    const excluded = createRouteCatalog(routesFixture, { excludedRoutes: ["aaa-bbb"] });
+
+    expect(excluded.getRoute("AAA", "BBB")).toBeNull();
+    expect(excluded.getDestinations("AAA")).toEqual(["DDD"]);
+    expect(excluded.getOrigins("BBB")).toEqual([]);
+    expect(excluded.getActiveRoutes()[0].arrivalStations.map(station => station.id)).toEqual(["DDD"]);
+    expect(excluded.isDateAvailable("AAA", "BBB", "2026-08-28")).toBe(false);
+  });
+
+  it("can exclude a route after the catalog is created", () => {
+    const dynamic = createRouteCatalog(routesFixture);
+
+    expect(dynamic.excludeRoute("AAA", "BBB")).toBe(true);
+    expect(dynamic.excludeRoute("AAA", "BBB")).toBe(false);
+    expect(dynamic.getDestinations("AAA")).toEqual(["DDD"]);
+  });
 });

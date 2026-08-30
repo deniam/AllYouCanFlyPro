@@ -16,6 +16,7 @@ export function createDirectSearch({
   appendResult,
   updateProgress,
   getConcurrency = () => 1,
+  isRouteExcluded = () => false,
   logger = () => {}
 }) {
   return async function searchDirectRoutes(
@@ -70,6 +71,7 @@ export function createDirectSearch({
 
     const pairResults = await mapConcurrentOrdered(pairs, getConcurrency(), async pair => {
       if (isCancelled()) return [];
+      if (isRouteExcluded(pair.origin, pair.destination)) return [];
       if (reverse && !allowedReversePairs.has(`${pair.origin}-${pair.destination}`)) return [];
 
       let flights;

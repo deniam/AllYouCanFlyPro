@@ -8,6 +8,7 @@ const MULTIPASS_PATTERN = "https://multipass.wizzair.com/*";
 const SESSION_TTL_MS = 60 * 60 * 1000;
 // The observed availability endpoint uses 400 to represent no matching flights.
 const EMPTY_AVAILABILITY_STATUSES = new Set([400]);
+const MISSING_ROUTE_STATUS = 302;
 const RATE_LIMIT_DELAYS = Object.freeze({ 426: 60000, 429: 40000, 501: 15000 });
 
 export function parseRetryAfter(value, now = Date.now()) {
@@ -24,6 +25,7 @@ export function createMultipassClient({
   cache,
   scheduler,
   logger = () => {},
+  onRouteNotFound = () => {},
   sessionStorage = localStorage,
   fetchImpl = fetch,
   maxAttempts = 2
@@ -183,6 +185,7 @@ export function createMultipassClient({
         const session = await ensureSession(signal);
         const response = await scheduler.schedule(() => fetchImpl(session.dynamicUrl, {
           method: "POST",
+          redirect: "manual",
           headers: { "Content-Type": "application/json", ...(session.headers ?? {}) },
           body: JSON.stringify({
             flightType: "RT",
@@ -195,6 +198,21 @@ export function createMultipassClient({
           signal
         }), signal);
 
+        const isMissingRoute = response.status === MISSING_ROUTE_STATUS
+          // Cross-origin manual redirects can be exposed as an opaque response.
+          || response.type === "opaqueredirect";
+        if (isMissingRoute) {
+          scheduler.recordSuccess();
+          try {
+            onRouteNotFound({ origin: segment.origin, destination: segment.destination });
+          } catch (error) {
+            logger("Unable to persist missing route exclusion", error);
+          }
+          logger(
+            `HTTP ${MISSING_ROUTE_STATUS}: excluding ${segment.origin} → ${segment.destination} from future searches`
+          );
+          return { outbound: [], inbound: null };
+        }
         if (EMPTY_AVAILABILITY_STATUSES.has(response.status)) {
           scheduler.recordSuccess();
           return { outbound: [], inbound: null };

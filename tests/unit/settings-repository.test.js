@@ -25,6 +25,13 @@ describe("settings repository", () => {
     });
   });
 
+  it("uses the updated search settings defaults", () => {
+    const settings = createSettingsRepository(memoryStorage()).load();
+
+    expect(settings.maxRequestsInRow).toBe(1000);
+    expect(settings.maxConcurrentRequests).toBe(15);
+  });
+
   it("clamps invalid numeric values and notifies subscribers", () => {
     const repository = createSettingsRepository(memoryStorage());
     const listener = vi.fn();
@@ -36,10 +43,10 @@ describe("settings repository", () => {
 
   it("stores request concurrency without an upper limit", () => {
     const repository = createSettingsRepository(memoryStorage());
-    expect(repository.load().maxConcurrentRequests).toBe(3);
+    expect(repository.load().maxConcurrentRequests).toBe(15);
     expect(repository.update({ maxConcurrentRequests: 2 }).maxConcurrentRequests).toBe(2);
     expect(repository.update({ maxConcurrentRequests: 5 }).maxConcurrentRequests).toBe(5);
-    expect(repository.update({ maxConcurrentRequests: 99 }).maxConcurrentRequests).toBe(99);
+    expect(repository.update({ maxConcurrentRequests: 99 }).maxConcurrentRequests).toBe(50);
     expect(repository.update({ maxConcurrentRequests: 0 }).maxConcurrentRequests).toBe(1);
   });
 

@@ -7,6 +7,7 @@ import { appState } from './app/state.js';
 import { createSettingsRepository } from './infrastructure/settings-repository.js';
 import { createExtensionGateway } from './infrastructure/extension-api.js';
 import { loadRoutesDataset } from './infrastructure/routes-data-repository.js';
+import { createRouteExclusionsRepository } from './infrastructure/route-exclusions.js';
 import { ErrorCode } from './infrastructure/errors.js';
 import { downloadBlob } from './ui/dom.js';
 import { createNotifier } from './ui/notifications.js';
@@ -23,6 +24,7 @@ import { mountDonationReminder } from './ui/reminders.js';
 import { createSearchProgress } from './ui/search-progress.js';
 import {
   mountSettingsPanel,
+  updateMaxConcurrentRequestsWarning,
   validateMaxConcurrentRequestsInput
 } from './ui/settings-panel.js';
 import { createThemeController } from './ui/theme-controller.js';
@@ -42,6 +44,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     logger: (...args) => console.warn('[AYCF routes]', ...args)
   });
   const routesData = loadedRoutesDataset.routes;
+  const routeExclusions = createRouteExclusionsRepository(localStorage);
   const initialSettings = settingsRepository.load();
   // Throttle and caching parameters (loaded from localStorage if available)
   let debug = initialSettings.debugMode;
@@ -70,7 +73,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   const connectionRadius = document.getElementById('connection-radius').value;
   const maxReq = document.getElementById('max-requests').value;
   const pauseDur = document.getElementById('pause-duration').value;
-  const maxConcurrentRequests = validateMaxConcurrentRequests();
   const cacheLife = document.getElementById('cache-lifetime').value;
   settingsRepository.update({
     minConnectionTime: minConnection,
@@ -80,7 +82,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     connectionRadius,
     maxRequestsInRow: maxReq,
     pauseDurationSeconds: pauseDur,
-    maxConcurrentRequests,
     cacheLifetimeHours: cacheLife
   });
   if (debug) {
@@ -92,7 +93,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       connectionRadius,
       maxRequestsInRow: maxReq,
       pauseDurationSeconds: pauseDur,
-      maxConcurrentRequests,
       cacheLifetimeHours: cacheLife
     });
   }
@@ -102,7 +102,15 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     // dataset (remote cache or packaged fallback) is indexed once in memory.
     const db = getDatabase();
     const flightCache = createFlightCache(db, () => CACHE_LIFETIME);
-    const routeCatalog = createRouteCatalog(routesData);
+    const routeCatalog = createRouteCatalog(routesData, {
+      excludedRoutes: routeExclusions.load()
+    });
+
+  function excludeRoute(origin, destination) {
+    if (!routeCatalog.excludeRoute(origin, destination)) return;
+    routeExclusions.add(origin, destination);
+    debugLogger(`Route excluded after HTTP 302: ${origin} → ${destination}`);
+  }
 
   async function initAirports() {
     try {
@@ -245,7 +253,6 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     '#connection-radius',
     '#max-requests',
     '#pause-duration',
-    '#max-concurrent-requests',
     '#cache-lifetime'
   ];
 
@@ -362,7 +369,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     gateway: extensionGateway,
     cache: flightCache,
     scheduler: requestScheduler,
-    logger: debugLogger
+    logger: debugLogger,
+    onRouteNotFound: ({ origin, destination }) => excludeRoute(origin, destination)
   });
   const selectPairedArrivalDate = createPairedDateSelector({
     routeCatalog,
@@ -377,6 +385,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   }
 
   function updateRequestSettings() {
+    const previousMaxConcurrentRequests = settingsRepository.load().maxConcurrentRequests;
     const maxRequestsInRow = parseInt(document.getElementById("max-requests").value, 10);
     const pauseDur = parseInt(document.getElementById("pause-duration").value, 10);
     const maxConcurrentRequests = validateMaxConcurrentRequests();
@@ -385,6 +394,11 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
       pauseDurationSeconds: pauseDur,
       maxConcurrentRequests
     });
+    updateMaxConcurrentRequestsWarning(
+      document.getElementById("max-concurrent-requests-warning"),
+      maxConcurrentRequests,
+      previousMaxConcurrentRequests
+    );
     requestScheduler.settingsChanged();
     debugLogger(`Request settings updated: Batch = ${maxRequestsInRow}, Pause = ${pauseDur}s, Max Concurrency = ${maxConcurrentRequests}`);
   }
@@ -556,6 +570,10 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
   }
 
   async function checkRouteSegment(origin, destination, date, queryOptions = {}) {
+    if (routeCatalog.isRouteExcluded(origin, destination)) {
+      debugLogger(`Skipping excluded route ${origin} → ${destination}`);
+      return [];
+    }
     const arrivalDate = await selectPairedArrivalDate({
       origin,
       destination,
@@ -606,13 +624,11 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
 
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
-    return routesData.map(route => ({
+    return routeCatalog.getActiveRoutes().map(route => ({
       ...route,
       arrivalStations: Array.isArray(route.arrivalStations)
-      ?
-       [...route.arrivalStations]
-       :
-        []
+        ? [...route.arrivalStations]
+        : []
     }));
   }
   
@@ -634,6 +650,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     updateProgress,
     fetchDestinations,
     routeCatalog,
+    isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination),
     airportLookup,
     appendRouteToDisplay,
     getSettings: () => settingsRepository.load(),
@@ -653,6 +670,7 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
     appendResult: appendRouteToDisplay,
     updateProgress,
     getConcurrency: () => settingsRepository.load().maxConcurrentRequests,
+    isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination),
     logger: debugLogger
   });
 

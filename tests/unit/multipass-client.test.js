@@ -152,6 +152,20 @@ describe("MultipassClient", () => {
     expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
   });
 
+  it("treats HTTP 302 as a permanently missing route", async () => {
+    const onRouteNotFound = vi.fn();
+    const { client, cache, fetchImpl, scheduler } = createHarness({ onRouteNotFound });
+    fetchImpl.mockResolvedValue(new Response("", { status: 302 }));
+
+    await expect(client.getFlights({
+      origin: "CDT", destination: "LTN", date: "2026-08-31"
+    })).resolves.toEqual([]);
+    expect(onRouteNotFound).toHaveBeenCalledWith({ origin: "CDT", destination: "LTN" });
+    expect(fetchImpl.mock.calls[0][1].redirect).toBe("manual");
+    expect(cache.put).toHaveBeenCalledWith("CDT-LTN-2026-08-31", []);
+    expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
+  });
+
   it("requests and caches both sides of a paired RT response", async () => {
     const { client, cache, fetchImpl } = createHarness();
     fetchImpl.mockResolvedValue(new Response(JSON.stringify({
