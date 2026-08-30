@@ -10,6 +10,54 @@ const SESSION_TTL_MS = 60 * 60 * 1000;
 const EMPTY_AVAILABILITY_STATUSES = new Set([400]);
 const MISSING_ROUTE_STATUS = 302;
 const RATE_LIMIT_DELAYS = Object.freeze({ 426: 60000, 429: 40000, 501: 15000 });
+const AVAILABILITY_REQUEST_TIMEOUT_MS = 10000;
+
+function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
+  const requestController = new AbortController();
+  const externalSignal = options.signal;
+  let timeout = null;
+  let settled = false;
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      if (timeout !== null) clearTimeout(timeout);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    };
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const onExternalAbort = () => {
+      requestController.abort();
+      finish(reject, new AppError(ErrorCode.CANCELLED, "Search cancelled"));
+    };
+
+    if (externalSignal?.aborted) {
+      onExternalAbort();
+      return;
+    }
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+    timeout = setTimeout(() => {
+      requestController.abort();
+      finish(
+        reject,
+        new AppError(
+          ErrorCode.HTTP_ERROR,
+          `Availability request timed out after ${timeoutMs / 1000} seconds`,
+          { retryable: false }
+        )
+      );
+    }, timeoutMs);
+
+    Promise.resolve(fetchImpl(url, { ...options, signal: requestController.signal }))
+      .then(
+        response => finish(resolve, response),
+        error => finish(reject, error)
+      );
+  });
+}
 
 export function parseRetryAfter(value, now = Date.now()) {
   if (!value) return null;
@@ -28,7 +76,8 @@ export function createMultipassClient({
   onRouteNotFound = () => {},
   sessionStorage = localStorage,
   fetchImpl = fetch,
-  maxAttempts = 2
+  maxAttempts = 2,
+  requestTimeoutMs = AVAILABILITY_REQUEST_TIMEOUT_MS
 }) {
   let authenticationTabId = null;
   let sessionPromise = null;
@@ -183,7 +232,7 @@ export function createMultipassClient({
       throwIfAborted(signal);
       try {
         const session = await ensureSession(signal);
-        const response = await scheduler.schedule(() => fetchImpl(session.dynamicUrl, {
+        const response = await scheduler.schedule(() => fetchWithTimeout(fetchImpl, session.dynamicUrl, {
           method: "POST",
           redirect: "manual",
           headers: { "Content-Type": "application/json", ...(session.headers ?? {}) },
@@ -196,7 +245,7 @@ export function createMultipassClient({
             intervalSubtype: null
           }),
           signal
-        }), signal);
+        }, requestTimeoutMs), signal);
 
         const isMissingRoute = response.status === MISSING_ROUTE_STATUS
           // Cross-origin manual redirects can be exposed as an opaque response.

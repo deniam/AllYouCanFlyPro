@@ -277,6 +277,27 @@ describe("MultipassClient", () => {
       .rejects.toMatchObject({ code: ErrorCode.HTTP_ERROR, message: "offline" });
   });
 
+  it("stops a hanging availability request after the configured timeout", async () => {
+    const hangingFetch = vi.fn((_url, options) => new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    }));
+    const { client } = createHarness({
+      fetchImpl: hangingFetch,
+      maxAttempts: 2,
+      requestTimeoutMs: 10
+    });
+
+    await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
+      .rejects.toMatchObject({
+        code: ErrorCode.HTTP_ERROR,
+        message: "Availability request timed out after 0.01 seconds",
+        retryable: false
+      });
+    expect(hangingFetch).toHaveBeenCalledOnce();
+  });
+
   it("recognizes an HTML login response and refreshes the session", async () => {
     const { client, fetchImpl, gateway } = createHarness({ maxAttempts: 1 });
     fetchImpl.mockResolvedValue(new Response("<!doctype html><title>Login</title>", {
