@@ -1,13 +1,34 @@
 export const CHANGELOG = Object.freeze([
   {
     current: true,
-    date: "July 1, 2026",
+    date: "August 31, 2026",
     items: [
-      "Improved connecting-flight search by skipping unnecessary checks when a key segment has no flights.",
-      "Added saved custom airport groups that can be used like built-in city groups."
+      "Rebuilt the project structure into a modular, layered architecture: application state, domain logic, infrastructure services, and UI components are now separated into independent modules.",
+      "Introduced a new search orchestration layer for direct, connecting, and round-trip searches, with normalized flight data and shared result matching.",
+      "Added streamed round-trip results and improved result sorting and rendering, including better cached connecting-flight cards.",
+      "Improved round-trip caching by selecting uncached paired dates and warming reverse-segment cache entries when possible.",
+      "Added adaptive request concurrency, centralized request throttling, configurable concurrency limits, and an availability-request timeout.",
+      "Improved Multipass authentication, handling of empty or malformed responses, session state, and opening Multipass in the current browser tab.",
+      "Added remote route-dataset loading with manifest and checksum validation, local cache support, and a packaged offline fallback.",
+      "Added configurable dark mode, improved mobile flight-card layout, and fixed weekend date-selection and live-search issues.",
+      "Added route-exclusion persistence and improved cache/settings storage while preserving compatibility with existing data.",
+      "Added automated unit and integration tests, syntax checks, extension validation, and a manual smoke-test checklist."
     ]
   },
-  { version: "3.4.3", date: "June 30, 2026", items: ["Updated routesData with schedule until 2026-08-30."] },
+  {
+    version: "3.6.0",
+    date: "August 29, 2026",
+    items: ["Updated routesData with schedule until 2026-10-31."]
+  },
+  {
+    version: "3.5.0",
+    date: "July 1, 2026",
+    items: [
+      "Improved search speed for connecting flights: the search algorithm for 1-stop and 2-stop flights now skips unnecessary checks when a key part of the route has no available flights.",
+      "Added Custom Airport Groups in Options: users can create and save airport groups and search them like built-in city groups."
+    ]
+  },
+  { version: "3.4.4", date: "June 30, 2026", items: ["Updated routesData with schedule until 2026-08-30."] },
   { version: "3.4.3", date: "April 27, 2026", items: ["Updated routesData with schedule until 2026-06-30."] },
   { version: "3.4.1", date: "February 25, 2026", items: ["Updated routesData with schedule until 2026-04-30."] },
   {

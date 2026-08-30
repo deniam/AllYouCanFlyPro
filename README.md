@@ -79,6 +79,38 @@ Run [the smoke checklist](docs/manual-smoke-checklist.md) on:
 
 Automated tests never call the live Wizz Air API. Authenticated availability and booking continuation must be tested manually with the minimum practical number of requests.
 
+## Changelog
+
+### Version 4.0.0 — August 31, 2026
+
+- Rebuilt the project structure into a modular, layered architecture, separating application state, domain logic, infrastructure services and UI components.
+- Introduced a search orchestration layer for direct, connecting and round-trip searches, with normalized flight data and shared result matching.
+- Added streamed round-trip results and improved result sorting and rendering, including cached connecting-flight cards.
+- Improved round-trip caching by selecting uncached paired dates and warming reverse-segment cache entries when possible.
+- Added adaptive request concurrency, centralized request throttling, configurable concurrency limits and an availability-request timeout.
+- Improved Multipass authentication, empty or malformed response handling, session state and opening Multipass in the current browser tab.
+- Added remote route-dataset loading with manifest and checksum validation, local cache support and a packaged offline fallback.
+- Added configurable dark mode, improved the mobile flight-card layout and fixed weekend date-selection and live-search issues.
+- Added route-exclusion persistence and improved cache/settings storage while preserving compatibility with existing data.
+- Added automated unit and integration tests, syntax checks, extension validation and a manual smoke-test checklist.
+
+### Version 3.6.0 — August 29, 2026
+
+- Updated `routesData` with schedule until 2026-10-31.
+
+### Version 3.5.0 — July 1, 2026
+
+- Improved search speed for connecting flights: the search algorithm for 1-stop and 2-stop flights now skips unnecessary checks when a key part of the route has no available flights.
+- Added Custom Airport Groups in Options, allowing users to create and save airport groups and search them like built-in city groups.
+
+### Version 3.4.4 — June 30, 2026
+
+- Updated `routesData` with schedule until 2026-08-30.
+
+### Version 3.4.3 — April 27, 2026
+
+- Updated `routesData` with schedule until 2026-06-30.
+
 ## Release checklist
 
 1. Confirm the manifest version and changelog.
