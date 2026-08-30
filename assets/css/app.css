@@ -436,7 +436,7 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
   font-size: 0.75rem;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 640px) {
   .flight-trip-group { padding: 0.3125rem; }
 
   .flight-card {
@@ -479,7 +479,18 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
     text-align: right;
   }
 
-  .flight-airport { order: 1; }
+  .flight-airport {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    order: 1;
+  }
+
+  .flight-airport-name-row {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
 
   .flight-time-zone {
     order: 2;
@@ -489,13 +500,19 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
   .flight-time { font-size: 1.1875rem; }
 
   .flight-airport-name {
+    flex: 1 1 auto;
+    min-width: 0;
     display: -webkit-box;
     overflow: hidden;
+    overflow-wrap: break-word;
+    word-break: normal;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     font-size: 0.8125rem;
     line-height: 1.12;
   }
+
+  .flight-airport-code { width: 100%; }
 
   .flight-route-symbol { font-size: 0.6875rem; }
   .flight-duration { font-size: 0.625rem; }
