@@ -1,12 +1,18 @@
-ZIP_NAME=extension.zip
-IGNORE_FILES=.git/\* node_modules/\* Makefile makefile
+VERSION := $(shell node -e "console.log(JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')).version)")
+ZIP_VERSION := $(subst .,_,$(VERSION))
+ZIP_NAME := AllYouCanFlyPro_ver_$(ZIP_VERSION).zip
+RUNTIME_PATHS := manifest.json index.html assets/css assets/emojis assets/icons assets/twemoji-init.js src LICENSE README.md
 
-all:
+.PHONY: all verify package clean
 
-	rm -f $(ZIP_NAME)
+all: package
 
-	find . -name ".DS_Store" -type f -delete
-	find . -name "screenshot.png" -type f -delete
-	find . -name ".vscode" -type d -delete
+verify:
+	npm run check
 
-	zip -r $(ZIP_NAME) . -x $(IGNORE_FILES)
+package: verify clean
+	zip -r "$(ZIP_NAME)" $(RUNTIME_PATHS) \
+		-x "*/.DS_Store" "src/libs/*.map"
+
+clean:
+	rm -f "$(ZIP_NAME)" extension.zip

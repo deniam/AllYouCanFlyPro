@@ -1,15 +1,3 @@
-import Dexie from '../libs/dexie.mjs';
-
-// Initialize Dexie database
-const db = new Dexie("FlightSearchCache");
-db.version(1).stores({
-  cache: 'key, timestamp'
-});
-db.version(2).stores({
-  cache: 'key, timestamp',
-  routes: '++id, departureStation'
-});
-
 // Mapping for multi-airport cities:
 // Keys are the city code used in autocomplete, values are arrays of actual airport codes.
 // This object is intentionally mutable — custom groups added at runtime extend it in place.
@@ -132,9 +120,7 @@ export function cityNameLookup(cityCode) {
  *
  * @returns {Promise<{AIRPORTS: Array, COUNTRY_AIRPORTS: Object}>}
  */
-export async function loadAirportsData() {
-  // Retrieve all routes from IndexedDB.
-  const routes = await db.routes.toArray();
+export async function loadAirportsData(routes = []) {
   const airportsMap = new Map();
 
   // Process both departure and arrival stations.
