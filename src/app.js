@@ -33,6 +33,7 @@ import { createDirectSearch } from './domain/search/direct.js';
 import { runSearch } from './domain/search/orchestrator.js';
 import { createConnectionsSearch } from './domain/search/connections.js';
 import { createPairedDateSelector } from './domain/search/paired-date-selector.js';
+import { defaultFlightKey } from './domain/search/result-matcher.js';
 // ----------------------- Global Settings -----------------------
   const settingsRepository = createSettingsRepository(localStorage);
   const extensionGateway = createExtensionGateway();
@@ -602,6 +603,8 @@ import { createPairedDateSelector } from './domain/search/paired-date-selector.j
    * then triggers re‑rendering.
    */
   function appendRouteToDisplay(routeObj) {
+    const routeKey = defaultFlightKey(routeObj);
+    if (appState.results.some(result => defaultFlightKey(result) === routeKey)) return;
     appState.results.push(routeObj);
     appState.defaultResults.push(routeObj);
     if (appState.tripType === "return") {

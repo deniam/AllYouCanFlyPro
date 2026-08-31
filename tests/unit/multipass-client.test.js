@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createMultipassClient,
   parseRetryAfter
@@ -58,6 +58,8 @@ function createHarness(overrides = {}) {
 }
 
 describe("MultipassClient", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("discovers a session, requests flights, and caches the response", async () => {
     const { client, cache, fetchImpl } = createHarness();
     const flights = await client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
@@ -277,7 +279,8 @@ describe("MultipassClient", () => {
       .rejects.toMatchObject({ code: ErrorCode.HTTP_ERROR, message: "offline" });
   });
 
-  it("stops a hanging availability request after the configured timeout", async () => {
+  it("retries a hanging availability request after the configured timeout", async () => {
+    vi.useFakeTimers();
     const hangingFetch = vi.fn((_url, options) => new Promise((resolve, reject) => {
       options.signal.addEventListener("abort", () => {
         reject(new DOMException("Aborted", "AbortError"));
@@ -289,13 +292,34 @@ describe("MultipassClient", () => {
       requestTimeoutMs: 10
     });
 
-    await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
-      .rejects.toMatchObject({
+    const request = client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
+    const expectation = expect(request).rejects.toMatchObject({
         code: ErrorCode.HTTP_ERROR,
         message: "Availability request timed out after 0.01 seconds",
-        retryable: false
+        retryable: true
       });
+    await vi.advanceTimersByTimeAsync(1020);
+    await expectation;
+    expect(hangingFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a 15-second availability timeout by default", async () => {
+    vi.useFakeTimers();
+    const hangingFetch = vi.fn((_url, options) => new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    }));
+    const { client } = createHarness({ fetchImpl: hangingFetch, maxAttempts: 1 });
+    const request = client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
+    const expectation = expect(request).rejects.toMatchObject({
+      message: "Availability request timed out after 15 seconds"
+    });
+
+    await vi.advanceTimersByTimeAsync(14999);
     expect(hangingFetch).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await expectation;
   });
 
   it("recognizes an HTML login response and refreshes the session", async () => {

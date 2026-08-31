@@ -10,7 +10,7 @@ const SESSION_TTL_MS = 60 * 60 * 1000;
 const EMPTY_AVAILABILITY_STATUSES = new Set([400]);
 const MISSING_ROUTE_STATUS = 302;
 const RATE_LIMIT_DELAYS = Object.freeze({ 426: 60000, 429: 40000, 501: 15000 });
-const AVAILABILITY_REQUEST_TIMEOUT_MS = 10000;
+const AVAILABILITY_REQUEST_TIMEOUT_MS = 15000;
 
 function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   const requestController = new AbortController();
@@ -46,7 +46,7 @@ function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
         new AppError(
           ErrorCode.HTTP_ERROR,
           `Availability request timed out after ${timeoutMs / 1000} seconds`,
-          { retryable: false }
+          { retryable: true }
         )
       );
     }, timeoutMs);

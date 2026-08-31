@@ -1,6 +1,8 @@
 import { cancelledError, throwIfAborted } from "./errors.js";
 
 const RECOVERY_SUCCESS_COUNT = 10;
+const DEFAULT_STAGGER_MIN_MS = 25;
+const DEFAULT_STAGGER_MAX_MS = 100;
 
 export function abortableDelay(milliseconds, signal) {
   throwIfAborted(signal);
@@ -28,7 +30,12 @@ function configuredConcurrency(settings) {
 export function createRequestScheduler(
   settingsProvider,
   onPause = () => {},
-  logger = () => {}
+  logger = () => {},
+  {
+    random = Math.random,
+    staggerMinMs = DEFAULT_STAGGER_MIN_MS,
+    staggerMaxMs = DEFAULT_STAGGER_MAX_MS
+  } = {}
 ) {
   const queue = [];
   let activeRequests = 0;
@@ -39,6 +46,15 @@ export function createRequestScheduler(
   let recovering = false;
   let successfulResponses = 0;
   let timer = null;
+  let nextStartAt = 0;
+
+  const minimumStagger = Math.max(0, Number(staggerMinMs) || 0);
+  const maximumStagger = Math.max(minimumStagger, Number(staggerMaxMs) || 0);
+
+  function nextStaggerDelay() {
+    const fraction = Math.max(0, Math.min(1, Number(random()) || 0));
+    return minimumStagger + fraction * (maximumStagger - minimumStagger);
+  }
 
   function currentConcurrency() {
     const configured = configuredConcurrency(settingsProvider());
@@ -74,6 +90,9 @@ export function createRequestScheduler(
   function start(item) {
     activeRequests += 1;
     requestsInBatch += 1;
+    if (currentConcurrency() > 1) {
+      nextStartAt = performance.now() + nextStaggerDelay();
+    }
     Promise.resolve()
       .then(() => item.task())
       .then(value => finish(item, "resolve", value), error => finish(item, "reject", error))
@@ -111,7 +130,8 @@ export function createRequestScheduler(
       }
     }
 
-    const readyAt = Math.max(batchPauseUntil, cooldownUntil);
+    const staggerUntil = concurrency > 1 ? nextStartAt : 0;
+    const readyAt = Math.max(batchPauseUntil, cooldownUntil, staggerUntil);
     if (readyAt > now) {
       schedulePump(readyAt - now);
       return;
@@ -180,6 +200,7 @@ export function createRequestScheduler(
   function resetBatch() {
     requestsInBatch = 0;
     batchPauseUntil = 0;
+    nextStartAt = 0;
     pump();
   }
 
@@ -208,7 +229,8 @@ export function createRequestScheduler(
       effectiveConcurrency: currentConcurrency(),
       recovering,
       requestsInBatch,
-      cooldownUntil
+      cooldownUntil,
+      nextStartAt
     })
   });
 }

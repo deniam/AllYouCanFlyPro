@@ -53,11 +53,10 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
     );
     outbound.push(...(flights ?? []));
   }
-  const uniqueOutbound = deduplicateFlights(outbound, flight => {
-    const route = Array.isArray(flight.route) ? flight.route.join("-") : defaultFlightKey(flight);
-    const departure = flight.calculatedDuration?.departureDate;
-    return `${route}|${departure instanceof Date ? departure.getTime() : departure}`;
-  });
+  // Aggregated routes carry a key made from every segment. Using only the
+  // endpoints and departure time here incorrectly merged distinct layovers
+  // that happened to start on the same flight.
+  const uniqueOutbound = deduplicateFlights(outbound);
   if (tripType === "oneway") return uniqueOutbound;
 
   uniqueOutbound.forEach(flight => {

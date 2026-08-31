@@ -44,7 +44,12 @@ describe("request scheduler", () => {
     const gates = Array.from({ length: 7 }, deferred);
     let active = 0;
     let maximum = 0;
-    const scheduler = createRequestScheduler(() => schedulerSettings({ maxConcurrentRequests: 50 }));
+    const scheduler = createRequestScheduler(
+      () => schedulerSettings({ maxConcurrentRequests: 50 }),
+      undefined,
+      undefined,
+      { staggerMinMs: 0, staggerMaxMs: 0 }
+    );
     const requests = gates.map(gate => scheduler.schedule(async () => {
       active += 1;
       maximum = Math.max(maximum, active);
@@ -59,7 +64,7 @@ describe("request scheduler", () => {
     expect(maximum).toBe(7);
   });
 
-  it("starts available slots immediately and applies the batch pause", async () => {
+  it("staggers concurrent request starts and applies the batch pause", async () => {
     vi.useFakeTimers();
     const starts = [];
     const onPause = vi.fn();
@@ -67,18 +72,50 @@ describe("request scheduler", () => {
       maxRequestsInRow: 2,
       pauseDurationSeconds: 1,
       maxConcurrentRequests: 5
-    }), onPause);
+    }), onPause, undefined, {
+      random: () => 0,
+      staggerMinMs: 25,
+      staggerMaxMs: 100
+    });
     const requests = Array.from({ length: 3 }, () => scheduler.schedule(async () => {
       starts.push(performance.now());
     }));
 
     await vi.advanceTimersByTimeAsync(0);
-    expect(starts).toEqual([0, 0]);
-    await vi.advanceTimersByTimeAsync(999);
-    expect(starts).toHaveLength(2);
+    expect(starts).toEqual([0]);
+    await vi.advanceTimersByTimeAsync(24);
+    expect(starts).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
-    expect(starts).toEqual([0, 0, 1000]);
+    expect(starts).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(starts).toEqual([0, 25]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(starts).toEqual([0, 25, 1025]);
     expect(onPause).toHaveBeenCalledWith(1000, "batch");
+    await Promise.all(requests);
+  });
+
+  it("uses a random delay inside the configured stagger range", async () => {
+    vi.useFakeTimers();
+    const starts = [];
+    const scheduler = createRequestScheduler(
+      () => schedulerSettings({ maxConcurrentRequests: 3 }),
+      undefined,
+      undefined,
+      { random: () => 0.5, staggerMinMs: 20, staggerMaxMs: 100 }
+    );
+    const requests = Array.from({ length: 3 }, () => scheduler.schedule(async () => {
+      starts.push(performance.now());
+    }));
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(starts).toEqual([0]);
+    await vi.advanceTimersByTimeAsync(59);
+    expect(starts).toEqual([0]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(starts).toEqual([0, 60]);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(starts).toEqual([0, 60, 120]);
     await Promise.all(requests);
   });
 
