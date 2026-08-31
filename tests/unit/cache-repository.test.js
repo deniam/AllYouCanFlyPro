@@ -29,4 +29,10 @@ describe("flight cache", () => {
     const cache = createFlightCache(database(entry), () => 60_000);
     await expect(cache.get("key")).resolves.toBeNull();
   });
+
+  it("exposes tri-state lookup and gives empty responses a shorter TTL", async () => {
+    const databaseWithEmpty = database({ timestamp: Date.now() - 60_000, results: [] });
+    const cache = createFlightCache(databaseWithEmpty, () => 4 * 60 * 60 * 1000);
+    await expect(cache.lookup("key")).resolves.toMatchObject({ state: "unavailable", results: [] });
+  });
 });

@@ -34,7 +34,8 @@ export function createRequestScheduler(
   {
     random = Math.random,
     staggerMinMs = DEFAULT_STAGGER_MIN_MS,
-    staggerMaxMs = DEFAULT_STAGGER_MAX_MS
+    staggerMaxMs = DEFAULT_STAGGER_MAX_MS,
+    initialConcurrency = Number.POSITIVE_INFINITY
   } = {}
 ) {
   const queue = [];
@@ -42,8 +43,14 @@ export function createRequestScheduler(
   let requestsInBatch = 0;
   let batchPauseUntil = 0;
   let cooldownUntil = 0;
-  let effectiveConcurrency = configuredConcurrency(settingsProvider());
-  let recovering = false;
+  const initialLimit = Number.isFinite(initialConcurrency)
+    ? Math.max(1, Number(initialConcurrency))
+    : Number.POSITIVE_INFINITY;
+  let effectiveConcurrency = Math.min(
+    configuredConcurrency(settingsProvider()),
+    initialLimit
+  );
+  let recovering = effectiveConcurrency < configuredConcurrency(settingsProvider());
   let successfulResponses = 0;
   let timer = null;
   let nextStartAt = 0;
@@ -182,6 +189,19 @@ export function createRequestScheduler(
     pump();
   }
 
+  function recordTransientFailure(error) {
+    const configured = configuredConcurrency(settingsProvider());
+    const previous = effectiveConcurrency;
+    effectiveConcurrency = Math.max(1, Math.floor(effectiveConcurrency / 2));
+    recovering = effectiveConcurrency < configured;
+    successfulResponses = 0;
+    logger(
+      `Transient availability failure${error?.status ? ` HTTP ${error.status}` : ""}: ` +
+      `concurrency ${previous} → ${effectiveConcurrency}`
+    );
+    pump();
+  }
+
   function recordSuccess() {
     if (!recovering) return;
     successfulResponses += 1;
@@ -220,6 +240,7 @@ export function createRequestScheduler(
   return Object.freeze({
     schedule,
     recordRateLimit,
+    recordTransientFailure,
     recordSuccess,
     resetBatch,
     settingsChanged,

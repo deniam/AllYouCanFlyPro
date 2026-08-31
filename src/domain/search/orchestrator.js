@@ -35,6 +35,23 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
     maxConcurrentRequests = 1
   } = request;
   const onRoundTripResult = dependencies.onRoundTripResult ?? (() => {});
+  const withDiagnostics = results => {
+    const diagnostics = dependencies.getDiagnostics?.() ?? {
+      complete: true,
+      failedProbes: [],
+      cacheHits: 0,
+      networkRequests: 0,
+      prunedBranches: 0
+    };
+    Object.defineProperty(results, "diagnostics", {
+      value: {
+        ...diagnostics,
+        complete: !(diagnostics.failedProbes?.length)
+      },
+      enumerable: false
+    });
+    return results;
+  };
 
   const outbound = [];
   for (const date of departureDates) {
@@ -57,7 +74,7 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
   // endpoints and departure time here incorrectly merged distinct layovers
   // that happened to start on the same flight.
   const uniqueOutbound = deduplicateFlights(outbound);
-  if (tripType === "oneway") return uniqueOutbound;
+  if (tripType === "oneway") return withDiagnostics(uniqueOutbound);
 
   uniqueOutbound.forEach(flight => {
     flight.returnFlights = [];
@@ -153,5 +170,5 @@ export async function runSearch(request, dependencies, signal, onProgress = () =
       return stationsMatch && minutesBetween(outboundArrival, departure) >= minRoundTripGapMinutes;
     });
   }
-  return uniqueOutbound.filter(flight => flight.returnFlights.length > 0);
+  return withDiagnostics(uniqueOutbound.filter(flight => flight.returnFlights.length > 0));
 }

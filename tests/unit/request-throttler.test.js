@@ -138,6 +138,20 @@ describe("request scheduler", () => {
     expect(logger).toHaveBeenCalledWith(expect.stringContaining("Retry-After: 40"));
   });
 
+  it("supports an adaptive initial limit and halves it after transient failures", () => {
+    const scheduler = createRequestScheduler(
+      () => schedulerSettings({ maxConcurrentRequests: 15 }),
+      undefined,
+      undefined,
+      { initialConcurrency: 4, staggerMinMs: 0, staggerMaxMs: 0 }
+    );
+    expect(scheduler.getState().effectiveConcurrency).toBe(4);
+    scheduler.recordTransientFailure({ status: 504 });
+    expect(scheduler.getState().effectiveConcurrency).toBe(2);
+    for (let index = 0; index < 10; index += 1) scheduler.recordSuccess();
+    expect(scheduler.getState().effectiveConcurrency).toBe(3);
+  });
+
   it("holds the whole queue during cooldown and resumes without a concurrent burst", async () => {
     vi.useFakeTimers();
     const gate = deferred();

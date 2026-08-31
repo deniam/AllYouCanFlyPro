@@ -35,6 +35,17 @@
 /** @typedef {NormalizedFlight & {returnFlights?: NormalizedFlight[]}} SearchResult */
 
 /**
+ * @typedef {Object} SearchDiagnostics
+ * @property {boolean} complete
+ * @property {Array<Object>} failedProbes
+ * @property {number} cacheHits
+ * @property {number} networkRequests
+ * @property {number} prunedBranches
+ */
+
+/** @typedef {SearchResult[] & {diagnostics?: SearchDiagnostics}} SearchOutcome */
+
+/**
  * @typedef {Object} AvailabilitySegmentRequest
  * @property {string} origin
  * @property {string} destination

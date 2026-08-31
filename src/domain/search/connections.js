@@ -10,6 +10,7 @@ import {
 } from "./candidate-builder.js";
 import { mapConcurrentOrdered } from "./concurrency.js";
 import { ErrorCode } from "../../infrastructure/errors.js";
+import { createConnectionPlanner } from "./connection-planner.js";
 
 const FATAL_SEARCH_ERRORS = new Set([
   ErrorCode.AUTH_REQUIRED,
@@ -114,6 +115,17 @@ export function createConnectionsSearch({
   getSettings,
   getStopoverText
 }) {
+  const optimizedPlanner = availabilityScope => createConnectionPlanner({
+    routeCatalog,
+    airportLookup,
+    availabilityScope,
+    isCancelled,
+    updateProgress,
+    debugLogger,
+    isRouteExcluded,
+    appendRouteToDisplay
+  });
+
   async function processSegment(candidate, index, currentDate, previousFlight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData, queryOptions) {
     if (index >= candidate.length - 1) {
       // Base case: return one option – an empty array.
@@ -988,6 +1000,27 @@ export function createConnectionsSearch({
     skipProgress = false,
     queryOptions = {}
   ) {
+    if (queryOptions?.availabilityScope) {
+      const settings = getSettings();
+      const stopoverText = getStopoverText();
+      const allowOvernight = queryOptions.allowOvernight
+        ?? stopoverText.includes("overnight");
+      const results = await optimizedPlanner(queryOptions.availabilityScope).search({
+        origins,
+        destinations,
+        selectedDate,
+        maxTransfers,
+        allowOvernight,
+        minConnection: Number(queryOptions.minConnection ?? settings.minConnectionTime),
+        maxConnection: Number(queryOptions.maxConnection ?? settings.maxConnectionTime),
+        connectionRadiusKm: Number(queryOptions.connectionRadiusKm ?? settings.connectionRadius),
+        allowChangeAirport: queryOptions.allowChangeAirport ?? settings.allowChangeAirport,
+        bookingWindow: queryOptions.bookingWindow,
+        appendResults: shouldAppend,
+        maxConcurrentRequests: queryOptions.maxConcurrentRequests ?? settings.maxConcurrentRequests
+      });
+      return results;
+    }
     debugLogger("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
     const originAnywhere = origins.length === 1 && origins[0] === "ANY";

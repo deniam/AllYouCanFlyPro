@@ -17,7 +17,8 @@ export function createDirectSearch({
   updateProgress,
   getConcurrency = () => 1,
   isRouteExcluded = () => false,
-  logger = () => {}
+  logger = () => {},
+  getAvailabilityScope = () => null
 }) {
   return async function searchDirectRoutes(
     origins,
@@ -76,11 +77,31 @@ export function createDirectSearch({
 
       let flights;
       try {
+        const availabilityScope = getAvailabilityScope();
+        if (availabilityScope) {
+          const outcome = await availabilityScope.resolve({
+            origin: pair.origin,
+            destination: pair.destination,
+            date: selectedDate
+          });
+          if (outcome.state === "unknown") {
+            logger(`Direct availability unresolved for ${pair.origin} → ${pair.destination}`);
+            flights = [];
+          } else {
+            flights = outcome.flights;
+          }
+          if (outcome.state === "unknown") {
+            processed += 1;
+            if (!skipProgress) updateProgress(processed, pairs.length, `Unresolved ${pair.origin} → ${pair.destination} on ${selectedDate}`);
+            return flights;
+          }
+        } else {
         flights = await getCached(pair.origin, pair.destination, selectedDate);
         if (!flights) {
           flights = await fetchFlights(pair.origin, pair.destination, selectedDate, queryOptions);
           if (!Array.isArray(flights)) flights = [];
           await setCached(pair.origin, pair.destination, selectedDate, flights);
+        }
         }
       } catch (error) {
         if ([ErrorCode.AUTH_REQUIRED, ErrorCode.CANCELLED].includes(error?.code)) throw error;

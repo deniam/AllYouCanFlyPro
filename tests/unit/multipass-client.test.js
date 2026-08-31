@@ -225,6 +225,19 @@ describe("MultipassClient", () => {
     expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
   });
 
+  it("classifies a malformed availability payload as unknown in the stateful API", async () => {
+    const { client, fetchImpl } = createHarness();
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ unexpected: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    const outcome = await client.getFlightsOutcome({
+      origin: "AAA", destination: "BBB", date: "2026-08-28"
+    });
+    expect(outcome.state).toBe("unknown");
+    expect(outcome.flights).toEqual([]);
+  });
+
   it("opens Multipass in an active tab when no Multipass tab exists", async () => {
     const { client, gateway } = createHarness();
     gateway.queryTabs

@@ -238,8 +238,9 @@ export function createResultsRenderer({
       const next = segments[index + 1];
       let connection = "";
       if (next) {
-        const minutes = Math.max(0, Math.round((next.calculatedDuration.departureDate
-          - segment.calculatedDuration.arrivalDate) / 60000));
+        const departure = next.departureDateUtc ?? next.calculatedDuration?.departureDate;
+        const arrival = segment.arrivalDateUtc ?? segment.calculatedDuration?.arrivalDate;
+        const minutes = Math.max(0, Math.round((departure - arrival) / 60000));
         connection = `<div class="theme-text-muted text-center text-sm my-2">Self-connection: ${Math.floor(minutes / 60)}h ${minutes % 60}m${escapeHtml(airportChangeText(flight, index))}</div>`;
       }
       return `${segmentHtml(segment, index === 0 ? label : "", index === 0 ? extraInfo : "")}${paymentHtml(segment, expanded)}${connection}`;

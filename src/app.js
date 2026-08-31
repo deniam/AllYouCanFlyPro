@@ -13,7 +13,7 @@ import { downloadBlob } from './ui/dom.js';
 import { createNotifier } from './ui/notifications.js';
 import { downloadTabSeparatedFile, escapeTabularCell } from './ui/csv-export.js';
 import { createMultipassClient } from './infrastructure/multipass-client.js';
-import { parseLocalDate } from './domain/dates.js';
+import { addDaysUTC, parseLocalDate } from './domain/dates.js';
 import { initMultiCalendar, renderCalendarMonth } from './ui/calendar.js';
 import { setupAirportAutocomplete } from './ui/autocomplete.js';
 import { createResultsRenderer } from './ui/results-renderer.js';
@@ -33,6 +33,7 @@ import { createDirectSearch } from './domain/search/direct.js';
 import { runSearch } from './domain/search/orchestrator.js';
 import { createConnectionsSearch } from './domain/search/connections.js';
 import { createPairedDateSelector } from './domain/search/paired-date-selector.js';
+import { createAvailabilityService } from './domain/search/availability-service.js';
 import { defaultFlightKey } from './domain/search/result-matcher.js';
 // ----------------------- Global Settings -----------------------
   const settingsRepository = createSettingsRepository(localStorage);
@@ -366,7 +367,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
   const requestScheduler = createRequestScheduler(
     () => settingsRepository.load(),
     (waitTimeMs, reason) => showTimeoutCountdown(waitTimeMs, reason === "rate-limit"),
-    debugLogger
+    debugLogger,
+    { initialConcurrency: 4 }
   );
   const multipassClient = createMultipassClient({
     gateway: extensionGateway,
@@ -597,6 +599,34 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     }
   }
 
+  const availabilityService = createAvailabilityService({
+    cache: flightCache,
+    isDateAvailable: (origin, destination, date) => routeCatalog.isDateAvailable(origin, destination, date),
+    isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination),
+    logger: debugLogger,
+    loadFlights: async ({ origin, destination, date, preferredReturnDates = [], skipCache = false, signal }) => {
+      const arrivalDate = await selectPairedArrivalDate({
+        origin,
+        destination,
+        departureDate: date,
+        preferredReturnDates
+      });
+      debugLogger(
+        `Availability request ${origin} → ${destination} on ${date}`,
+        arrivalDate ? `(paired with ${destination} → ${origin} on ${arrivalDate})` : "(outbound only)"
+      );
+      try {
+        return await multipassClient.getFlightsOutcome(
+          { origin, destination, date, arrivalDate },
+          signal,
+          { skipCache }
+        );
+      } finally {
+        selectPairedArrivalDate.release({ origin, destination, arrivalDate });
+      }
+    }
+  });
+
     // ---------------- Global Results Display Functions ----------------
     /**
    * Appends a unified route (either a direct flight or an aggregated connecting route) to the global results,
@@ -627,6 +657,24 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     resultsRenderer.displayRoundTrips(results);
   }
 
+  function renderSearchDiagnostics(diagnostics = {}) {
+    const warning = document.getElementById("search-warning");
+    const text = document.getElementById("search-warning-text");
+    const retry = document.getElementById("retry-incomplete-search");
+    if (!warning || !text || !retry) return;
+    const failed = diagnostics.failedProbes?.length ?? 0;
+    if (!failed) {
+      warning.classList.add("hidden");
+      retry.onclick = null;
+      return;
+    }
+    text.textContent = `Search incomplete: ${failed} availability check${failed === 1 ? "" : "s"} failed. Results may be partial.`;
+    warning.classList.remove("hidden");
+    retry.onclick = () => {
+      if (!appState.searchSession.active) handleSearch();
+    };
+  }
+
   // ---------------- Data Fetching Functions ----------------
   async function fetchDestinations() {
     return routeCatalog.getActiveRoutes().map(route => ({
@@ -644,6 +692,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
    * Recursive function to iterate through possible options for route segments.
    * Returns an array of options (each option is an array of flights for segments from index to the end).
    */
+  let activeAvailabilityScope = null;
   const searchConnectingRoutes = createConnectionsSearch({
     isCancelled: () => appState.searchSession.cancelled,
     debugLogger,
@@ -676,7 +725,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     updateProgress,
     getConcurrency: () => settingsRepository.load().maxConcurrentRequests,
     isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination),
-    logger: debugLogger
+    logger: debugLogger,
+    getAvailabilityScope: () => activeAvailabilityScope
   });
 
   function setSearchButtonIdle(button) {
@@ -719,6 +769,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     appState.defaultResults = [];
     resultsRenderer.reset();
     totalResultsEl.textContent = "Total results: 0";
+    renderSearchDiagnostics({ failedProbes: [] });
     const searchSession = appState.beginSearch();
     selectPairedArrivalDate.reset();
     setSearchButtonActive(searchButton);
@@ -880,8 +931,20 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     const returnDates = returnInputRaw.split(",").map(value => value.trim()).filter(Boolean);
     let wasCancelled = false;
     let searchFailed = false;
+    let completedResults = null;
+    const searchSettings = settingsRepository.load();
+    const allowOvernight = stopoverText.includes("overnight");
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    const bookingWindow = {
+      from: todayUtc,
+      to: addDaysUTC(new Date(`${todayUtc}T00:00:00Z`), 3).toISOString().slice(0, 10)
+    };
 
     try {
+      activeAvailabilityScope = availabilityService.createScope({
+        signal: searchSession.controller.signal,
+        preferredReturnDates: returnDates
+      });
       const results = await runSearch({
         origins,
         destinations,
@@ -890,24 +953,49 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
         returnDates,
         tripType,
         maxTransfers,
-        maxConcurrentRequests: settingsRepository.load().maxConcurrentRequests
+        maxConcurrentRequests: searchSettings.maxConcurrentRequests,
+        allowOvernight,
+        minConnectionMinutes: searchSettings.minConnectionTime,
+        maxConnectionMinutes: searchSettings.maxConnectionTime,
+        allowAirportChange: searchSettings.allowChangeAirport,
+        connectionRadiusKm: searchSettings.connectionRadius,
+        bookingWindow
       }, {
         searchDirect: ({ origins: from, destinations: to, date, append, skipProgress, preferredReturnDates }) =>
           searchDirectRoutes(from, to, date, append, false, skipProgress, { preferredReturnDates }),
         searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress, preferredReturnDates }) =>
-          searchConnectingRoutes(from, to, date, transfers, append, skipProgress, { preferredReturnDates }),
+          searchConnectingRoutes(from, to, date, transfers, append, skipProgress, {
+            preferredReturnDates,
+            availabilityScope: activeAvailabilityScope,
+            allowOvernight,
+            minConnection: searchSettings.minConnectionTime,
+            maxConnection: searchSettings.maxConnectionTime,
+            allowChangeAirport: searchSettings.allowChangeAirport,
+            connectionRadiusKm: searchSettings.connectionRadius,
+            maxConcurrentRequests: searchSettings.maxConcurrentRequests,
+            bookingWindow
+          }),
         onRoundTripResult: (flight, index) => {
           if (searchSession.controller.signal.aborted || appState.searchSession !== searchSession) return;
           resultsRenderer.upsertRoundTrip(flight, index);
+        },
+        getDiagnostics: () => {
+          const diagnostics = activeAvailabilityScope?.diagnostics ?? {};
+          return {
+            ...diagnostics,
+            failedProbes: activeAvailabilityScope?.getFailed?.() ?? []
+          };
         }
       }, searchSession.controller.signal, progress => {
         updateProgress(progress.current, progress.total, progress.message);
       });
+      completedResults = results;
 
       appState.results = results;
       appState.defaultResults = [...results];
       if (tripType === "return") displayRoundTripResultsAll(results);
       else displayGlobalResults(results);
+      renderSearchDiagnostics(results.diagnostics);
       debugLogger(`Search complete. Valid results: ${results.length}`);
     } catch (error) {
       if (error?.code === ErrorCode.CANCELLED || error?.name === "AbortError") {
@@ -921,7 +1009,10 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
         console.error("Search error:", error);
       }
     } finally {
-      if (!wasCancelled && !searchFailed && appState.results.length === 0 && tripType === "oneway") {
+      activeAvailabilityScope = null;
+      if (!wasCancelled && !searchFailed && appState.results.length === 0
+        && !(completedResults?.diagnostics?.failedProbes?.length)
+        && tripType === "oneway") {
         document.querySelector(".route-list").textContent = "There are no available flights on this route.";
       }
       if (appState.finishSearch(searchSession)) {

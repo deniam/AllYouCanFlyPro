@@ -1,7 +1,7 @@
 import { MessageAction } from "./extension-api.js";
 import { AppError, ErrorCode, throwIfAborted } from "./errors.js";
 import { abortableDelay } from "./request-throttler.js";
-import { segmentCacheKey } from "./cache-repository.js";
+import { AvailabilityState, segmentCacheKey } from "./cache-repository.js";
 
 const MULTIPASS_URL = "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
 const MULTIPASS_PATTERN = "https://multipass.wizzair.com/*";
@@ -226,7 +226,7 @@ export function createMultipassClient({
     return refreshPromise;
   }
 
-  async function requestFlights(segment, signal) {
+  async function requestFlights(segment, signal, { strictPayload = false } = {}) {
     let lastError;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       throwIfAborted(signal);
@@ -247,9 +247,10 @@ export function createMultipassClient({
           signal
         }, requestTimeoutMs), signal);
 
-        const isMissingRoute = response.status === MISSING_ROUTE_STATUS
-          // Cross-origin manual redirects can be exposed as an opaque response.
-          || response.type === "opaqueredirect";
+        // A plain 302 is the documented missing-route response. Opaque
+        // redirects are deliberately not treated as a permanent exclusion:
+        // they can also represent an authentication redirect.
+        const isMissingRoute = response.status === MISSING_ROUTE_STATUS;
         if (isMissingRoute) {
           scheduler.recordSuccess();
           try {
@@ -297,12 +298,15 @@ export function createMultipassClient({
 
         const payload = await response.json();
         if (!Array.isArray(payload?.flightsOutbound)) {
-          logger(
-            `No flightsOutbound array for ${segment.origin} → ${segment.destination} on ${segment.date}; treating it as no availability`,
-            payload
+          if (!strictPayload) {
+            scheduler.recordSuccess();
+            return { outbound: [], inbound: null };
+          }
+          throw new AppError(
+            ErrorCode.INVALID_RESPONSE,
+            `Availability response for ${segment.origin} → ${segment.destination} is missing flightsOutbound`,
+            { retryable: false }
           );
-          scheduler.recordSuccess();
-          return { outbound: [], inbound: null };
         }
         let inbound = null;
         if (segment.arrivalDate) {
@@ -326,6 +330,11 @@ export function createMultipassClient({
             retryable: true
           });
         lastError = normalized;
+        if (normalized.code !== ErrorCode.RATE_LIMITED
+          && (normalized.retryable || normalized.status >= 500)
+          && typeof scheduler.recordTransientFailure === "function") {
+          scheduler.recordTransientFailure(normalized);
+        }
         if (!normalized.retryable || attempt === maxAttempts - 1) throw normalized;
         if (normalized.code !== ErrorCode.RATE_LIMITED) {
           await abortableDelay(1000, signal);
@@ -335,17 +344,20 @@ export function createMultipassClient({
     throw lastError ?? new AppError(ErrorCode.INVALID_RESPONSE, "Flight request failed");
   }
 
-  return Object.freeze({
-    ensureSession,
-    clearSession,
-    async getFlights(segment, signal) {
+  async function getFlights(segment, signal, {
+    skipCache = false,
+    coalesce = false,
+    strictPayload = false
+  } = {}) {
       const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
-      const cached = await cache.get(key);
-      if (Array.isArray(cached)) return cached;
-      const requestKey = `${key}|${segment.arrivalDate ?? ""}`;
+      if (!skipCache) {
+        const cached = await cache.get(key);
+        if (Array.isArray(cached)) return cached;
+      }
+      const requestKey = coalesce ? key : `${key}|${segment.arrivalDate ?? ""}`;
       if (inFlightRequests.has(requestKey)) return inFlightRequests.get(requestKey);
       const request = (async () => {
-        const { outbound, inbound } = await requestFlights(segment, signal);
+        const { outbound, inbound } = await requestFlights(segment, signal, { strictPayload });
         const writes = [cache.put(key, outbound)];
         if (segment.arrivalDate && Array.isArray(inbound)) {
           writes.push(cache.put(
@@ -362,7 +374,56 @@ export function createMultipassClient({
       } finally {
         if (inFlightRequests.get(requestKey) === request) inFlightRequests.delete(requestKey);
       }
-    },
+  }
+
+  async function getFlightsOutcome(segment, signal, { skipCache = false } = {}) {
+      const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
+      const cached = skipCache
+        ? null
+        : typeof cache.lookup === "function"
+          ? await cache.lookup(key)
+          : (() => null)();
+      if (!cached && !skipCache) {
+        const legacy = await cache.get(key);
+        if (Array.isArray(legacy)) {
+          return legacy.length
+            ? { state: AvailabilityState.AVAILABLE, flights: legacy, source: "cache" }
+            : { state: AvailabilityState.UNAVAILABLE, flights: [], source: "cache", reason: "empty-response" };
+        }
+      }
+      const cacheState = cached ?? { state: AvailabilityState.UNKNOWN, reason: "miss" };
+      if (cacheState.state === AvailabilityState.AVAILABLE) {
+        return { ...cacheState, flights: cacheState.results };
+      }
+      if (cacheState.state === AvailabilityState.UNAVAILABLE) {
+        return { ...cacheState, flights: [] };
+      }
+      try {
+        const flights = await getFlights(segment, signal, {
+          skipCache: true,
+          coalesce: true,
+          strictPayload: true
+        });
+        return flights.length
+          ? { state: AvailabilityState.AVAILABLE, flights, source: "network" }
+          : { state: AvailabilityState.UNAVAILABLE, flights: [], source: "network", reason: "empty-response" };
+      } catch (error) {
+        if (error?.code === ErrorCode.AUTH_REQUIRED || error?.code === ErrorCode.CANCELLED) throw error;
+        return {
+          state: AvailabilityState.UNKNOWN,
+          flights: [],
+          source: "network",
+          reason: error?.code === ErrorCode.RATE_LIMITED ? "rate-limit" : "request-error",
+          error
+        };
+      }
+  }
+
+  return Object.freeze({
+    ensureSession,
+    clearSession,
+    getFlights,
+    getFlightsOutcome,
     async continueBooking(subscriptionId, outboundKey, signal) {
       const tab = await gateway.createTab({ url: MULTIPASS_URL, active: true });
       await gateway.waitForTabComplete(tab.id, { signal });
