@@ -19,7 +19,9 @@ export const MULTI_AIRPORT_CITIES = {
   "BLS": ["VAR", "BOJ"],
   "CRE": ["HER", "CHQ"],
   "GRI": ["CFU", "HER", "CHQ", "JMK", "JSI", "JTR", "RHO", "ZTH"],
-  "CNA": ["SKD", "TAS", "FRU", "ALA", "HSA", "NQZ"]
+  "CNA": ["SKD", "TAS", "FRU", "ALA", "HSA", "NQZ"],
+  "WSW": ["WAW", "WMI", "RDO"],
+  "ALX": ["ALY", "HBE"]
 };
 
 // Country flag mapping.
@@ -108,7 +110,9 @@ export function cityNameLookup(cityCode) {
     "BLS": "Black Sea (Any)",
     "CRE": "Crete (Any)",
     "GRI": "Greek Islands (Any)",
-    "CNA": "Central Asia (Stan Countries)"
+    "CNA": "Central Asia (Stan Countries)",
+    "WSW": "Warsaw (Any)",
+    "ALX": "Alexandria (Any)"
   };
   return mapping[cityCode] || cityCode;
 }
@@ -201,6 +205,12 @@ export async function loadAirportsData(routes = []) {
     acc[airport.country].push(airport.code);
     return acc;
   }, {});
+
+  // Keep the source/display name "Türkiye", but also allow the common English
+  // spelling to resolve to the same set of airports in autocomplete/search.
+  if (COUNTRY_AIRPORTS["Türkiye"]) {
+    COUNTRY_AIRPORTS["Turkey"] = [...COUNTRY_AIRPORTS["Türkiye"]];
+  }
 
   return { AIRPORTS, COUNTRY_AIRPORTS };
 }
