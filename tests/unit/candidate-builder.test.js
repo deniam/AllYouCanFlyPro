@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildGraph,
   candidateHasValidFlightDates,
-  findCandidateRoutes
+  findCandidateRoutes,
+  findReachableOrigins
 } from "../../src/domain/search/candidate-builder.js";
 import { routesFixture } from "../fixtures/routes.js";
 
@@ -22,6 +23,21 @@ describe("candidate builder", () => {
   it("keeps deterministic origin order", () => {
     expect(findCandidateRoutes(graph, ["BBB", "AAA"], ["CCC"], 1)[0])
       .toEqual(["BBB", "CCC"]);
+  });
+
+  it("resolves ANY origins through one- and two-transfer reverse paths", () => {
+    const routeGraph = new Map([
+      ["DIRECT", ["DEST"]],
+      ["ONE", ["DIRECT"]],
+      ["TWO", ["ONE"]],
+      ["TOO_FAR", ["TWO"]],
+      ["UNRELATED", ["OTHER"]]
+    ]);
+
+    expect(findReachableOrigins(routeGraph, ["DEST"], 1))
+      .toEqual(["DIRECT", "ONE"]);
+    expect(findReachableOrigins(routeGraph, ["DEST"], 2))
+      .toEqual(["DIRECT", "ONE", "TWO"]);
   });
 
   it("filters candidate dates against operationStartDate", () => {

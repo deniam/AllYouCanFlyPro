@@ -171,6 +171,64 @@ describe("connection aggregation", () => {
   });
 
   it.each([
+    { maxTransfers: 1, path: ["AAA", "BBB", "DDD"], stopover: "One stop or fewer" },
+    { maxTransfers: 2, path: ["AAA", "BBB", "CCC", "DDD"], stopover: "Two stops or fewer (overnight)" }
+  ])("expands an ANY origin for $maxTransfers-transfer searches", async ({
+    maxTransfers, path, stopover
+  }) => {
+    const today = new Date();
+    const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const selectedDate = addDaysUTC(todayUtc, 1).toISOString().slice(0, 10);
+    const routes = path.slice(0, -1).map((origin, index) => ({
+      departureStation: origin,
+      arrivalStations: [{ id: path[index + 1], flightDates: [selectedDate] }]
+    }));
+    const catalog = createRouteCatalog(routes);
+    const cached = new Map();
+    const flights = new Map(path.slice(0, -1).map((origin, index) => {
+      const destination = path[index + 1];
+      const departureHour = 8 + index * 4;
+      return [`${origin}-${destination}`, segment(
+        `${origin}-${destination}`, origin, destination,
+        `${selectedDate}T${String(departureHour).padStart(2, "0")}:00:00Z`,
+        `${selectedDate}T${String(departureHour + 2).padStart(2, "0")}:00:00Z`
+      )];
+    }));
+    const search = createConnectionsSearch({
+      isCancelled: () => false,
+      debugLogger: vi.fn(),
+      isDateAvailableForSegment: (origin, destination, date) =>
+        catalog.isDateAvailable(origin, destination, date),
+      getCachedResults: vi.fn(async key => cached.get(key) ?? null),
+      setCachedResults: vi.fn(async (key, value) => cached.set(key, value)),
+      getUnifiedCacheKey: (origin, destination, date) => `${origin}-${destination}-${date}`,
+      checkRouteSegment: vi.fn(async (origin, destination) => [
+        flights.get(`${origin}-${destination}`)
+      ]),
+      updateProgress: vi.fn(),
+      fetchDestinations: async () => routes,
+      routeCatalog: catalog,
+      airportLookup: {},
+      appendRouteToDisplay: vi.fn(),
+      getSettings: () => ({
+        minConnectionTime: 60,
+        maxConnectionTime: 300,
+        connectionRadius: 0,
+        allowChangeAirport: false,
+        maxConcurrentRequests: 3
+      }),
+      getStopoverText: () => stopover
+    });
+
+    const results = await search(
+      ["ANY"], [path.at(-1)], selectedDate, maxTransfers, false, true
+    );
+
+    expect(results.map(result => result.departureStation)).toEqual(path.slice(0, -1));
+    expect(results.every(result => result.arrivalStation === path.at(-1))).toBe(true);
+  });
+
+  it.each([
     { maxTransfers: 1, middlePrefix: "B" },
     { maxTransfers: 2, middlePrefix: "C" }
   ])("processes independent candidate chains concurrently with $maxTransfers transfers", async ({

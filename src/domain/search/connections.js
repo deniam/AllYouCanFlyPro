@@ -4,7 +4,8 @@ import { addDaysUTC, minutesBetween, parseFlightDateTime } from "../dates.js";
 import {
   buildGraph,
   candidateHasValidFlightDates,
-  findCandidateRoutes
+  findCandidateRoutes,
+  findReachableOrigins
 } from "./candidate-builder.js";
 import { mapConcurrentOrdered } from "./concurrency.js";
 import { ErrorCode } from "../../infrastructure/errors.js";
@@ -1015,6 +1016,20 @@ export function createConnectionsSearch({
       destinationList = destinations;
     }
   
+    // Resolve an ANY origin through the reversed route graph. With one
+    // transfer this walks at most two segments; with two, at most three.
+    if (origins.length === 1 && origins[0] === "ANY") {
+      // Airport-change paths contain a ground-transfer edge that is not in the
+      // flight graph. Keep every real departure vertex for that specialized
+      // search and let its distance-aware candidate builder prune the list.
+      origins = allowChangeAirport && connectionRadius > 0
+        ? [...graph.keys()]
+        : findReachableOrigins(graph, destinationList, maxTransfers);
+      debugLogger(
+        `Expanded origin ANY to ${origins.length} candidate departure airports`
+      );
+    }
+
     // 4) Build allowedOffsets
     const maxDayOffset = Math.floor(maxConnection / (60*24)); // =1
     let allowedOffsets = [];

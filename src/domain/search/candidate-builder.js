@@ -40,6 +40,42 @@ export function findCandidateRoutes(graph, origins, destinations, maxTransfers) 
   return results;
 }
 
+/**
+ * Returns graph vertices that can reach any destination within the requested
+ * number of flight segments. Traversing the reversed graph avoids expanding
+ * an ANY origin into unrelated airports.
+ */
+export function findReachableOrigins(graph, destinations, maxTransfers) {
+  const reverseGraph = new Map();
+  for (const [origin, arrivals] of graph) {
+    for (const destination of arrivals) {
+      const predecessors = reverseGraph.get(destination) ?? [];
+      if (!predecessors.includes(origin)) predecessors.push(origin);
+      reverseGraph.set(destination, predecessors);
+    }
+  }
+
+  const reachable = new Set();
+  const expanded = new Set(destinations);
+  let frontier = new Set(destinations);
+  const maximumSegments = Math.max(1, Math.floor(Number(maxTransfers) || 0) + 1);
+
+  for (let depth = 0; depth < maximumSegments && frontier.size; depth += 1) {
+    const nextFrontier = new Set();
+    for (const destination of frontier) {
+      for (const origin of reverseGraph.get(destination) ?? []) {
+        reachable.add(origin);
+        if (!expanded.has(origin)) nextFrontier.add(origin);
+      }
+    }
+    nextFrontier.forEach(origin => expanded.add(origin));
+    frontier = nextFrontier;
+  }
+
+  // Preserve route-catalog order so candidate and result ordering remains stable.
+  return [...graph.keys()].filter(origin => reachable.has(origin));
+}
+
 export function candidateHasValidFlightDates(
   candidate,
   routes,

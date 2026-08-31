@@ -778,16 +778,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     const isOriginAnywhere = (origins.length === 1 && origins[0] === "ANY");
     const isDestinationAnywhere = (destinations.length === 1 && destinations[0] === "ANY");
   
-    // 1) Abort if either field is ANY and more then 2 transfers are allowed.
-    if ((isOriginAnywhere || isDestinationAnywhere) && maxTransfers > 1) {
-      showNotification("Search for routes with 'Anywhere' is available only for flights with up to one stop.");
-      setSearchButtonIdle(searchButton);
-      appState.finishSearch(searchSession);
-      hideProgress();
-      return;
-    }
-  
-    // 2) Abort if both fields are ANY and trip type is roundtrip.
+    // 1) Abort if both fields are ANY and trip type is roundtrip.
     if (isOriginAnywhere && isDestinationAnywhere && appState.tripType === "return") {
       showNotification("Search for 'Anywhere to Anywhere' is available only for one-way direct flights.");
       setSearchButtonIdle(searchButton);
@@ -796,8 +787,9 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
       return;
     }
   
-    // 3) If both origin and destination are ANY (and allowed), replace origins with all unique departure codes.
-    if (isOriginAnywhere && isDestinationAnywhere) {
+    // 2) For a direct Anywhere-to-Anywhere search, expand all departure codes
+    // here. Connecting searches resolve ANY from the route graph.
+    if (isOriginAnywhere && isDestinationAnywhere && maxTransfers === 0) {
       showNotification("Searching all available direct flights. Please wait.");
       let allRoutes = await fetchDestinations();
       allRoutes = allRoutes.map(route => {
@@ -818,7 +810,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
       debugLogger("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
     }
   
-    // 4) If only origin is ANY and destination is specified, filter origins.
+    // 3) If only origin is ANY and destination is specified, filter origins.
     if (isOriginAnywhere && !isDestinationAnywhere && maxTransfers === 0) {
       debugLogger("Origin = ANY; filtering origins by direct routes");
       let fetchedRoutes = await fetchDestinations();
@@ -850,7 +842,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
       debugLogger("Filtered origins:", origins);
     }
   
-    // 5) If only destination is ANY and origin is specified, filter destinations.
+    // 4) If only destination is ANY and origin is specified, filter destinations.
     if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
       debugLogger("Destination = ANY; filtering destinations by direct routes");
       let fetchedRoutes = await fetchDestinations();
