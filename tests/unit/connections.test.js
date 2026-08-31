@@ -229,6 +229,101 @@ describe("connection aggregation", () => {
   });
 
   it.each([
+    {
+      maxTransfers: 1,
+      flightLegs: [["AAA", "FCO"], ["CIA", "DDD"]],
+      stopover: "One stop or fewer"
+    },
+    {
+      maxTransfers: 2,
+      flightLegs: [["AAA", "FCO"], ["CIA", "BBB"], ["BBB", "DDD"]],
+      stopover: "Two stops or fewer (overnight)"
+    }
+  ])("keeps date-valid ANY origins reachable through ground edges with $maxTransfers transfers", async ({
+    maxTransfers, flightLegs, stopover
+  }) => {
+    const today = new Date();
+    const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const selectedDate = addDaysUTC(todayUtc, 1).toISOString().slice(0, 10);
+    const routesByOrigin = new Map();
+    flightLegs.forEach(([origin, destination]) => {
+      const route = routesByOrigin.get(origin) ?? { departureStation: origin, arrivalStations: [] };
+      route.arrivalStations.push({ id: destination, flightDates: [selectedDate] });
+      routesByOrigin.set(origin, route);
+    });
+    routesByOrigin.set("UNRELATED", {
+      departureStation: "UNRELATED",
+      arrivalStations: [{ id: "NOWHERE", flightDates: [selectedDate] }]
+    });
+    routesByOrigin.set("LATE", {
+      departureStation: "LATE",
+      arrivalStations: [{
+        id: "FCO",
+        flightDates: [addDaysUTC(new Date(`${selectedDate}T00:00:00Z`), 1)
+          .toISOString().slice(0, 10)]
+      }]
+    });
+    const routes = [...routesByOrigin.values()];
+    const catalog = createRouteCatalog(routes);
+    const cached = new Map();
+    const flights = new Map(flightLegs.map(([origin, destination], index) => {
+      const departureHour = 8 + index * 4;
+      return [`${origin}-${destination}`, segment(
+        `${origin}-${destination}`, origin, destination,
+        `${selectedDate}T${String(departureHour).padStart(2, "0")}:00:00Z`,
+        `${selectedDate}T${String(departureHour + 2).padStart(2, "0")}:00:00Z`
+      )];
+    }));
+    const checkRouteSegment = vi.fn(async (origin, destination, date) => {
+      if (date !== selectedDate) return [];
+      const found = flights.get(`${origin}-${destination}`);
+      return found ? [found] : [];
+    });
+    const search = createConnectionsSearch({
+      isCancelled: () => false,
+      debugLogger: vi.fn(),
+      isDateAvailableForSegment: (origin, destination, date) =>
+        catalog.isDateAvailable(origin, destination, date),
+      getCachedResults: vi.fn(async key => cached.get(key) ?? null),
+      setCachedResults: vi.fn(async (key, value) => cached.set(key, value)),
+      getUnifiedCacheKey: (origin, destination, date) => `${origin}-${destination}-${date}`,
+      checkRouteSegment,
+      updateProgress: vi.fn(),
+      fetchDestinations: async () => routes,
+      routeCatalog: catalog,
+      airportLookup: {
+        FCO: { latitude: 41.8, longitude: 12.25 },
+        CIA: { latitude: 41.8, longitude: 12.6 }
+      },
+      appendRouteToDisplay: vi.fn(),
+      getSettings: () => ({
+        minConnectionTime: 60,
+        maxConnectionTime: 300,
+        connectionRadius: 100,
+        allowChangeAirport: true,
+        maxConcurrentRequests: 3
+      }),
+      getStopoverText: () => stopover
+    });
+
+    const results = await search(
+      ["ANY"], ["DDD"], selectedDate, maxTransfers, false, true
+    );
+
+    expect(results).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        departureStation: "AAA",
+        arrivalStation: "DDD",
+        segments: expect.arrayContaining([
+          expect.objectContaining({ departureStation: "AAA", arrivalStation: "FCO" })
+        ])
+      })
+    ]));
+    expect(checkRouteSegment.mock.calls.some(([origin]) => origin === "UNRELATED")).toBe(false);
+    expect(checkRouteSegment.mock.calls.some(([origin]) => origin === "LATE")).toBe(false);
+  });
+
+  it.each([
     { maxTransfers: 1, middlePrefix: "B" },
     { maxTransfers: 2, middlePrefix: "C" }
   ])("processes independent candidate chains concurrently with $maxTransfers transfers", async ({

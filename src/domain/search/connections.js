@@ -3,6 +3,7 @@ import { formatFlightDateCombined, unifyRawFlight } from "../flight-normalizer.j
 import { addDaysUTC, minutesBetween, parseFlightDateTime } from "../dates.js";
 import {
   buildGraph,
+  buildGroundTransferGraph,
   candidateHasValidFlightDates,
   findCandidateRoutes,
   findReachableOrigins
@@ -532,7 +533,11 @@ export function createConnectionsSearch({
     connectionRadiusKm,
     allowedOffsets,
     shouldAppend = true,
-    queryOptions = {}
+    queryOptions = {},
+    {
+      originAnywhere = false,
+      destinationAnywhere = false
+    } = {}
   ) {
     const results    = [];
     const routesData = await fetchDestinations();
@@ -631,7 +636,11 @@ export function createConnectionsSearch({
         
         for (let { code: X, via: A } of midsO) {
           for (let { code: Y, via: B } of midsD) {
-            if (origins.includes(Y) || origins.includes(B) || destinations.includes(X) || destinations.includes(A)) {
+            const returnsToExplicitOrigin = !originAnywhere
+              && (origins.includes(Y) || origins.includes(B));
+            const crossesExplicitDestination = !destinationAnywhere
+              && (destinations.includes(X) || destinations.includes(A));
+            if (returnsToExplicitOrigin || crossesExplicitDestination) {
               continue;
             }
             // require that X→Y is either a real flight or within radius foot‑transfer
@@ -661,7 +670,7 @@ export function createConnectionsSearch({
         }
       }
     }
-    console.table(candidates);
+    debugLogger("[DEBUG] two-stop airport-change candidates", candidates);
 
     // ─── 3.1) preliminary flight‑dates filter ───
     const todayUTC      = new Date(new Date().toISOString().slice(0,10) + "T00:00:00Z");
@@ -691,7 +700,7 @@ export function createConnectionsSearch({
     debugLogger(
       `[DEBUG] After real‑flight date‑filter: ${candidates.length} of ${totalCands} remain`
     );
-    console.table(candidates);
+    debugLogger("[DEBUG] date-valid two-stop airport-change candidates", candidates);
 
 
     // ─── 4) Smart-grouped load & stitch: check outer legs once per unique pair,
@@ -858,6 +867,15 @@ export function createConnectionsSearch({
                   : null;
                 const agg = {
                   key: flight1.key + " | " + flight2.key + " | " + flight3.key,
+                  fareSellKey: flight1.fareSellKey,
+                  departure: flight1.departure,
+                  arrival: flight3.arrival,
+                  departureStation: flight1.departureStation,
+                  departureStationText: flight1.departureStationText,
+                  arrivalStation: flight3.arrivalStation,
+                  arrivalStationText: flight3.arrivalStationText,
+                  departureDate: flight1.departureDate,
+                  arrivalDate: flight3.arrivalDate,
                   stops: "2 transfers",
                   totalConnectionTime: conn,
                   segments: [flight1, flight2, flight3],
@@ -972,7 +990,8 @@ export function createConnectionsSearch({
   ) {
     debugLogger("Starting searchConnectingRoutes");
     const routesData = await fetchDestinations();
-    const graph = buildGraph(routesData);
+    const originAnywhere = origins.length === 1 && origins[0] === "ANY";
+    const destinationAnywhere = destinations.length === 1 && destinations[0] === "ANY";
   
     // 1) Load user settings
     const connectionSettings = getSettings();
@@ -1000,37 +1019,7 @@ export function createConnectionsSearch({
     const bookingHorizon = addDaysUTC(todayUTC, 3);
     debugLogger(`Booking horizon set to: ${bookingHorizon.toISOString().slice(0,10)}`);
   
-    // 3) Expand "ANY" destinations
-    let destinationList = [];
-    if (destinations.length === 1 && destinations[0] === "ANY") {
-      const allDest = new Set();
-      routesData.forEach(r => {
-        (r.arrivalStations || []).forEach(s => {
-          allDest.add(typeof s === "object" ? s.id : s);
-        });
-      });
-      destinations = Array.from(allDest);
-      destinationList = destinations;
-      debugLogger(`Expanded ANY → ${destinationList.join(", ")}`);
-    } else {
-      destinationList = destinations;
-    }
-  
-    // Resolve an ANY origin through the reversed route graph. With one
-    // transfer this walks at most two segments; with two, at most three.
-    if (origins.length === 1 && origins[0] === "ANY") {
-      // Airport-change paths contain a ground-transfer edge that is not in the
-      // flight graph. Keep every real departure vertex for that specialized
-      // search and let its distance-aware candidate builder prune the list.
-      origins = allowChangeAirport && connectionRadius > 0
-        ? [...graph.keys()]
-        : findReachableOrigins(graph, destinationList, maxTransfers);
-      debugLogger(
-        `Expanded origin ANY to ${origins.length} candidate departure airports`
-      );
-    }
-
-    // 4) Build allowedOffsets
+    // 3) Build allowedOffsets
     const maxDayOffset = Math.floor(maxConnection / (60*24)); // =1
     let allowedOffsets = [];
     if (maxTransfers > 1) {
@@ -1050,6 +1039,39 @@ export function createConnectionsSearch({
       }
     }
     debugLogger(`Allowed offsets: ${allowedOffsets.join(", ")}`);
+
+    // Build the candidate graph only from routes operating on a relevant
+    // date. The selected-date graph is stricter because the first flight of
+    // every result must depart on the user's selected date.
+    const allowedDates = allowedOffsets.map(offset =>
+      addDaysUTC(baseDateUTC, offset).toISOString().slice(0, 10)
+    );
+    const graph = buildGraph(routesData, allowedDates);
+    const selectedDateGraph = buildGraph(routesData, [selectedDate]);
+
+    // 4) Expand "ANY" destinations from the date-filtered graph.
+    let destinationList = destinations;
+    if (destinationAnywhere) {
+      destinationList = [...new Set([...graph.values()].flat())];
+      destinations = destinationList;
+      debugLogger(`Expanded destination ANY → ${destinationList.join(", ")}`);
+    }
+
+    // Resolve an ANY origin through the reversed flight graph. Optional
+    // ground edges consume no flight segment and may occur only between two
+    // flights, so one/two-transfer limits still mean two/three flights.
+    if (originAnywhere) {
+      const groundGraph = allowChangeAirport && connectionRadius > 0
+        ? buildGroundTransferGraph(graph, airportLookup, connectionRadius)
+        : new Map();
+      origins = findReachableOrigins(graph, destinationList, maxTransfers, {
+        groundGraph,
+        originGraph: selectedDateGraph
+      });
+      debugLogger(
+        `Expanded origin ANY to ${origins.length} date-valid candidate departure airports`
+      );
+    }
   
     // 5) Airport-change shortcut?
     const switchableForTwoStops = (
@@ -1085,7 +1107,8 @@ export function createConnectionsSearch({
         connectionRadius,
         allowedOffsets,
         shouldAppend,
-        queryOptions
+        queryOptions,
+        { originAnywhere, destinationAnywhere }
       );
       results.push(...twoStopResults || []);
       debugLogger(`Found ${results.length} two-stop routes with airport change`);
