@@ -214,6 +214,40 @@ describe("results renderer", () => {
     expect(button.dataset.outboundKey).toBe("flight-key");
   });
 
+  it("expands payment details when the flight card is clicked and collapses them again", () => {
+    const { list, renderer } = setupRenderer();
+
+    renderer.display([segment()]);
+
+    const card = list.querySelector(".flight-card");
+    const payment = card.querySelector(".flight-payment");
+    expect(card.getAttribute("aria-expanded")).toBe("false");
+    expect(payment.classList.contains("hidden")).toBe(true);
+
+    card.click();
+    expect(card.getAttribute("aria-expanded")).toBe("true");
+    expect(payment.classList.contains("hidden")).toBe(false);
+
+    card.click();
+    expect(card.getAttribute("aria-expanded")).toBe("false");
+    expect(payment.classList.contains("hidden")).toBe(true);
+  });
+
+  it("keeps only one flight card expanded at the same level", () => {
+    const { list, renderer } = setupRenderer();
+
+    renderer.display([segment({ key: "first" }), segment({ key: "second" })]);
+
+    const [first, second] = list.querySelectorAll(".flight-card");
+    first.click();
+    second.click();
+
+    expect(first.getAttribute("aria-expanded")).toBe("false");
+    expect(first.querySelector(".flight-payment").classList.contains("hidden")).toBe(true);
+    expect(second.getAttribute("aria-expanded")).toBe("true");
+    expect(second.querySelector(".flight-payment").classList.contains("hidden")).toBe(false);
+  });
+
   it("renders and toggles round-trip results while keeping stopover information", () => {
     const { list, renderer } = setupRenderer();
     const inbound = segment({
@@ -245,6 +279,47 @@ describe("results renderer", () => {
     toggle.click();
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(returnList.classList.contains("hidden")).toBe(false);
+  });
+
+  it("keeps outbound and inbound expansion independent for round trips", () => {
+    const { list, renderer } = setupRenderer();
+    const inboundOne = segment({
+      key: "return-one",
+      departureStationCode: "SSH",
+      arrivalStationCode: "PMO",
+      calculatedDuration: {
+        hours: 3,
+        minutes: 20,
+        totalMinutes: 200,
+        departureDate: new Date("2026-09-01T21:35:00Z"),
+        arrivalDate: new Date("2026-09-02T00:55:00Z")
+      }
+    });
+    const inboundTwo = { ...inboundOne, key: "return-two", flightCode: "W91234" };
+    const outboundOne = segment({ key: "outbound-one", returnFlights: [inboundOne, inboundTwo] });
+    const outboundTwo = segment({ key: "outbound-two", returnFlights: [inboundOne, inboundTwo] });
+
+    renderer.displayRoundTrips([outboundOne, outboundTwo]);
+
+    const groups = list.querySelectorAll(".flight-trip-group");
+    const firstOutbound = groups[0].querySelector(":scope > .flight-card");
+    const secondOutbound = groups[1].querySelector(":scope > .flight-card");
+    firstOutbound.click();
+    secondOutbound.click();
+
+    expect(firstOutbound.getAttribute("aria-expanded")).toBe("false");
+    expect(secondOutbound.getAttribute("aria-expanded")).toBe("true");
+
+    const secondGroupReturnToggle = groups[1].querySelector(".return-toggle");
+    secondGroupReturnToggle.click();
+    const secondReturnList = groups[1].querySelector(".flight-return-list");
+    const [firstInbound, secondInbound] = secondReturnList.querySelectorAll(".flight-card");
+    firstInbound.click();
+    secondInbound.click();
+
+    expect(secondOutbound.getAttribute("aria-expanded")).toBe("true");
+    expect(firstInbound.getAttribute("aria-expanded")).toBe("false");
+    expect(secondInbound.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("updates one streamed round-trip group without losing its expanded state", () => {
@@ -370,5 +445,9 @@ describe("results renderer", () => {
     expect(list.querySelectorAll(".flight-route-row")).toHaveLength(2);
     expect(list.querySelectorAll(".flight-continue-button")).toHaveLength(2);
     expect(list.textContent).toContain("Self-connection: 2h 0m");
+
+    list.querySelector(".flight-card").click();
+    expect([...list.querySelectorAll(".flight-payment")]
+      .every(payment => !payment.classList.contains("hidden"))).toBe(true);
   });
 });

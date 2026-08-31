@@ -168,6 +168,7 @@ export function createResultsRenderer({
   let returnSortOption = "departure";
   let tooltipListenerBound = false;
   let roundTripListenerBound = false;
+  let flightCardListenerBound = false;
   const roundTripEntries = new Map();
 
   function segmentHtml(segment, label = "", extraInfo = "") {
@@ -223,14 +224,14 @@ export function createResultsRenderer({
       </div>`;
   }
 
-  function paymentHtml(segment) {
-    return `<div class="flight-payment">
+  function paymentHtml(segment, expanded = false) {
+    return `<div class="flight-payment${expanded ? "" : " hidden"}">
       <div class="flight-price">${escapeHtml(segment.currency)} ${escapeHtml(segment.displayPrice)}</div>
       <button type="button" class="continue-payment-button flight-continue-button" data-outbound-key="${escapeHtml(segment.key)}">Continue</button>
     </div>`;
   }
 
-  function routeHtml(flight, label = "", extraInfo = "") {
+  function routeHtml(flight, label = "", extraInfo = "", expanded = false) {
     const inbound = label.toLowerCase().includes("inbound");
     const segments = flight.segments?.length ? flight.segments : [flight];
     const body = segments.map((segment, index) => {
@@ -241,9 +242,9 @@ export function createResultsRenderer({
           - segment.calculatedDuration.arrivalDate) / 60000));
         connection = `<div class="theme-text-muted text-center text-sm my-2">Self-connection: ${Math.floor(minutes / 60)}h ${minutes % 60}m${escapeHtml(airportChangeText(flight, index))}</div>`;
       }
-      return `${segmentHtml(segment, index === 0 ? label : "", index === 0 ? extraInfo : "")}${paymentHtml(segment)}${connection}`;
+      return `${segmentHtml(segment, index === 0 ? label : "", index === 0 ? extraInfo : "")}${paymentHtml(segment, expanded)}${connection}`;
     }).join("");
-    return `<div class="flight-card ${inbound ? "flight-card--inbound" : ""}">${body}</div>`;
+    return `<div class="flight-card ${inbound ? "flight-card--inbound" : ""}" data-flight-key="${escapeHtml(flightKey(flight))}" tabindex="0" role="button" aria-expanded="${expanded}">${body}</div>`;
   }
 
   function bindTooltips() {
@@ -272,11 +273,64 @@ export function createResultsRenderer({
     });
   }
 
+  function bindFlightCardToggles() {
+    if (flightCardListenerBound) return;
+    flightCardListenerBound = true;
+    list.addEventListener("click", event => {
+      if (event.target.closest(".tooltip-trigger, button, a, input, select, textarea")) return;
+      const card = event.target.closest(".flight-card");
+      if (!card) return;
+      toggleFlightCard(card);
+    });
+
+    list.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const card = event.target.closest(".flight-card");
+      if (!card || event.target !== card) return;
+      event.preventDefault();
+      toggleFlightCard(card);
+    });
+  }
+
+  function toggleFlightCard(card) {
+    const expanded = card.getAttribute("aria-expanded") === "true";
+    if (!expanded) {
+      cardsAtSameLevel(card).forEach(sibling => {
+        if (sibling !== card) setFlightCardExpanded(sibling, false);
+      });
+    }
+    setFlightCardExpanded(card, !expanded);
+  }
+
+  function setFlightCardExpanded(card, expanded) {
+    card.setAttribute("aria-expanded", String(expanded));
+    card.querySelectorAll(".flight-payment").forEach(payment => {
+      payment.classList.toggle("hidden", !expanded);
+    });
+  }
+
+  function cardsAtSameLevel(card) {
+    const returnList = card.closest(".flight-return-list");
+    if (returnList) {
+      return [...returnList.children].filter(child => child.classList.contains("flight-card"));
+    }
+
+    if (card.closest(".flight-trip-group")) {
+      return [...list.children]
+        .filter(child => child.classList.contains("flight-trip-group"))
+        .map(group => [...group.children].find(child => child.classList.contains("flight-card")))
+        .filter(Boolean);
+    }
+
+    return [...list.children].filter(child => child.classList.contains("flight-card"));
+  }
+
   function prepare(results) {
     toolbar.classList.remove("hidden");
     total.textContent = `Total results: ${results.length}`;
     list.replaceChildren();
     bindTooltips();
+    bindFlightCardToggles();
   }
 
   function expandedRoundTripKeys() {
@@ -285,18 +339,29 @@ export function createResultsRenderer({
       .map(group => group.dataset.roundtripKey));
   }
 
-  function roundTripGroupHtml(outbound, index, expanded = false) {
+  function expandedFlightKeys() {
+    return new Set([...list.querySelectorAll('.flight-card[aria-expanded="true"]')]
+      .map(card => card.dataset.flightKey)
+      .filter(Boolean));
+  }
+
+  function roundTripGroupHtml(outbound, index, expanded = false, expandedCards = new Set()) {
     const returnsId = `return-list-${index}`;
     const availableReturns = sortReturnFlightsArray(outbound.returnFlights ?? [], returnSortOption, "asc");
     const count = availableReturns.length;
     const returns = availableReturns.map((flight, returnIndex) => {
       const minutes = Math.max(0, Math.round((flight.calculatedDuration.departureDate
         - outbound.calculatedDuration.arrivalDate) / 60000));
-      return routeHtml(flight, `Inbound Flight ${returnIndex + 1}`, `Stopover: ${Math.floor(minutes / 60)}h ${minutes % 60}m`);
+      return routeHtml(
+        flight,
+        `Inbound Flight ${returnIndex + 1}`,
+        `Stopover: ${Math.floor(minutes / 60)}h ${minutes % 60}m`,
+        expandedCards.has(flightKey(flight))
+      );
     }).join("") ?? "";
     const isExpanded = expanded && count > 0;
     return `<div class="flight-trip-group" data-roundtrip-index="${index}" data-roundtrip-key="${escapeHtml(flightKey(outbound))}">
-      ${routeHtml(outbound, "Outbound Flight")}
+      ${routeHtml(outbound, "Outbound Flight", "", expandedCards.has(flightKey(outbound)))}
       ${count ? `<div class="flight-return-summary"><button type="button" class="return-toggle" aria-expanded="${isExpanded}" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
       <div id="${returnsId}" class="flight-return-list${isExpanded ? "" : " hidden"}">${returns}</div>
     </div>`;
@@ -304,12 +369,13 @@ export function createResultsRenderer({
 
   function renderRoundTrips() {
     const expanded = expandedRoundTripKeys();
+    const expandedCards = expandedFlightKeys();
     const outbounds = sortResultsArray([...roundTripEntries.values()], sortOption, airportName, sortDirection);
     prepare(outbounds);
     bindRoundTripToggles();
     outbounds.forEach((outbound, index) => list.insertAdjacentHTML(
       "beforeend",
-      roundTripGroupHtml(outbound, index, expanded.has(flightKey(outbound)))
+      roundTripGroupHtml(outbound, index, expanded.has(flightKey(outbound)), expandedCards)
     ));
   }
 
