@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
 
@@ -29,6 +30,16 @@ describe("extension structure", () => {
 
   it("provides separate donation controls", () => {
     expect(document.querySelectorAll(".donate-link")).toHaveLength(2);
+  });
+
+  it("injects the donation completion marker only on the Stripe success page", () => {
+    const successScript = JSON.parse(readFileSync(resolve("manifest.json"), "utf8"))
+      .content_scripts.find(script => script.js?.includes("src/donation-success.js"));
+    expect(successScript).toEqual({
+      matches: ["https://deniam.github.io/AllYouCanFlyPro/donation-success.html*"],
+      js: ["src/donation-success.js"],
+      run_at: "document_start"
+    });
   });
 
   it("exposes the accessible sorting controls without fare or airport-change ranking", () => {

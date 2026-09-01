@@ -67,6 +67,16 @@ For Orion on iOS/iPadOS, enable extension support in Orion, import the unpacked/
 4. Update `src/data/routes.js` separately only when refreshing the packaged offline fallback for an application release.
 5. Run `npm run check` and test airport resolution, date filtering, Anywhere, connecting routes, offline cache and packaged fallback behavior.
 
+## Donations
+
+Configure the Stripe Payment Link to redirect after a completed checkout to
+`https://deniam.github.io/AllYouCanFlyPro/donation-success.html`. The page is
+published with the route dataset by the sibling scanner project. The extension
+marks the local profile as supported only when that page loads; opening the
+Stripe checkout and abandoning it does not permanently dismiss the reminder.
+This is a client-side convenience signal, not server-side payment
+verification, and it can be reset by removing the extension's local data.
+
 ## Manual platform matrix
 
 Run [the smoke checklist](docs/manual-smoke-checklist.md) on:

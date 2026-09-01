@@ -35,6 +35,11 @@
         "js": ["src/content-parsers.js", "src/content.js"],
         "run_at": "document_start",
         "all_frames": true
+      },
+      {
+        "matches": ["https://deniam.github.io/AllYouCanFlyPro/donation-success.html*"],
+        "js": ["src/donation-success.js"],
+        "run_at": "document_start"
       }
     ],
     "content_security_policy": {

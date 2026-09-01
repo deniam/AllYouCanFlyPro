@@ -1210,7 +1210,13 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     themeController ??= createThemeController({ repository: settingsRepository });
     mountSettingsPanel({ settings, animate: animateElement });
     
-    mountDonationReminder({ storage: localStorage });
+    mountDonationReminder({
+      storage: localStorage,
+      getDonationCompleted: async () => {
+        const result = await extensionGateway.storageGet("donationCompleted");
+        return result?.donationCompleted === true;
+      }
+    });
     initCustomGroupsUI();
 
     // ========== 2. Setup Autocomplete and Multi-Airport Fields ==========
