@@ -997,7 +997,9 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
       appState.defaultResults = [...results];
       if (tripType === "return") displayRoundTripResultsAll(results);
       else displayGlobalResults(results);
-      donationReminderController?.resultsDisplayed(results.length);
+      if (!results.diagnostics?.failedProbes?.length) {
+        donationReminderController?.resultsDisplayed(results.length);
+      }
       renderSearchDiagnostics(results.diagnostics);
       debugLogger(`Search complete. Valid results: ${results.length}`);
     } catch (error) {
