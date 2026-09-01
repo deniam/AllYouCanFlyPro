@@ -24,6 +24,27 @@ export const MULTI_AIRPORT_CITIES = {
   "ALX": ["ALY", "HBE"]
 };
 
+// Routes returned by Wizz Air through city-level airport aliases but not
+// supported by Multipass. Keep these out of searches involving multi-airport
+// city groups.
+export const EXCLUDED_ROUTES = Object.freeze([
+  "LTN-BBU", "LGW-OTP", "OTP-LGW",
+  "ALC-BBU", "ATH-BBU", "BBU-ALC", "BBU-ATH", "BBU-BCN",
+  "BBU-DTM", "BBU-EIN", "BBU-FAO", "BBU-FCO", "BBU-JMK",
+  "BBU-LCA", "BBU-LTN", "BBU-LYS", "BBU-MAD", "BBU-MXP",
+  "BBU-NCE", "BBU-PMI", "BBU-RMO", "BBU-SVQ", "BBU-TLV",
+  "BBU-VLC", "BCN-BBU", "BRI-BBU", "CDT-BUD", "CDT-FCO",
+  "CDT-KRK", "CDT-LGW", "CDT-LTN", "CDT-MXP", "CDT-SOF",
+  "CDT-TIA", "CDT-WAW", "KRK-LTN", "MLH-BBU", "MLH-BTS",
+  "BBU-ALC", "BBU-ATH", "ALC-BBU", "BBU-BCN", "DTM-BBU",
+  "EIN-BBU", "FAO-BBU", "FCO-BBU", "JMK-BBU", "LCA-BBU",
+  "LTN-BBU", "LYS-BBU", "MAD-BBU", "MXP-BBU", "NCE-BBU",
+  "PMI-BBU", "RMO-BBU", "SVQ-BBU", "TLV-BBU", "VLC-BBU",
+  "BBU-BCN", "BBU-BRI", "BUD-CDT", "FCO-CDT", "KRK-CDT",
+  "LGW-CDT", "LTN-CDT", "MXP-CDT", "SOF-CDT", "TIA-CDT",
+  "WAW-CDT", "LTN-KRK", "BBU-MLH", "BTS-MLH"
+]);
+
 // Country flag mapping.
 const flagMapping = {
   "Albania": "🇦🇱",
