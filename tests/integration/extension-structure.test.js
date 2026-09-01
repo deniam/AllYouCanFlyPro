@@ -32,6 +32,16 @@ describe("extension structure", () => {
     expect(document.querySelectorAll(".donate-link")).toHaveLength(2);
   });
 
+  it("uses one accessible donation CTA without the review action", () => {
+    const reminder = document.getElementById("donation-reminder");
+    expect(reminder?.getAttribute("role")).toBe("dialog");
+    expect(reminder?.getAttribute("aria-labelledby")).toBe("donation-reminder-title");
+    expect(reminder?.getAttribute("aria-describedby")).toBe("donation-reminder-description");
+    expect(document.getElementById("leave-review")).toBeNull();
+    expect(document.getElementById("donate-link-reminder")?.textContent).toContain("Support the project");
+    expect(reminder?.classList.contains("transform")).toBe(false);
+  });
+
   it("injects the donation completion marker only on the Stripe success page", () => {
     const successScript = JSON.parse(readFileSync(resolve("manifest.json"), "utf8"))
       .content_scripts.find(script => script.js?.includes("src/donation-success.js"));

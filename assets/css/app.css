@@ -536,19 +536,17 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 }
 
 #donation-reminder {
+  transform: translate(-50%, -50%);
   animation: slideIn 0.5s ease-out;
   box-shadow: 0 10px 25px var(--theme-shadow);
   border-left: 4px solid #c90076;
 }
 
 @keyframes slideIn {
-  from { transform: translateY(100%); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.reminder-hidden { animation: fadeOut 0.3s ease-in forwards; }
-
-@keyframes fadeOut {
-  from { transform: translateY(0); opacity: 1; }
-  to { transform: translateY(20px); opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  #donation-reminder { animation: none; }
 }

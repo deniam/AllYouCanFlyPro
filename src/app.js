@@ -63,6 +63,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
   let CACHE_LIFETIME = initialSettings.cacheLifetimeHours * 60 * 60 * 1000;
   // 4 hours in ms
   let themeController;
+  let donationReminderController;
   // Build airport names mapping from AIRPORTS list (strip code in parentheses)
   let AIRPORTS = [];
   let COUNTRY_AIRPORTS = {};
@@ -767,6 +768,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     // Clear previous results and mark search as active.
     appState.results = [];
     appState.defaultResults = [];
+    donationReminderController?.searchStarted();
     resultsRenderer.reset();
     totalResultsEl.textContent = "Total results: 0";
     renderSearchDiagnostics({ failedProbes: [] });
@@ -995,6 +997,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
       appState.defaultResults = [...results];
       if (tripType === "return") displayRoundTripResultsAll(results);
       else displayGlobalResults(results);
+      donationReminderController?.resultsDisplayed(results.length);
       renderSearchDiagnostics(results.diagnostics);
       debugLogger(`Search complete. Valid results: ${results.length}`);
     } catch (error) {
@@ -1210,7 +1213,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     themeController ??= createThemeController({ repository: settingsRepository });
     mountSettingsPanel({ settings, animate: animateElement });
     
-    mountDonationReminder({
+    donationReminderController = mountDonationReminder({
       storage: localStorage,
       getDonationCompleted: async () => {
         const result = await extensionGateway.storageGet("donationCompleted");
