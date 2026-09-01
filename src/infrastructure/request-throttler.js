@@ -1,6 +1,8 @@
 import { cancelledError, throwIfAborted } from "./errors.js";
 
-const RECOVERY_SUCCESS_COUNT = 10;
+const RECOVERY_SUCCESS_COUNT = 5;
+const TRANSIENT_FAILURE_RATIO = 0.2;
+const MIN_OUTCOME_WINDOW = 5;
 const DEFAULT_STAGGER_MIN_MS = 25;
 const DEFAULT_STAGGER_MAX_MS = 100;
 
@@ -34,8 +36,7 @@ export function createRequestScheduler(
   {
     random = Math.random,
     staggerMinMs = DEFAULT_STAGGER_MIN_MS,
-    staggerMaxMs = DEFAULT_STAGGER_MAX_MS,
-    initialConcurrency = Number.POSITIVE_INFINITY
+    staggerMaxMs = DEFAULT_STAGGER_MAX_MS
   } = {}
 ) {
   const queue = [];
@@ -43,17 +44,16 @@ export function createRequestScheduler(
   let requestsInBatch = 0;
   let batchPauseUntil = 0;
   let cooldownUntil = 0;
-  const initialLimit = Number.isFinite(initialConcurrency)
-    ? Math.max(1, Number(initialConcurrency))
-    : Number.POSITIVE_INFINITY;
-  let effectiveConcurrency = Math.min(
-    configuredConcurrency(settingsProvider()),
-    initialLimit
-  );
-  let recovering = effectiveConcurrency < configuredConcurrency(settingsProvider());
+  let effectiveConcurrency = configuredConcurrency(settingsProvider());
+  let recovering = false;
   let successfulResponses = 0;
+  let outcomeWindow = [];
+  let outcomeWindowSize = Math.max(MIN_OUTCOME_WINDOW, effectiveConcurrency);
+  let peakActiveRequests = 0;
+  let concurrencyChanges = [];
   let timer = null;
   let nextStartAt = 0;
+  const stateListeners = new Set();
 
   const minimumStagger = Math.max(0, Number(staggerMinMs) || 0);
   const maximumStagger = Math.max(minimumStagger, Number(staggerMaxMs) || 0);
@@ -65,9 +65,46 @@ export function createRequestScheduler(
 
   function currentConcurrency() {
     const configured = configuredConcurrency(settingsProvider());
-    if (!recovering) effectiveConcurrency = configured;
-    else effectiveConcurrency = Math.min(effectiveConcurrency, configured);
+    effectiveConcurrency = Math.min(effectiveConcurrency, configured);
     return effectiveConcurrency;
+  }
+
+  function stateSnapshot() {
+    return {
+      activeRequests,
+      queuedRequests: queue.filter(item => !item.settled).length,
+      effectiveConcurrency: currentConcurrency(),
+      recovering,
+      requestsInBatch,
+      cooldownUntil,
+      nextStartAt,
+      peakActiveRequests,
+      concurrencyChanges: [...concurrencyChanges]
+    };
+  }
+
+  function notifyState() {
+    const state = stateSnapshot();
+    for (const listener of stateListeners) {
+      try {
+        listener(state);
+      } catch (error) {
+        logger("Request scheduler state listener failed", error);
+      }
+    }
+  }
+
+  function setEffectiveConcurrency(value, reason) {
+    const configured = configuredConcurrency(settingsProvider());
+    const next = Math.max(1, Math.min(configured, Math.floor(Number(value) || 1)));
+    const previous = effectiveConcurrency;
+    effectiveConcurrency = next;
+    recovering = effectiveConcurrency < configured;
+    if (previous !== next) {
+      concurrencyChanges.push({ from: previous, to: next, reason });
+      notifyState();
+    }
+    return { previous, next };
   }
 
   function clearTimer() {
@@ -96,6 +133,8 @@ export function createRequestScheduler(
 
   function start(item) {
     activeRequests += 1;
+    peakActiveRequests = Math.max(peakActiveRequests, activeRequests);
+    notifyState();
     requestsInBatch += 1;
     if (currentConcurrency() > 1) {
       nextStartAt = performance.now() + nextStaggerDelay();
@@ -105,6 +144,7 @@ export function createRequestScheduler(
       .then(value => finish(item, "resolve", value), error => finish(item, "reject", error))
       .finally(() => {
         activeRequests -= 1;
+        notifyState();
         pump();
       });
   }
@@ -170,16 +210,17 @@ export function createRequestScheduler(
       };
       signal?.addEventListener("abort", item.onAbort, { once: true });
       queue.push(item);
+      notifyState();
       pump();
     });
   }
 
   function recordRateLimit(waitMs, status, retryAfter = null) {
     const now = performance.now();
-    const previous = effectiveConcurrency;
-    effectiveConcurrency = 1;
-    recovering = true;
+    const { previous } = setEffectiveConcurrency(1, `rate-limit-${status}`);
     successfulResponses = 0;
+    outcomeWindow = [];
+    outcomeWindowSize = MIN_OUTCOME_WINDOW;
     cooldownUntil = Math.max(cooldownUntil, now + Math.max(0, waitMs));
     logger(
       `Rate limit HTTP ${status}: concurrency ${previous} → 1, cooldown ${waitMs}ms` +
@@ -189,31 +230,73 @@ export function createRequestScheduler(
     pump();
   }
 
-  function recordTransientFailure(error) {
-    const configured = configuredConcurrency(settingsProvider());
-    const previous = effectiveConcurrency;
-    effectiveConcurrency = Math.max(1, Math.floor(effectiveConcurrency / 2));
-    recovering = effectiveConcurrency < configured;
-    successfulResponses = 0;
-    logger(
-      `Transient availability failure${error?.status ? ` HTTP ${error.status}` : ""}: ` +
-      `concurrency ${previous} → ${effectiveConcurrency}`
-    );
+  function recordProbeOutcome(kind, error = null) {
+    if (!['success', 'transient'].includes(kind)) return;
+    outcomeWindow.push(kind);
+    if (kind === 'success') {
+      successfulResponses += 1;
+      if (recovering && successfulResponses >= RECOVERY_SUCCESS_COUNT) {
+        successfulResponses = 0;
+        const { previous, next } = setEffectiveConcurrency(
+          effectiveConcurrency + 1,
+          'healthy-recovery'
+        );
+        if (previous !== next) logger(`Request concurrency recovered: ${previous} → ${next}`);
+      }
+    } else {
+      successfulResponses = 0;
+    }
+
+    if (outcomeWindow.length >= outcomeWindowSize) {
+      const transientFailures = outcomeWindow.filter(value => value === 'transient').length;
+      const failureRatio = transientFailures / outcomeWindow.length;
+      outcomeWindow = [];
+      if (failureRatio >= TRANSIENT_FAILURE_RATIO) {
+        const { previous, next } = setEffectiveConcurrency(
+          Math.floor(effectiveConcurrency / 2),
+          'transient-window'
+        );
+        successfulResponses = 0;
+        if (previous !== next) {
+          logger(
+            `Transient availability window${error?.status ? ` HTTP ${error.status}` : ""}: ` +
+            `concurrency ${previous} → ${next}`
+          );
+        }
+      }
+      outcomeWindowSize = Math.max(MIN_OUTCOME_WINDOW, effectiveConcurrency);
+    }
+    notifyState();
     pump();
   }
 
+  function recordTransientFailure(error) {
+    recordProbeOutcome('transient', error);
+  }
+
   function recordSuccess() {
-    if (!recovering) return;
-    successfulResponses += 1;
-    if (successfulResponses < RECOVERY_SUCCESS_COUNT) return;
+    recordProbeOutcome('success');
+  }
+
+  function beginSearch(maxConcurrency = configuredConcurrency(settingsProvider())) {
+    const now = performance.now();
+    const configured = Math.min(
+      configuredConcurrency(settingsProvider()),
+      Math.max(1, Math.min(50, Number(maxConcurrency) || 1))
+    );
+    const next = cooldownUntil > now ? 1 : configured;
+    const previous = effectiveConcurrency;
+    effectiveConcurrency = next;
+    recovering = next < configured;
     successfulResponses = 0;
-    const configured = configuredConcurrency(settingsProvider());
-    if (effectiveConcurrency < configured) {
-      const previous = effectiveConcurrency;
-      effectiveConcurrency += 1;
-      logger(`Request concurrency recovered: ${previous} → ${effectiveConcurrency}`);
-    }
-    if (effectiveConcurrency >= configured) recovering = false;
+    outcomeWindow = [];
+    outcomeWindowSize = Math.max(MIN_OUTCOME_WINDOW, next);
+    peakActiveRequests = activeRequests;
+    concurrencyChanges = previous === next
+      ? []
+      : [{ from: previous, to: next, reason: 'search-start' }];
+    logger(`Request scheduler search started: max concurrency ${configured}, effective concurrency ${next}`);
+    notifyState();
     pump();
   }
 
@@ -221,12 +304,16 @@ export function createRequestScheduler(
     requestsInBatch = 0;
     batchPauseUntil = 0;
     nextStartAt = 0;
+    notifyState();
     pump();
   }
 
   function settingsChanged() {
+    const configured = configuredConcurrency(settingsProvider());
+    if (!recovering) setEffectiveConcurrency(configured, 'settings-change');
+    else if (effectiveConcurrency > configured) setEffectiveConcurrency(configured, 'settings-change');
     logger(
-      `Request scheduler configured: max concurrency ${configuredConcurrency(settingsProvider())}, ` +
+      `Request scheduler configured: max concurrency ${configured}, ` +
       `effective concurrency ${currentConcurrency()}`
     );
     pump();
@@ -239,19 +326,18 @@ export function createRequestScheduler(
 
   return Object.freeze({
     schedule,
+    beginSearch,
     recordRateLimit,
+    recordProbeOutcome,
     recordTransientFailure,
     recordSuccess,
     resetBatch,
     settingsChanged,
-    getState: () => ({
-      activeRequests,
-      queuedRequests: queue.filter(item => !item.settled).length,
-      effectiveConcurrency: currentConcurrency(),
-      recovering,
-      requestsInBatch,
-      cooldownUntil,
-      nextStartAt
-    })
+    subscribe(listener) {
+      stateListeners.add(listener);
+      listener(stateSnapshot());
+      return () => stateListeners.delete(listener);
+    },
+    getState: stateSnapshot
   });
 }

@@ -83,6 +83,14 @@ export function createMultipassClient({
   let sessionPromise = null;
   let refreshPromise = null;
   const inFlightRequests = new Map();
+  function recordLogicalOutcome(kind, error = null) {
+    if (typeof scheduler.recordProbeOutcome === "function") {
+      scheduler.recordProbeOutcome(kind, error);
+      return;
+    }
+    if (kind === "transient") scheduler.recordTransientFailure?.(error);
+    else if (kind === "success") scheduler.recordSuccess?.();
+  }
 
   function readSession() {
     try {
@@ -228,6 +236,7 @@ export function createMultipassClient({
 
   async function requestFlights(segment, signal, { strictPayload = false } = {}) {
     let lastError;
+    let sawTransientFailure = false;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       throwIfAborted(signal);
       try {
@@ -246,13 +255,12 @@ export function createMultipassClient({
           }),
           signal
         }, requestTimeoutMs), signal);
-
         // A plain 302 is the documented missing-route response. Opaque
         // redirects are deliberately not treated as a permanent exclusion:
         // they can also represent an authentication redirect.
         const isMissingRoute = response.status === MISSING_ROUTE_STATUS;
         if (isMissingRoute) {
-          scheduler.recordSuccess();
+          recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
           try {
             onRouteNotFound({ origin: segment.origin, destination: segment.destination });
           } catch (error) {
@@ -264,7 +272,7 @@ export function createMultipassClient({
           return { outbound: [], inbound: null };
         }
         if (EMPTY_AVAILABILITY_STATUSES.has(response.status)) {
-          scheduler.recordSuccess();
+          recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
           return { outbound: [], inbound: null };
         }
         if ([426, 429, 501].includes(response.status)) {
@@ -299,7 +307,7 @@ export function createMultipassClient({
         const payload = await response.json();
         if (!Array.isArray(payload?.flightsOutbound)) {
           if (!strictPayload) {
-            scheduler.recordSuccess();
+            recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
             return { outbound: [], inbound: null };
           }
           throw new AppError(
@@ -319,7 +327,7 @@ export function createMultipassClient({
             );
           }
         }
-        scheduler.recordSuccess();
+        recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
         return { outbound: payload.flightsOutbound, inbound };
       } catch (error) {
         if (signal?.aborted) throw new AppError(ErrorCode.CANCELLED, "Search cancelled");
@@ -331,11 +339,13 @@ export function createMultipassClient({
           });
         lastError = normalized;
         if (normalized.code !== ErrorCode.RATE_LIMITED
-          && (normalized.retryable || normalized.status >= 500)
-          && typeof scheduler.recordTransientFailure === "function") {
-          scheduler.recordTransientFailure(normalized);
+          && (normalized.retryable || normalized.status >= 500)) {
+          sawTransientFailure = true;
         }
-        if (!normalized.retryable || attempt === maxAttempts - 1) throw normalized;
+        if (!normalized.retryable || attempt === maxAttempts - 1) {
+          if (sawTransientFailure) recordLogicalOutcome("transient", normalized);
+          throw normalized;
+        }
         if (normalized.code !== ErrorCode.RATE_LIMITED) {
           await abortableDelay(1000, signal);
         }

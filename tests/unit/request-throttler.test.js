@@ -41,7 +41,7 @@ describe("request scheduler", () => {
   afterEach(() => vi.useRealTimers());
 
   it("never exceeds the configured active-request limit", async () => {
-    const gates = Array.from({ length: 7 }, deferred);
+    const gates = Array.from({ length: 15 }, deferred);
     let active = 0;
     let maximum = 0;
     const scheduler = createRequestScheduler(
@@ -57,11 +57,12 @@ describe("request scheduler", () => {
       active -= 1;
     }));
 
-    await vi.waitFor(() => expect(scheduler.getState().activeRequests).toBe(7));
-    expect(maximum).toBe(7);
+    scheduler.beginSearch(15);
+    await vi.waitFor(() => expect(scheduler.getState().activeRequests).toBe(15));
+    expect(maximum).toBe(15);
     gates.forEach(gate => gate.resolve());
     await Promise.all(requests);
-    expect(maximum).toBe(7);
+    expect(maximum).toBe(15);
   });
 
   it("staggers concurrent request starts and applies the batch pause", async () => {
@@ -128,28 +129,33 @@ describe("request scheduler", () => {
     );
     scheduler.recordRateLimit(40000, 429, "40");
     expect(scheduler.getState()).toMatchObject({ effectiveConcurrency: 1, recovering: true });
-    for (let index = 0; index < 10; index++) scheduler.recordSuccess();
+    for (let index = 0; index < 5; index++) scheduler.recordSuccess();
     expect(scheduler.getState().effectiveConcurrency).toBe(2);
     for (const expected of [3, 4, 5]) {
-      for (let index = 0; index < 10; index++) scheduler.recordSuccess();
+      for (let index = 0; index < 5; index++) scheduler.recordSuccess();
       expect(scheduler.getState().effectiveConcurrency).toBe(expected);
     }
     expect(scheduler.getState().recovering).toBe(false);
     expect(logger).toHaveBeenCalledWith(expect.stringContaining("Retry-After: 40"));
   });
 
-  it("supports an adaptive initial limit and halves it after transient failures", () => {
+  it("starts at the configured maximum and halves once per unhealthy outcome window", () => {
     const scheduler = createRequestScheduler(
       () => schedulerSettings({ maxConcurrentRequests: 15 }),
       undefined,
       undefined,
-      { initialConcurrency: 4, staggerMinMs: 0, staggerMaxMs: 0 }
+      { staggerMinMs: 0, staggerMaxMs: 0 }
     );
-    expect(scheduler.getState().effectiveConcurrency).toBe(4);
-    scheduler.recordTransientFailure({ status: 504 });
-    expect(scheduler.getState().effectiveConcurrency).toBe(2);
-    for (let index = 0; index < 10; index += 1) scheduler.recordSuccess();
-    expect(scheduler.getState().effectiveConcurrency).toBe(3);
+    scheduler.beginSearch(15);
+    expect(scheduler.getState().effectiveConcurrency).toBe(15);
+    for (let index = 0; index < 3; index += 1) {
+      scheduler.recordTransientFailure({ status: 504 });
+      expect(scheduler.getState().effectiveConcurrency).toBe(15);
+    }
+    for (let index = 0; index < 12; index += 1) scheduler.recordSuccess();
+    expect(scheduler.getState().effectiveConcurrency).toBe(7);
+    for (let index = 0; index < 5; index += 1) scheduler.recordSuccess();
+    expect(scheduler.getState().effectiveConcurrency).toBe(8);
   });
 
   it("holds the whole queue during cooldown and resumes without a concurrent burst", async () => {

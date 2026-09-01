@@ -38,7 +38,7 @@ function createHarness(overrides = {}) {
       return { success: true };
     })
   };
-  const scheduler = {
+  const scheduler = overrides.scheduler ?? {
     schedule: vi.fn(async task => task()),
     recordSuccess: vi.fn(),
     recordRateLimit: vi.fn()
@@ -290,6 +290,32 @@ describe("MultipassClient", () => {
     fetchImpl.mockRejectedValue(new TypeError("offline"));
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .rejects.toMatchObject({ code: ErrorCode.HTTP_ERROR, message: "offline" });
+  });
+
+  it("reports retry congestion once for the complete logical probe", async () => {
+    vi.useFakeTimers();
+    const scheduler = {
+      schedule: vi.fn(async task => task()),
+      recordProbeOutcome: vi.fn(),
+      recordRateLimit: vi.fn()
+    };
+    const { client, fetchImpl } = createHarness({ scheduler, maxAttempts: 2 });
+    fetchImpl
+      .mockResolvedValueOnce(new Response("failed", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ flightsOutbound: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+
+    const request = client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(request).resolves.toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(scheduler.recordProbeOutcome).toHaveBeenCalledOnce();
+    expect(scheduler.recordProbeOutcome).toHaveBeenCalledWith(
+      "transient",
+      expect.objectContaining({ status: 503 })
+    );
   });
 
   it("retries a hanging availability request after the configured timeout", async () => {

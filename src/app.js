@@ -1,4 +1,4 @@
-import { loadAirportsData, MULTI_AIRPORT_CITIES, cityNameLookup, customCityNames } from './data/airports.js';
+import { loadAirportsData, MULTI_AIRPORT_CITIES, EXCLUDED_ROUTES, cityNameLookup, customCityNames } from './data/airports.js';
 import { createRouteCatalog } from './domain/route-catalog.js';
 import { getDatabase } from './infrastructure/database.js';
 import { createFlightCache, segmentCacheKey } from './infrastructure/cache-repository.js';
@@ -107,7 +107,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     const db = getDatabase();
     const flightCache = createFlightCache(db, () => CACHE_LIFETIME);
     const routeCatalog = createRouteCatalog(routesData, {
-      excludedRoutes: routeExclusions.load()
+      excludedRoutes: [...EXCLUDED_ROUTES, ...routeExclusions.load()]
     });
 
   function excludeRoute(origin, destination) {
@@ -368,8 +368,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
   const requestScheduler = createRequestScheduler(
     () => settingsRepository.load(),
     (waitTimeMs, reason) => showTimeoutCountdown(waitTimeMs, reason === "rate-limit"),
-    debugLogger,
-    { initialConcurrency: 4 }
+    debugLogger
   );
   const multipassClient = createMultipassClient({
     gateway: extensionGateway,
@@ -605,6 +604,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     isDateAvailable: (origin, destination, date) => routeCatalog.isDateAvailable(origin, destination, date),
     isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination),
     logger: debugLogger,
+    getEffectiveConcurrency: () => requestScheduler.getState().effectiveConcurrency,
+    subscribeConcurrency: listener => requestScheduler.subscribe(listener),
     loadFlights: async ({ origin, destination, date, preferredReturnDates = [], skipCache = false, signal }) => {
       const arrivalDate = await selectPairedArrivalDate({
         origin,
@@ -935,6 +936,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     let searchFailed = false;
     let completedResults = null;
     const searchSettings = settingsRepository.load();
+    requestScheduler.beginSearch(searchSettings.maxConcurrentRequests);
     const allowOvernight = stopoverText.includes("overnight");
     const todayUtc = new Date().toISOString().slice(0, 10);
     const bookingWindow = {
@@ -945,7 +947,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     try {
       activeAvailabilityScope = availabilityService.createScope({
         signal: searchSession.controller.signal,
-        preferredReturnDates: returnDates
+        preferredReturnDates: returnDates,
+        maxConcurrentRequests: searchSettings.maxConcurrentRequests
       });
       const results = await runSearch({
         origins,
@@ -983,8 +986,13 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
         },
         getDiagnostics: () => {
           const diagnostics = activeAvailabilityScope?.diagnostics ?? {};
+          const schedulerDiagnostics = requestScheduler.getState();
           return {
             ...diagnostics,
+            peakNetworkConcurrency: schedulerDiagnostics.peakActiveRequests
+              ?? diagnostics.peakNetworkConcurrency
+              ?? 0,
+            concurrencyChanges: schedulerDiagnostics.concurrencyChanges ?? diagnostics.concurrencyChanges ?? [],
             failedProbes: activeAvailabilityScope?.getFailed?.() ?? []
           };
         }
@@ -1014,6 +1022,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
         console.error("Search error:", error);
       }
     } finally {
+      activeAvailabilityScope?.clear?.();
       activeAvailabilityScope = null;
       if (!wasCancelled && !searchFailed && appState.results.length === 0
         && !(completedResults?.diagnostics?.failedProbes?.length)

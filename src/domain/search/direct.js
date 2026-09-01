@@ -70,6 +70,14 @@ export function createDirectSearch({
     let processed = 0;
     if (!skipProgress) updateProgress(0, pairs.length, "Checking direct flights");
 
+    const availabilityScope = getAvailabilityScope();
+    if (availabilityScope?.preflight) {
+      await availabilityScope.preflight(pairs.map(pair => ({
+        ...pair,
+        date: selectedDate
+      })));
+    }
+
     const pairResults = await mapConcurrentOrdered(pairs, getConcurrency(), async pair => {
       if (isCancelled()) return [];
       if (isRouteExcluded(pair.origin, pair.destination)) return [];
@@ -77,7 +85,6 @@ export function createDirectSearch({
 
       let flights;
       try {
-        const availabilityScope = getAvailabilityScope();
         if (availabilityScope) {
           const outcome = await availabilityScope.resolve({
             origin: pair.origin,

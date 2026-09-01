@@ -2,10 +2,11 @@ import { addDaysUTC, minutesBetween } from "../dates.js";
 import { formatFlightDateCombined } from "../flight-normalizer.js";
 import { haversineDistance } from "../airports.js";
 import { AvailabilityState } from "../../infrastructure/cache-repository.js";
-import { mapConcurrentOrdered } from "./concurrency.js";
+import { availabilityKey } from "./availability-service.js";
 
 const MIN_LOCAL_OFFSET_MINUTES = -12 * 60;
 const MAX_LOCAL_OFFSET_MINUTES = 14 * 60;
+const COMPLETION_PRIORITY = 1_000_000;
 
 function code(value) {
   return typeof value === "object" ? value?.id : value;
@@ -15,8 +16,10 @@ function isoDate(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function flightKey(flight) {
-  return flight?.key ?? `${flight?.departureStation}|${flight?.arrivalStation}|${flight?.departureDateIso}|${flight?.departure}`;
+function utcText(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime())
+    ? value.toISOString()
+    : String(value ?? "");
 }
 
 function departureUtc(flight) {
@@ -27,30 +30,34 @@ function arrivalUtc(flight) {
   return flight?.arrivalDateUtc ?? flight?.calculatedDuration?.arrivalDate;
 }
 
+export function flightInstanceKey(flight) {
+  if (flight?.key) return String(flight.key);
+  return [
+    code(flight?.departureStation),
+    code(flight?.arrivalStation),
+    utcText(departureUtc(flight)),
+    utcText(arrivalUtc(flight))
+  ].join("|");
+}
+
 function requestedLocalDate(flight) {
   return flight?.departureDateIso
     ?? flight?.calculatedDuration?.departureDate?.toISOString?.().slice(0, 10);
 }
 
-function nearbyAirports(codeValue, airportLookup, radiusKm) {
-  const base = airportLookup?.[codeValue];
-  if (!base || !(Number(radiusKm) > 0)) return [codeValue];
-  const result = [codeValue];
-  for (const [otherCode, airport] of Object.entries(airportLookup)) {
-    if (otherCode === codeValue || !airport) continue;
-    if (![base.latitude, base.longitude, airport.latitude, airport.longitude].every(Number.isFinite)) continue;
-    if (haversineDistance(base.latitude, base.longitude, airport.latitude, airport.longitude) <= radiusKm) {
-      result.push(otherCode);
-    }
+function dateRange(from, to) {
+  const dates = [];
+  for (let cursor = new Date(`${from}T00:00:00Z`);
+    isoDate(cursor) <= to;
+    cursor = addDaysUTC(cursor, 1)) {
+    dates.push(isoDate(cursor));
   }
-  return result;
+  return dates;
 }
 
 function possibleLocalDates(earliestUtc, latestUtc, bookingFrom, bookingTo) {
   const start = new Date(earliestUtc.getTime() + MIN_LOCAL_OFFSET_MINUTES * 60000);
   const end = new Date(latestUtc.getTime() + MAX_LOCAL_OFFSET_MINUTES * 60000);
-  // The arithmetic above intentionally expands the date envelope. Correct
-  // UTC filtering is performed after the availability response is received.
   const first = new Date(Math.min(start.getTime(), end.getTime()));
   const last = new Date(Math.max(start.getTime(), end.getTime()));
   const dates = [];
@@ -72,12 +79,11 @@ function aggregateRoute(chain, airportLookup) {
   if (!(firstDeparture instanceof Date) || !(lastArrival instanceof Date)) return null;
   const gaps = [];
   for (let index = 0; index < chain.length - 1; index += 1) {
-    const gap = minutesBetween(arrivalUtc(chain[index]), departureUtc(chain[index + 1]));
-    gaps.push(gap);
+    gaps.push(minutesBetween(arrivalUtc(chain[index]), departureUtc(chain[index + 1])));
   }
   const totalMinutes = minutesBetween(firstDeparture, lastArrival);
   const route = {
-    key: chain.map(flightKey).join(" | "),
+    key: chain.map(flightInstanceKey).join(" | "),
     fareSellKey: first.fareSellKey,
     departure: first.departure,
     arrival: last.arrival,
@@ -103,33 +109,21 @@ function aggregateRoute(chain, airportLookup) {
     priceTag: first.priceTag,
     route: [first.departureStationText, last.arrivalStationText]
   };
-  if (chain.length === 2) {
-    const from = code(first.arrivalStation);
-    const to = code(last.departureStation);
+  for (let index = 0; index < chain.length - 1; index += 1) {
+    const from = code(chain[index].arrivalStation);
+    const to = code(chain[index + 1].departureStation);
+    if (from === to) continue;
     const left = airportLookup?.[from];
     const right = airportLookup?.[to];
-    route.airportChange = {
+    const airportChange = {
       from,
       to,
       distanceKm: left && right && [left.latitude, left.longitude, right.latitude, right.longitude].every(Number.isFinite)
         ? Math.round(haversineDistance(left.latitude, left.longitude, right.latitude, right.longitude))
         : null
     };
-  } else if (chain.length === 3) {
-    for (const [index, field] of [[0, "airportChangeOne"], [1, "airportChangeTwo"]]) {
-      const from = code(chain[index].arrivalStation);
-      const to = code(chain[index + 1].departureStation);
-      if (from === to) continue;
-      const left = airportLookup?.[from];
-      const right = airportLookup?.[to];
-      route[field] = {
-        from,
-        to,
-        distanceKm: left && right && [left.latitude, left.longitude, right.latitude, right.longitude].every(Number.isFinite)
-          ? Math.round(haversineDistance(left.latitude, left.longitude, right.latitude, right.longitude))
-          : null
-      };
-    }
+    if (chain.length === 2) route.airportChange = airportChange;
+    else route[index === 0 ? "airportChangeOne" : "airportChangeTwo"] = airportChange;
   }
   return route;
 }
@@ -144,35 +138,43 @@ export function createConnectionPlanner({
   isRouteExcluded = () => false,
   appendRouteToDisplay = () => {}
 }) {
-  function allEdges() {
-    const edges = [];
-    for (const origin of routeCatalog.airportCodes ?? []) {
-      for (const destination of routeCatalog.getDestinations(origin) ?? []) {
-        if (origin !== destination && !isRouteExcluded(origin, destination)) edges.push({ origin, destination });
-      }
-    }
-    return edges;
+  const adjacency = new Map();
+  const allCodes = new Set(routeCatalog.airportCodes ?? []);
+  for (const origin of routeCatalog.airportCodes ?? []) {
+    const destinations = [...(routeCatalog.getDestinations(origin) ?? [])];
+    adjacency.set(origin, destinations);
+    destinations.forEach(destination => allCodes.add(destination));
   }
+  const nearbyIndexes = new Map();
 
-function hasStaticPath(origin, targets, flightsLeft, date, allowChangeAirport, radiusKm, known, memo = new Map()) {
-    const memoKey = `${origin}|${flightsLeft}|${date ?? "*"}|${allowChangeAirport ? radiusKm : 0}`;
-    if (memo.has(memoKey)) return memo.get(memoKey);
-    if (targets.has(origin)) return true;
-    if (flightsLeft <= 0) return false;
-    for (const destination of routeCatalog.getDestinations(origin) ?? []) {
-      if (isRouteExcluded(origin, destination) || (date && !routeCatalog.isDateAvailable(origin, destination, date))) continue;
-      const key = `${origin}-${destination}-${date}`;
-      const state = known.get(key)?.state;
-      if (state === AvailabilityState.UNAVAILABLE) continue;
-      const nextAirports = allowChangeAirport ? nearbyAirports(destination, airportLookup, radiusKm) : [destination];
-      if (nextAirports.some(next => hasStaticPath(next, targets, flightsLeft - 1, date, allowChangeAirport, radiusKm, known, memo))) {
-        memo.set(memoKey, true);
-        return true;
+  function nearbyAirports(codeValue, radiusKm) {
+    if (!(Number(radiusKm) > 0)) return [codeValue];
+    const radiusKey = String(Number(radiusKm));
+    let index = nearbyIndexes.get(radiusKey);
+    if (!index) {
+      index = new Map();
+      for (const airportCode of allCodes) {
+        const base = airportLookup?.[airportCode];
+        const neighbors = [airportCode];
+        if (base && [base.latitude, base.longitude].every(Number.isFinite)) {
+          for (const otherCode of allCodes) {
+            if (otherCode === airportCode) continue;
+            const airport = airportLookup?.[otherCode];
+            if (!airport || ![airport.latitude, airport.longitude].every(Number.isFinite)) continue;
+            if (haversineDistance(
+              base.latitude,
+              base.longitude,
+              airport.latitude,
+              airport.longitude
+            ) <= Number(radiusKm)) neighbors.push(otherCode);
+          }
+        }
+        index.set(airportCode, Object.freeze(neighbors));
       }
+      nearbyIndexes.set(radiusKey, index);
     }
-    memo.set(memoKey, false);
-    return false;
-}
+    return index.get(codeValue) ?? [codeValue];
+  }
 
   async function search({
     origins,
@@ -185,164 +187,278 @@ function hasStaticPath(origin, targets, flightsLeft, date, allowChangeAirport, r
     connectionRadiusKm = 0,
     allowChangeAirport = false,
     bookingWindow = {},
-    appendResults = true,
-    maxConcurrentRequests = 1
+    appendResults = true
   }) {
     const maxFlights = Math.max(1, Number(maxTransfers) + 1);
-    const today = bookingWindow.from ?? isoDate(new Date());
-    const horizon = bookingWindow.to ?? isoDate(addDaysUTC(new Date(`${today}T00:00:00Z`), 3));
-    const edges = allEdges();
-    const allCodes = [...new Set(edges.flatMap(edge => [edge.origin, edge.destination]))];
+    const bookingFrom = bookingWindow.from ?? isoDate(new Date());
+    const horizon = bookingWindow.to
+      ?? isoDate(addDaysUTC(new Date(`${bookingFrom}T00:00:00Z`), 3));
+    const overnightDates = dateRange(selectedDate, horizon);
     const targets = new Set(destinations.includes("ANY") ? allCodes : destinations);
-    const originCodes = origins.includes("ANY") ? allCodes : origins;
-    const preflightDates = [];
-    for (const edge of edges) {
-      if (!allowOvernight) preflightDates.push({ ...edge, date: selectedDate });
-      else {
-        for (let cursor = new Date(`${selectedDate}T00:00:00Z`); isoDate(cursor) <= horizon; cursor = addDaysUTC(cursor, 1)) {
-          preflightDates.push({ ...edge, date: isoDate(cursor) });
+    const originCodes = origins.includes("ANY") ? [...allCodes] : origins;
+    const changeAirport = allowChangeAirport && Number(connectionRadiusKm) > 0;
+    const results = [];
+    const resultKeys = new Set();
+    const partialChainKeys = new Set();
+    const plannedKeys = new Set();
+    const resolvedKeys = new Set();
+    const enqueueKeys = new Set();
+    const scheduleProbe = availabilityScope.schedule?.bind(availabilityScope)
+      ?? availabilityScope.resolve.bind(availabilityScope);
+
+    function datesForLayer(layer, origin, destination) {
+      const dates = layer === 0 || !allowOvernight ? [selectedDate] : overnightDates;
+      return dates.filter(date => routeCatalog.isDateAvailable(origin, destination, date));
+    }
+
+    function buildRelevantLayers(useKnownAvailability) {
+      const layers = Array.from({ length: maxFlights }, () => new Map());
+      const memo = new Map();
+
+      function edgeIsLive(layer, origin, destination) {
+        if (isRouteExcluded(origin, destination)) return false;
+        const dates = datesForLayer(layer, origin, destination);
+        if (!dates.length) return false;
+        if (!useKnownAvailability) return true;
+        return dates.some(date =>
+          availabilityScope.getKnown(availabilityKey(origin, destination, date))?.state
+            !== AvailabilityState.UNAVAILABLE
+        );
+      }
+
+      function canReach(origin, flightsLeft, layer) {
+        const memoKey = `${origin}|${flightsLeft}|${layer}`;
+        if (memo.has(memoKey)) return memo.get(memoKey);
+        if (flightsLeft <= 0) return false;
+        for (const destination of adjacency.get(origin) ?? []) {
+          if (!edgeIsLive(layer, origin, destination)) continue;
+          if (targets.has(destination)) {
+            memo.set(memoKey, true);
+            return true;
+          }
+          if (flightsLeft <= 1) continue;
+          const nextOrigins = changeAirport
+            ? nearbyAirports(destination, connectionRadiusKm)
+            : [destination];
+          if (nextOrigins.some(next => canReach(next, flightsLeft - 1, layer + 1))) {
+            memo.set(memoKey, true);
+            return true;
+          }
+        }
+        memo.set(memoKey, false);
+        return false;
+      }
+
+      const collected = new Set();
+      function collect(origin, flightsLeft, layer) {
+        const stateKey = `${origin}|${flightsLeft}|${layer}`;
+        if (collected.has(stateKey) || flightsLeft <= 0) return;
+        collected.add(stateKey);
+        for (const destination of adjacency.get(origin) ?? []) {
+          if (!edgeIsLive(layer, origin, destination)) continue;
+          const nextOrigins = flightsLeft > 1
+            ? (changeAirport ? nearbyAirports(destination, connectionRadiusKm) : [destination])
+              .filter(next => canReach(next, flightsLeft - 1, layer + 1))
+            : [];
+          if (!targets.has(destination) && !nextOrigins.length) continue;
+          const layerOrigins = layers[layer];
+          const layerDestinations = layerOrigins.get(origin) ?? new Set();
+          layerDestinations.add(destination);
+          layerOrigins.set(origin, layerDestinations);
+          for (const next of nextOrigins) collect(next, flightsLeft - 1, layer + 1);
+        }
+      }
+
+      const viableOrigins = originCodes.filter(origin => canReach(origin, maxFlights, 0));
+      viableOrigins.forEach(origin => collect(origin, maxFlights, 0));
+      return { layers, viableOrigins };
+    }
+
+    const structural = buildRelevantLayers(false);
+    const preflightSegmentsByKey = new Map();
+    for (let layer = 0; layer < structural.layers.length; layer += 1) {
+      for (const [origin, layerDestinations] of structural.layers[layer]) {
+        for (const destination of layerDestinations) {
+          for (const date of datesForLayer(layer, origin, destination)) {
+            const segment = { origin, destination, date };
+            preflightSegmentsByKey.set(availabilityKey(origin, destination, date), segment);
+          }
         }
       }
     }
-    await availabilityScope.preflight(preflightDates);
-    const known = new Map();
-    for (const item of preflightDates) {
-      const value = availabilityScope.getKnown(`${item.origin}-${item.destination}-${item.date}`);
-      if (value) known.set(`${item.origin}-${item.destination}-${item.date}`, value);
+    const preflightSegments = [...preflightSegmentsByKey.values()];
+    await availabilityScope.preflight(preflightSegments);
+    if (isCancelled()) return results;
+    const relevant = buildRelevantLayers(true);
+
+    let pendingEvents = 0;
+    const completedEvents = [];
+    let eventWaiter = null;
+
+    function publishEvent(event) {
+      completedEvents.push(event);
+      eventWaiter?.();
+      eventWaiter = null;
     }
 
-    const reachabilityMemo = new Map();
-    const viableOrigins = originCodes.filter(origin =>
-      hasStaticPath(origin, targets, maxFlights, allowOvernight ? null : selectedDate, allowChangeAirport, connectionRadiusKm, known, reachabilityMemo)
-    );
-    const results = [];
-    const resultKeys = new Set();
-    let resolved = 0;
-    let planned = 0;
-    const probeConcurrency = Math.max(1, Math.min(4, Number(maxConcurrentRequests) || 1));
-
-    async function resolveFlights(origin, destination, date) {
-      const outcome = await availabilityScope.resolve({ origin, destination, date });
-      resolved += 1;
-      updateProgress(resolved, Math.max(resolved, planned), `Checking ${origin} → ${destination} on ${date}`);
-      return outcome;
+    async function nextEvent() {
+      if (!completedEvents.length) {
+        await new Promise(resolve => { eventWaiter = resolve; });
+      }
+      return completedEvents.shift();
     }
 
-    async function resolveMany(segments) {
-      planned += segments.length;
-      return mapConcurrentOrdered(
-        segments,
-        probeConcurrency,
-        segment => resolveFlights(segment.origin, segment.destination, segment.date)
-      );
+    function priorityFor({ destination, remainingFlights, dateAlternatives = 1 }) {
+      const completion = targets.has(destination) ? COMPLETION_PRIORITY : 0;
+      const branchValue = 10_000 / Math.max(1, dateAlternatives);
+      const proximity = (maxFlights - remainingFlights) * 100;
+      return completion + branchValue + proximity;
     }
 
-    async function expandState(state, flightLegsRemaining) {
+    function enqueueProbe(probe, context, priority) {
       if (isCancelled()) return;
-      const previous = state.chain[state.chain.length - 1];
-      const departureOrigins = allowChangeAirport
-        ? nearbyAirports(code(previous.arrivalStation), airportLookup, connectionRadiusKm)
+      const probeKey = availabilityKey(probe.origin, probe.destination, probe.date);
+      const contextKey = `${context.chainKey ?? "root"}|${probeKey}`;
+      if (enqueueKeys.has(contextKey)) return;
+      enqueueKeys.add(contextKey);
+      plannedKeys.add(probeKey);
+      pendingEvents += 1;
+      Promise.resolve(scheduleProbe(probe, { priority }))
+        .then(
+          outcome => publishEvent({ probe, context, outcome, probeKey }),
+          error => publishEvent({ probe, context, error, probeKey })
+        );
+    }
+
+    function finishAlternative(context, compatibleFlights, outcome) {
+      const group = context.alternativeGroup;
+      if (!group) return;
+      group.remaining -= 1;
+      if (compatibleFlights > 0) group.sawCompatibleFlight = true;
+      if (outcome?.state === AvailabilityState.UNKNOWN) group.sawUnknown = true;
+      if (group.remaining === 0 && !group.sawCompatibleFlight && !group.sawUnknown) {
+        availabilityScope.diagnostics.prunedBranches += 1;
+      }
+    }
+
+    function emitResult(chain) {
+      const result = aggregateRoute(chain, airportLookup);
+      if (!result || resultKeys.has(result.key)) return;
+      resultKeys.add(result.key);
+      results.push(result);
+      if (appendResults) appendRouteToDisplay(result);
+    }
+
+    function scheduleNextState(chain, flightsRemaining) {
+      if (isCancelled() || flightsRemaining <= 0) return;
+      const previous = chain[chain.length - 1];
+      const previousArrival = arrivalUtc(previous);
+      if (!(previousArrival instanceof Date) || Number.isNaN(previousArrival.getTime())) return;
+      const layer = chain.length;
+      const departureOrigins = changeAirport
+        ? nearbyAirports(code(previous.arrivalStation), connectionRadiusKm)
         : [code(previous.arrivalStation)];
       let dates = [selectedDate];
       if (allowOvernight) {
-        const arrival = arrivalUtc(previous);
-        const earliest = new Date(arrival.getTime() + minConnection * 60000);
-        const latest = new Date(arrival.getTime() + maxConnection * 60000);
-        dates = possibleLocalDates(earliest, latest, today, horizon);
+        dates = possibleLocalDates(
+          new Date(previousArrival.getTime() + Number(minConnection) * 60000),
+          new Date(previousArrival.getTime() + Number(maxConnection) * 60000),
+          bookingFrom,
+          horizon
+        );
       }
-      const probes = [];
-      const alternatives = new Map();
+      const chainKey = chain.map(flightInstanceKey).join("|");
       for (const nextOrigin of departureOrigins) {
-        for (const destination of routeCatalog.getDestinations(nextOrigin) ?? []) {
-          if (isRouteExcluded(nextOrigin, destination) || !targets.size) continue;
-          if (!allowOvernight && !routeCatalog.isDateAvailable(nextOrigin, destination, selectedDate)) continue;
-          const candidateDates = dates.filter(date => routeCatalog.isDateAvailable(nextOrigin, destination, date));
+        const destinationsForLayer = relevant.layers[layer]?.get(nextOrigin) ?? new Set();
+        for (const destination of destinationsForLayer) {
+          const candidateDates = dates.filter(date =>
+            routeCatalog.isDateAvailable(nextOrigin, destination, date)
+          );
           if (!candidateDates.length) continue;
-          alternatives.set(`${nextOrigin}|${destination}`, candidateDates.length);
-          for (const date of candidateDates) probes.push({ origin: nextOrigin, destination, date });
-        }
-      }
-      probes.sort((left, right) => {
-        const score = alternatives.get(`${left.origin}|${left.destination}`)
-          - alternatives.get(`${right.origin}|${right.destination}`);
-        return score || `${left.origin}-${left.destination}-${left.date}`.localeCompare(`${right.origin}-${right.destination}-${right.date}`);
-      });
-      const outcomes = await resolveMany(probes);
-      const nextStates = [];
-      const grouped = new Map();
-      probes.forEach((probe, index) => {
-        const groupKey = `${probe.origin}|${probe.destination}`;
-        const group = grouped.get(groupKey) ?? { probe, outcomes: [] };
-        group.outcomes.push({ probe, outcome: outcomes[index] });
-        grouped.set(groupKey, group);
-      });
-      for (const { outcomes: groupedOutcomes } of grouped.values()) {
-        let sawUnknown = false;
-        let sawAvailable = false;
-        for (const { probe, outcome } of groupedOutcomes) {
-          if (outcome.state === AvailabilityState.UNKNOWN) {
-            sawUnknown = true;
-            continue;
+          const alternativeGroup = {
+            remaining: candidateDates.length,
+            sawCompatibleFlight: false,
+            sawUnknown: false
+          };
+          for (const date of candidateDates) {
+            const probe = { origin: nextOrigin, destination, date };
+            const context = {
+              chain,
+              chainKey,
+              previous,
+              remainingFlights: flightsRemaining - 1,
+              alternativeGroup
+            };
+            enqueueProbe(probe, context, priorityFor({
+              destination,
+              remainingFlights: flightsRemaining - 1,
+              dateAlternatives: candidateDates.length
+            }));
           }
-          if (outcome.state !== AvailabilityState.AVAILABLE) continue;
-          sawAvailable = true;
-          const flights = outcome.flights.filter(flight => requestedLocalDate(flight) === probe.date);
-            for (const flight of flights) {
-              const gap = minutesBetween(arrivalUtc(previous), departureUtc(flight));
-              if (gap < minConnection || gap > maxConnection) continue;
-              const chain = [...state.chain, flight];
-              if (targets.has(code(flight.arrivalStation))) {
-                const result = aggregateRoute(chain, airportLookup);
-                if (result && !resultKeys.has(result.key)) {
-                  resultKeys.add(result.key);
-                  results.push(result);
-                  if (appendResults) appendRouteToDisplay(result);
-                }
-              }
-              if (flightLegsRemaining > 1) nextStates.push({ chain, legs: flightLegsRemaining - 1 });
-            }
         }
-        if (!sawAvailable && !sawUnknown) availabilityScope.diagnostics.prunedBranches += 1;
       }
-      await mapConcurrentOrdered(nextStates, probeConcurrency, state => expandState(state, state.legs));
     }
 
-    const firstProbes = [];
-    for (const origin of viableOrigins) {
-      for (const destination of routeCatalog.getDestinations(origin) ?? []) {
-        if (isRouteExcluded(origin, destination) || !routeCatalog.isDateAvailable(origin, destination, selectedDate)) continue;
-        firstProbes.push({ origin, destination, date: selectedDate });
-      }
-    }
-    const destinationFanout = new Map();
-    for (const probe of firstProbes) {
-      destinationFanout.set(probe.destination, (destinationFanout.get(probe.destination) ?? 0) + 1);
-    }
-    firstProbes.sort((left, right) => {
-      const score = (destinationFanout.get(right.destination) ?? 0)
-        - (destinationFanout.get(left.destination) ?? 0);
-      return score || `${left.origin}-${left.destination}`.localeCompare(`${right.origin}-${right.destination}`);
-    });
-    const firstOutcomes = await resolveMany(firstProbes);
-    for (let probeIndex = 0; probeIndex < firstProbes.length; probeIndex += 1) {
-        if (isCancelled()) break;
-        const outcome = firstOutcomes[probeIndex];
-        if (outcome.state !== AvailabilityState.AVAILABLE) continue;
-        const flights = outcome.flights.filter(flight => requestedLocalDate(flight) === selectedDate);
-        for (const flight of flights) {
-          const airport = code(flight.arrivalStation);
-          if (targets.has(airport)) {
-            const result = aggregateRoute([flight], airportLookup);
-            if (result && !resultKeys.has(result.key)) {
-              resultKeys.add(result.key);
-              results.push(result);
-              if (appendResults) appendRouteToDisplay(result);
-            }
-          }
-          if (maxFlights > 1) await expandState({ chain: [flight] }, maxFlights - 1);
+    function processAvailableFlights(probe, context, outcome) {
+      let compatibleFlights = 0;
+      for (const flight of outcome.flights ?? []) {
+        if (requestedLocalDate(flight) !== probe.date) continue;
+        if (context.previous) {
+          const gap = minutesBetween(arrivalUtc(context.previous), departureUtc(flight));
+          if (gap < Number(minConnection) || gap > Number(maxConnection)) continue;
         }
+        compatibleFlights += 1;
+        const chain = [...(context.chain ?? []), flight];
+        const chainKey = chain.map(flightInstanceKey).join("|");
+        if (partialChainKeys.has(chainKey)) continue;
+        partialChainKeys.add(chainKey);
+        if (targets.has(code(flight.arrivalStation))) emitResult(chain);
+        if (context.remainingFlights > 0) scheduleNextState(chain, context.remainingFlights);
       }
-    debugLogger(`Optimized connecting search completed: ${results.length} results, ${resolved} availability probes`);
+      return compatibleFlights;
+    }
+
+    for (const origin of relevant.viableOrigins) {
+      for (const destination of relevant.layers[0]?.get(origin) ?? []) {
+        const probe = { origin, destination, date: selectedDate };
+        const alternativeGroup = {
+          remaining: 1,
+          sawCompatibleFlight: false,
+          sawUnknown: false
+        };
+        enqueueProbe(probe, {
+          chain: [],
+          chainKey: "root",
+          previous: null,
+          remainingFlights: maxFlights - 1,
+          alternativeGroup
+        }, priorityFor({ destination, remainingFlights: maxFlights - 1 }));
+      }
+    }
+
+    while (pendingEvents > 0 && !isCancelled()) {
+      const event = completedEvents.length ? completedEvents.shift() : await nextEvent();
+      pendingEvents -= 1;
+      if (event.error) throw event.error;
+      if (!resolvedKeys.has(event.probeKey)) {
+        resolvedKeys.add(event.probeKey);
+        updateProgress(
+          resolvedKeys.size,
+          Math.max(resolvedKeys.size, plannedKeys.size),
+          `Checking ${event.probe.origin} → ${event.probe.destination} on ${event.probe.date}`
+        );
+      }
+      const compatibleFlights = event.outcome.state === AvailabilityState.AVAILABLE
+        ? processAvailableFlights(event.probe, event.context, event.outcome)
+        : 0;
+      finishAlternative(event.context, compatibleFlights, event.outcome);
+    }
+
+    debugLogger(
+      `Lazy connecting search completed: ${results.length} results, ` +
+      `${resolvedKeys.size}/${plannedKeys.size} unique availability probes, ` +
+      `${preflightSegments.length} relevant cache keys`
+    );
     return results;
   }
 

@@ -85,11 +85,21 @@ Run [the smoke checklist](docs/manual-smoke-checklist.md) on:
 - current Orion on iPhone;
 - current Orion on iPad;
 - clean installation;
-- update over 3.5.0 with existing settings, custom groups and cache.
+- update over 4.0.0 with existing settings, custom groups and cache.
 
 Automated tests never call the live Wizz Air API. Authenticated availability and booking continuation must be tested manually with the minimum practical number of requests.
 
 ## Changelog
+
+### Version 4.1.0 — September 2, 2026
+
+- Replaced eager connecting-route expansion with a lazy, date-aware layered graph for one-stop and two-stop searches, including overnight connections, `ANY` origins/destinations, airport changes, `flightDates` and booking-window filtering.
+- Added shared availability nodes and partial flight-chain states so one availability request can serve multiple branches while flights at different times remain separate results.
+- Removed the planner's hard concurrency cap of four. Direct and connecting searches now use the user's **Max Concurrent Requests** through one global staggered scheduler.
+- Improved adaptive concurrency with transient-failure windows, recovery, rate-limit cooldowns and search-scoped concurrency diagnostics.
+- Added date-aware cache preflight, single-flight request coalescing, branch pruning and stable flight-instance/result deduplication.
+- Improved incomplete-search handling: confirmed unavailable routes are pruned, while timeouts and transport failures remain retryable `UNKNOWN` checks.
+- Expanded automated coverage for layered planning, overnight and airport-change routes, cache behavior, scheduler adaptation and concurrent availability requests.
 
 ### Version 4.0.0 — August 31, 2026
 

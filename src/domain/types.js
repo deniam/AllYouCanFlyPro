@@ -41,6 +41,13 @@
  * @property {number} cacheHits
  * @property {number} networkRequests
  * @property {number} prunedBranches
+ * @property {number} uniquePlannedProbes
+ * @property {number} uniqueResolvedProbes
+ * @property {number} peakPendingProbes
+ * @property {number} peakActiveProbes
+ * @property {number} peakNetworkConcurrency
+ * @property {number} preflightKeys
+ * @property {Array<{from: number, to: number, reason: string}>} concurrencyChanges
  */
 
 /** @typedef {SearchResult[] & {diagnostics?: SearchDiagnostics}} SearchOutcome */

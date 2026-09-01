@@ -115,16 +115,22 @@ export function createConnectionsSearch({
   getSettings,
   getStopoverText
 }) {
-  const optimizedPlanner = availabilityScope => createConnectionPlanner({
-    routeCatalog,
-    airportLookup,
-    availabilityScope,
-    isCancelled,
-    updateProgress,
-    debugLogger,
-    isRouteExcluded,
-    appendRouteToDisplay
-  });
+  const optimizedPlanners = new WeakMap();
+  const optimizedPlanner = availabilityScope => {
+    if (!optimizedPlanners.has(availabilityScope)) {
+      optimizedPlanners.set(availabilityScope, createConnectionPlanner({
+        routeCatalog,
+        airportLookup,
+        availabilityScope,
+        isCancelled,
+        updateProgress,
+        debugLogger,
+        isRouteExcluded,
+        appendRouteToDisplay
+      }));
+    }
+    return optimizedPlanners.get(availabilityScope);
+  };
 
   async function processSegment(candidate, index, currentDate, previousFlight, bookingHorizon, minConnection, maxConnection, baseMaxDays, selectedDate, routesData, queryOptions) {
     if (index >= candidate.length - 1) {
