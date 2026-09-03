@@ -91,17 +91,26 @@ describe("paired round-trip cache integration", () => {
         preferredReturnDates: options.preferredReturnDates ?? []
       })
     });
+    const availabilityScope = {
+      preflight: vi.fn(async () => {}),
+      resolve: vi.fn(async segment => {
+        const flights = (await fetchFlights(
+          segment.origin,
+          segment.destination,
+          segment.date,
+          { preferredReturnDates: segment.preferredReturnDates }
+        )).map(normalized);
+        return flights.length
+          ? { state: "available", flights }
+          : { state: "unavailable", flights: [] };
+      })
+    };
     const searchDirect = createDirectSearch({
-      fetchRoutes: async () => routes,
-      getPreviousResults: () => [],
+      routeCatalog: catalog,
       isCancelled: () => false,
-      getCached: (origin, destination, date) => cache.get(segmentCacheKey(origin, destination, date)),
-      setCached: (origin, destination, date, flights) =>
-        cache.put(segmentCacheKey(origin, destination, date), flights),
-      fetchFlights,
-      normalizeFlight: normalized,
       appendResult: vi.fn(),
-      updateProgress: vi.fn()
+      updateProgress: vi.fn(),
+      getAvailabilityScope: () => availabilityScope
     });
 
     const results = await runSearch({

@@ -19,8 +19,42 @@ export const MULTI_AIRPORT_CITIES = {
   "BLS": ["VAR", "BOJ"],
   "CRE": ["HER", "CHQ"],
   "GRI": ["CFU", "HER", "CHQ", "JMK", "JSI", "JTR", "RHO", "ZTH"],
-  "CNA": ["SKD", "TAS", "FRU", "ALA", "HSA", "NQZ"]
+  "CNA": ["SKD", "TAS", "FRU", "ALA", "HSA", "NQZ"],
+  "WSW": ["WAW", "WMI", "RDO"],
+  "ALX": ["ALY", "HBE"]
 };
+
+// Routes returned by Wizz Air through city-level airport aliases but not
+// supported by Multipass. Keep these out of searches involving multi-airport
+// city groups.
+export const EXCLUDED_ROUTES = Object.freeze([
+  "LTN-BBU", "LGW-OTP", "OTP-LGW",
+  "ALC-BBU", "ATH-BBU", "BBU-ALC", "BBU-ATH", "BBU-BCN",
+  "BBU-DTM", "BBU-EIN", "BBU-FAO", "BBU-FCO", "BBU-JMK",
+  "BBU-LCA", "BBU-LTN", "BBU-LYS", "BBU-MAD", "BBU-MXP",
+  "BBU-NCE", "BBU-PMI", "BBU-RMO", "BBU-SVQ", "BBU-TLV",
+  "BBU-VLC", "BCN-BBU", "BRI-BBU", "CDT-BUD", "CDT-FCO",
+  "CDT-KRK", "CDT-LGW", "CDT-LTN", "CDT-MXP", "CDT-SOF",
+  "CDT-TIA", "CDT-WAW", "KRK-LTN", "MLH-BBU", "MLH-BTS",
+  "BBU-ALC", "BBU-ATH", "ALC-BBU", "BBU-BCN", "DTM-BBU",
+  "EIN-BBU", "FAO-BBU", "FCO-BBU", "JMK-BBU", "LCA-BBU",
+  "LTN-BBU", "LYS-BBU", "MAD-BBU", "MXP-BBU", "NCE-BBU",
+  "PMI-BBU", "RMO-BBU", "SVQ-BBU", "TLV-BBU", "VLC-BBU",
+  "BBU-BCN", "BBU-BRI", "BUD-CDT", "FCO-CDT", "KRK-CDT",
+  "LGW-CDT", "LTN-CDT", "MXP-CDT", "SOF-CDT", "TIA-CDT",
+  "WAW-CDT", "LTN-KRK", "BBU-MLH", "BTS-MLH",
+  "AGP-BBU", "AHO-BBU", "AYT-BBU", "BBU-AGP", "BBU-AHO",
+  "BBU-AYT", "BBU-BER", "BBU-BLL", "BBU-BLQ", "BBU-BVA",
+  "BBU-CDT", "BBU-CFU", "BBU-CPH", "BBU-CRL", "BBU-EFL",
+  "BBU-HER", "BBU-LPA", "BBU-LPL", "BBU-OPO", "BBU-PSA",
+  "BBU-PSR", "BBU-STR", "BBU-TRF", "BBU-TSF", "BBU-ZAZ",
+  "BBU-ZTH", "BER-BBU", "BLL-BBU", "BLQ-BBU", "BNX-BSL",
+  "BSL-BNX", "BTS-SJJ", "BVA-BBU", "CDT-BBU", "CFU-BBU",
+  "CPH-BBU", "CRL-BBU", "EFL-BBU", "HER-BBU", "LPA-BBU",
+  "LPL-BBU", "MLH-TSR", "OPO-BBU", "PSA-BBU", "PSR-BBU",
+  "SJJ-BTS", "STR-BBU", "TRF-BBU", "TSF-BBU", "TSR-MLH",
+  "ZAZ-BBU", "ZTH-BBU"
+]);
 
 // Country flag mapping.
 const flagMapping = {
@@ -108,7 +142,9 @@ export function cityNameLookup(cityCode) {
     "BLS": "Black Sea (Any)",
     "CRE": "Crete (Any)",
     "GRI": "Greek Islands (Any)",
-    "CNA": "Central Asia (Stan Countries)"
+    "CNA": "Central Asia (Stan Countries)",
+    "WSW": "Warsaw (Any)",
+    "ALX": "Alexandria (Any)"
   };
   return mapping[cityCode] || cityCode;
 }
@@ -201,6 +237,12 @@ export async function loadAirportsData(routes = []) {
     acc[airport.country].push(airport.code);
     return acc;
   }, {});
+
+  // Keep the source/display name "Türkiye", but also allow the common English
+  // spelling to resolve to the same set of airports in autocomplete/search.
+  if (COUNTRY_AIRPORTS["Türkiye"]) {
+    COUNTRY_AIRPORTS["Turkey"] = [...COUNTRY_AIRPORTS["Türkiye"]];
+  }
 
   return { AIRPORTS, COUNTRY_AIRPORTS };
 }

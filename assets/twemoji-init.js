@@ -12,8 +12,43 @@ if (!isAppleDevice()) {
   };
 
   document.addEventListener('DOMContentLoaded', () => {
-    twemoji.parse(document.body, options);
-    new MutationObserver(() => twemoji.parse(document.body, options))
-      .observe(document.body, { childList: true, subtree: true });
+    let pendingNodes = [];
+    let scheduled = false;
+    let parsing = false;
+
+    const parseNodes = nodes => {
+      const uniqueNodes = [...new Set(nodes)].filter(node =>
+        node?.nodeType === Node.ELEMENT_NODE
+        && node.isConnected
+        && !node.classList.contains('emoji')
+      );
+      if (!uniqueNodes.length) return;
+      parsing = true;
+      uniqueNodes.forEach(node => twemoji.parse(node, options));
+      parsing = false;
+    };
+
+    const flush = () => {
+      scheduled = false;
+      const nodes = pendingNodes;
+      pendingNodes = [];
+      parseNodes(nodes);
+    };
+
+    const schedule = nodes => {
+      pendingNodes.push(...nodes);
+      if (scheduled) return;
+      scheduled = true;
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(flush);
+      else setTimeout(flush, 0);
+    };
+
+    // Parse the static shell once, then only parse newly inserted subtrees.
+    parseNodes([...document.body.children]);
+    new MutationObserver(mutations => {
+      if (parsing) return;
+      const added = mutations.flatMap(mutation => [...mutation.addedNodes]);
+      schedule(added);
+    }).observe(document.body, { childList: true, subtree: true });
   });
 }

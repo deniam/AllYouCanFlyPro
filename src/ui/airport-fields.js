@@ -1,4 +1,4 @@
-export function createAirportFields({ setupAutocomplete, maxRows = 3 }) {
+export function createAirportFields({ setupAutocomplete, maxRows = 3, autocompleteOptions = {} }) {
   let nextId = 0;
 
   function values(containerId) {
@@ -62,7 +62,7 @@ export function createAirportFields({ setupAutocomplete, maxRows = 3 }) {
       update(container);
     });
     input.addEventListener("input", () => update(container));
-    setupAutocomplete(input.id, suggestions.id);
+    setupAutocomplete(input.id, suggestions.id, autocompleteOptions);
     update(container);
     return input;
   }

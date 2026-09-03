@@ -1,6 +1,24 @@
 export const CHANGELOG = Object.freeze([
   {
     current: true,
+    date: "September 3, 2026",
+    items: [
+      "Replaced eager connecting-route expansion with a lazy, date-aware layered graph for one-stop and two-stop searches, including overnight connections, ANY origins/destinations, airport changes, flightDates and booking-window filtering.",
+      "Added shared availability nodes and partial flight-chain states so one availability request can serve multiple branches while flights at different times remain separate results.",
+      "Removed the planner's hard concurrency cap of four. Direct and connecting searches now use the user's Max Concurrent Requests through one global staggered scheduler.",
+      "Improved adaptive request concurrency with transient-failure windows, recovery, rate-limit cooldowns and search-scoped concurrency diagnostics.",
+      "Added date-aware cache preflight, single-flight request coalescing, branch pruning and stable flight-instance/result deduplication.",
+      "Improved incomplete-search handling: confirmed unavailable routes are pruned, while timeouts and transport failures remain retryable UNKNOWN checks.",
+      "Expanded automated coverage for layered planning, overnight and airport-change routes, cache behavior, scheduler adaptation and concurrent availability requests.",
+      "Added per-result freshness indicators that distinguish cached snapshots from online checks and show relative age using the oldest contributing segment.",
+      "Added scoped refresh for individual direct, connecting and round-trip result groups. Refreshes force only the selected segment/date cache keys and keep unrelated cached results intact.",
+      "Added unavailable and refresh-error states, disabled booking actions for confirmed unavailable routes, and preserved stale snapshots when a refresh fails.",
+      "Fixed scoped refresh progress handling so unrelated route pairs are not shown and the global progress bar is hidden after completion.",
+      "Expanded automated coverage for cache timestamps, provenance, scoped refresh, responsive result states and refresh progress handling."
+    ]
+  },
+  {
+    version: "4.0.0",
     date: "August 31, 2026",
     items: [
       "Rebuilt the project structure into a modular, layered architecture: application state, domain logic, infrastructure services, and UI components are now separated into independent modules.",

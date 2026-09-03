@@ -6,6 +6,8 @@ export function createCustomGroupsController({
   groupNames,
   airportLookup,
   airports,
+  airportFields,
+  resolveAirport,
   notify
 }) {
   let initialized = false;
@@ -81,6 +83,21 @@ export function createCustomGroupsController({
     }
   }
 
+  function airportCodes(values) {
+    const resolved = values.map(value => {
+      if (typeof resolveAirport === "function") return resolveAirport(value);
+      const normalized = value.trim().toUpperCase();
+      const exact = airportLookup[normalized];
+      if (exact) return [exact.code];
+      const airport = airports.find(item => item.name.toLowerCase() === value.trim().toLowerCase());
+      return airport ? [airport.code] : [];
+    });
+    return {
+      codes: [...new Set(resolved.flat().filter(code => airportLookup[code]))],
+      hasInvalid: resolved.some(codes => !codes.length || codes.some(code => !airportLookup[code]))
+    };
+  }
+
   function initialize() {
     if (initialized) return;
     initialized = true;
@@ -89,29 +106,29 @@ export function createCustomGroupsController({
     document.getElementById("toggle-custom-groups").addEventListener("click", () => {
       document.getElementById("custom-groups-panel").classList.toggle("hidden");
     });
+    airportFields?.initialize("custom-group-airports", "custom-group-airport");
     const keyInput = document.getElementById("custom-group-key");
     keyInput.addEventListener("input", () => {
       keyInput.value = keyInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
     });
     document.getElementById("add-custom-group-btn").addEventListener("click", () => {
       const nameInput = document.getElementById("custom-group-name");
-      const airportsInput = document.getElementById("custom-group-airports");
       const name = nameInput.value.trim();
       const key = keyInput.value.trim().toUpperCase();
-      const codes = [...new Set(airportsInput.value.split(",").map(value => value.trim().toUpperCase()).filter(Boolean))];
+      const values = airportFields?.values("custom-group-airports") ?? [];
+      const { codes, hasInvalid } = airportCodes(values);
       if (!name) return notify("Please enter a group name.");
       if (!/^[A-Z0-9]{2,6}$/.test(key)) return notify("Tag must be 2–6 uppercase letters/digits.");
       if (groups[key] || airportLookup[key]) return notify(`Tag "${key}" is already in use.`);
+      if (hasInvalid) return notify("Please select airports from the lookup.");
       if (codes.length < 2) return notify("Please enter at least 2 airport codes.");
-      const unknown = codes.filter(code => !airportLookup[code]);
-      if (unknown.length) return notify(`Unknown airport codes: ${unknown.join(", ")}`);
       const group = { key, name, airports: codes };
       save([...load(), group]);
       apply(group);
       render();
       nameInput.value = "";
       keyInput.value = "";
-      airportsInput.value = "";
+      airportFields?.initialize("custom-group-airports", "custom-group-airport");
       notify(`Group "${name}" [${key}] added!`);
     });
   }

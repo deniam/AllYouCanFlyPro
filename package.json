@@ -1,6 +1,6 @@
 {
   "name": "all-you-can-fly-pro",
-  "version": "3.5.0",
+  "version": "4.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,14 +8,19 @@
     "test:watch": "vitest",
     "lint": "eslint src tests vitest.config.js",
     "check:syntax": "node scripts/check-syntax.mjs",
+    "build:css": "tailwindcss -i ./src/styles/tailwind.css -o ./assets/css/tailwind.generated.css --minify",
+    "check:css": "node scripts/check-css.mjs",
     "check:extension": "node scripts/validate-extension.mjs",
-    "check": "npm run check:syntax && npm run lint && npm test && npm run check:extension",
+    "check": "npm run check:syntax && npm run lint && npm test && npm run check:css && npm run check:extension",
     "package": "make package"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.0.9",
     "eslint": "^9.29.0",
+    "fake-indexeddb": "^6.0.0",
     "globals": "^16.2.0",
     "jsdom": "^26.1.0",
+    "tailwindcss": "^4.0.9",
     "vitest": "^3.2.4"
   }
 }

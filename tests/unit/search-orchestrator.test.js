@@ -20,6 +20,23 @@ describe("search orchestrator", () => {
     expect(searchDirect).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps distinct layovers that share endpoints and departure time", async () => {
+    const viaFirst = flight(
+      "first | via-one", "AAA", "DDD", "2026-09-01T08:00:00Z", "2026-09-01T14:00:00Z"
+    );
+    const viaSecond = flight(
+      "first | via-two", "AAA", "DDD", "2026-09-01T08:00:00Z", "2026-09-01T15:00:00Z"
+    );
+    const searchConnections = vi.fn(async () => [viaFirst, viaSecond, viaFirst]);
+
+    const results = await runSearch({
+      origins: ["AAA"], destinations: ["DDD"],
+      departureDates: ["2026-09-01"], maxTransfers: 1
+    }, { searchDirect: vi.fn(), searchConnections });
+
+    expect(results.map(result => result.key)).toEqual(["first | via-one", "first | via-two"]);
+  });
+
   it("matches a round-trip after the minimum gap", async () => {
     const searchDirect = vi.fn(async ({ origins }) => origins[0] === "AAA"
       ? [flight("out", "AAA", "BBB", "2026-09-01T08:00:00Z", "2026-09-01T10:00:00Z")]

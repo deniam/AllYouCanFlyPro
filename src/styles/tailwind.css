@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* Scan the HTML shell and JS template literals for utility classes. */
+@source "../../index.html";
+@source "../ui";
+@source "../app";
+@source "./tailwind-safelist.html";
+
+/* Runtime-generated state/classes that are not always present as literals. */

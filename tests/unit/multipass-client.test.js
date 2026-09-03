@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createMultipassClient,
   parseRetryAfter
@@ -38,7 +38,7 @@ function createHarness(overrides = {}) {
       return { success: true };
     })
   };
-  const scheduler = {
+  const scheduler = overrides.scheduler ?? {
     schedule: vi.fn(async task => task()),
     recordSuccess: vi.fn(),
     recordRateLimit: vi.fn()
@@ -58,12 +58,18 @@ function createHarness(overrides = {}) {
 }
 
 describe("MultipassClient", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("discovers a session, requests flights, and caches the response", async () => {
     const { client, cache, fetchImpl } = createHarness();
     const flights = await client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
     expect(flights).toEqual([{ key: "flight-1" }]);
     expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", flights);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      flights,
+      { checkedAt: expect.any(Number) }
+    );
   });
 
   it("does not access the tab or network on a cache hit", async () => {
@@ -71,6 +77,20 @@ describe("MultipassClient", () => {
     cache.get.mockResolvedValue([{ key: "cached" }]);
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .resolves.toEqual([{ key: "cached" }]);
+    expect(gateway.queryTabs).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not access the tab or network for an excluded route", async () => {
+    const { client, cache, gateway, fetchImpl } = createHarness({
+      isRouteExcluded: (origin, destination) => `${origin}-${destination}` === "LTN-KRK"
+    });
+
+    await expect(client.getFlights({ origin: "LTN", destination: "KRK", date: "2026-08-28" }))
+      .resolves.toEqual([]);
+    await expect(client.getFlightsOutcome({ origin: "LTN", destination: "KRK", date: "2026-08-28" }))
+      .resolves.toMatchObject({ state: "unavailable", reason: "excluded-route" });
+    expect(cache.get).not.toHaveBeenCalled();
     expect(gateway.queryTabs).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -148,7 +168,11 @@ describe("MultipassClient", () => {
     }))
       .resolves.toEqual([]);
     expect(cache.put).toHaveBeenCalledTimes(1);
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
     expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
   });
 
@@ -161,9 +185,59 @@ describe("MultipassClient", () => {
       origin: "CDT", destination: "LTN", date: "2026-08-31"
     })).resolves.toEqual([]);
     expect(onRouteNotFound).toHaveBeenCalledWith({ origin: "CDT", destination: "LTN" });
-    expect(fetchImpl.mock.calls[0][1].redirect).toBe("manual");
-    expect(cache.put).toHaveBeenCalledWith("CDT-LTN-2026-08-31", []);
+    expect(fetchImpl.mock.calls[0][1].redirect).toBe("follow");
+    expect(cache.put).toHaveBeenCalledWith(
+      "CDT-LTN-2026-08-31",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
     expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
+  });
+
+  it("classifies a followed translations redirect as a permanently missing route", async () => {
+    const onRouteNotFound = vi.fn();
+    const { client, cache, fetchImpl, scheduler } = createHarness({ onRouteNotFound });
+    fetchImpl.mockResolvedValue({
+      status: 200,
+      ok: true,
+      redirected: true,
+      url: "https://multipass.wizzair.com/w6/translations/en",
+      headers: new Headers()
+    });
+
+    await expect(client.getFlights({
+      origin: "BBU", destination: "AHO", date: "2026-09-05"
+    })).resolves.toEqual([]);
+    expect(onRouteNotFound).toHaveBeenCalledWith({ origin: "BBU", destination: "AHO" });
+    expect(cache.put).toHaveBeenCalledWith(
+      "BBU-AHO-2026-09-05",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
+    expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes the session for a redirect that is not the missing-route target", async () => {
+    const onRouteNotFound = vi.fn();
+    const { client, fetchImpl, gateway } = createHarness({ onRouteNotFound });
+    fetchImpl
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        redirected: true,
+        url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets",
+        headers: new Headers()
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        flightsOutbound: [{ key: "flight-after-refresh" }]
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await expect(client.getFlights({
+      origin: "AAA", destination: "BBB", date: "2026-08-28"
+    })).resolves.toEqual([{ key: "flight-after-refresh" }]);
+    expect(onRouteNotFound).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(gateway.reloadTab).toHaveBeenCalledOnce();
   });
 
   it("requests and caches both sides of a paired RT response", async () => {
@@ -181,8 +255,17 @@ describe("MultipassClient", () => {
       flightType: "RT", origin: "AAA", destination: "BBB",
       departure: "2026-08-28", arrival: "2026-08-29"
     });
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", [{ key: "out" }]);
-    expect(cache.put).toHaveBeenCalledWith("BBB-AAA-2026-08-29", [{ key: "in" }]);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      [{ key: "out" }],
+      { checkedAt: expect.any(Number) }
+    );
+    expect(cache.put).toHaveBeenCalledWith(
+      "BBB-AAA-2026-08-29",
+      [{ key: "in" }],
+      { checkedAt: expect.any(Number) }
+    );
+    expect(cache.put.mock.calls[0][2].checkedAt).toBe(cache.put.mock.calls[1][2].checkedAt);
   });
 
   it("negative-caches a valid empty inbound response", async () => {
@@ -195,7 +278,11 @@ describe("MultipassClient", () => {
     await client.getFlights({
       origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
     });
-    expect(cache.put).toHaveBeenCalledWith("BBB-AAA-2026-08-29", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "BBB-AAA-2026-08-29",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
   });
 
   it("does not cache a malformed or missing inbound response", async () => {
@@ -220,7 +307,25 @@ describe("MultipassClient", () => {
     }));
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .resolves.toEqual([]);
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
+  });
+
+  it("classifies a malformed availability payload as unknown in the stateful API", async () => {
+    const { client, cache, fetchImpl } = createHarness();
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ unexpected: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    const outcome = await client.getFlightsOutcome({
+      origin: "AAA", destination: "BBB", date: "2026-08-28"
+    });
+    expect(outcome.state).toBe("unknown");
+    expect(outcome.flights).toEqual([]);
+    expect(cache.put).not.toHaveBeenCalled();
   });
 
   it("opens Multipass in an active tab when no Multipass tab exists", async () => {
@@ -271,13 +376,41 @@ describe("MultipassClient", () => {
   });
 
   it("normalizes network failures", async () => {
-    const { client, fetchImpl } = createHarness({ maxAttempts: 1 });
+    const { client, cache, fetchImpl } = createHarness({ maxAttempts: 1 });
     fetchImpl.mockRejectedValue(new TypeError("offline"));
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .rejects.toMatchObject({ code: ErrorCode.HTTP_ERROR, message: "offline" });
+    expect(cache.put).not.toHaveBeenCalled();
   });
 
-  it("stops a hanging availability request after the configured timeout", async () => {
+  it("reports retry congestion once for the complete logical probe", async () => {
+    vi.useFakeTimers();
+    const scheduler = {
+      schedule: vi.fn(async task => task()),
+      recordProbeOutcome: vi.fn(),
+      recordRateLimit: vi.fn()
+    };
+    const { client, fetchImpl } = createHarness({ scheduler, maxAttempts: 2 });
+    fetchImpl
+      .mockResolvedValueOnce(new Response("failed", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ flightsOutbound: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }));
+
+    const request = client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(request).resolves.toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(scheduler.recordProbeOutcome).toHaveBeenCalledOnce();
+    expect(scheduler.recordProbeOutcome).toHaveBeenCalledWith(
+      "transient",
+      expect.objectContaining({ status: 503 })
+    );
+  });
+
+  it("retries a hanging availability request after the configured timeout", async () => {
+    vi.useFakeTimers();
     const hangingFetch = vi.fn((_url, options) => new Promise((resolve, reject) => {
       options.signal.addEventListener("abort", () => {
         reject(new DOMException("Aborted", "AbortError"));
@@ -289,13 +422,34 @@ describe("MultipassClient", () => {
       requestTimeoutMs: 10
     });
 
-    await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
-      .rejects.toMatchObject({
+    const request = client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
+    const expectation = expect(request).rejects.toMatchObject({
         code: ErrorCode.HTTP_ERROR,
         message: "Availability request timed out after 0.01 seconds",
-        retryable: false
+        retryable: true
       });
+    await vi.advanceTimersByTimeAsync(1020);
+    await expectation;
+    expect(hangingFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a 15-second availability timeout by default", async () => {
+    vi.useFakeTimers();
+    const hangingFetch = vi.fn((_url, options) => new Promise((resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    }));
+    const { client } = createHarness({ fetchImpl: hangingFetch, maxAttempts: 1 });
+    const request = client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
+    const expectation = expect(request).rejects.toMatchObject({
+      message: "Availability request timed out after 15 seconds"
+    });
+
+    await vi.advanceTimersByTimeAsync(14999);
     expect(hangingFetch).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await expectation;
   });
 
   it("recognizes an HTML login response and refreshes the session", async () => {

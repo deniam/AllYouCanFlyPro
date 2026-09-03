@@ -61,10 +61,6 @@
     return headers;
   }
 
-  function extractRoutes() {
-    return parsers.extractRoutes(Array.from(document.scripts, script => script.textContent ?? ""));
-  }
-
   function injectPaymentForm(subscriptionId, outboundKey) {
     if (!subscriptionId || !outboundKey) throw new Error("Missing booking parameters");
     const form = document.createElement("form");
@@ -91,9 +87,6 @@
           return false;
         case "getHeaders":
           sendResponse({ headers: getHeaders() });
-          return false;
-        case "getDestinations":
-          sendResponse({ success: true, routes: extractRoutes() });
           return false;
         case "getDynamicUrl":
           getDynamicUrl()

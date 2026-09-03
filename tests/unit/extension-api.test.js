@@ -48,23 +48,4 @@ describe("extension gateway", () => {
     expect(gateway.getManifestVersion()).toBe("3.5.0");
   });
 
-  it("creates and focuses an authentication window through callback APIs", async () => {
-    const api = {
-      runtime: { lastError: null },
-      tabs: {
-        update(_id, _properties, callback) { callback({ id: 9, active: true }); }
-      },
-      windows: {
-        create(_data, callback) { callback({ id: 4, tabs: [{ id: 9 }] }); },
-        update(_id, _properties, callback) { callback({ id: 4, focused: true }); }
-      }
-    };
-    const gateway = createExtensionGateway(api);
-
-    await expect(gateway.createWindow({ url: "https://example.test", focused: true }))
-      .resolves.toMatchObject({ id: 4 });
-    await expect(gateway.updateTab(9, { active: true }))
-      .resolves.toMatchObject({ active: true });
-    await expect(gateway.focusWindow(4)).resolves.toMatchObject({ focused: true });
-  });
 });

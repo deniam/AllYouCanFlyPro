@@ -1,7 +1,7 @@
 import { MessageAction } from "./extension-api.js";
 import { AppError, ErrorCode, throwIfAborted } from "./errors.js";
 import { abortableDelay } from "./request-throttler.js";
-import { segmentCacheKey } from "./cache-repository.js";
+import { AvailabilityState, segmentCacheKey } from "./cache-repository.js";
 
 const MULTIPASS_URL = "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets";
 const MULTIPASS_PATTERN = "https://multipass.wizzair.com/*";
@@ -9,8 +9,21 @@ const SESSION_TTL_MS = 60 * 60 * 1000;
 // The observed availability endpoint uses 400 to represent no matching flights.
 const EMPTY_AVAILABILITY_STATUSES = new Set([400]);
 const MISSING_ROUTE_STATUS = 302;
+const MULTIPASS_ORIGIN = "https://multipass.wizzair.com";
+const MISSING_ROUTE_REDIRECT_PATTERN = /^\/w6\/translations\/[^/]+\/?$/;
 const RATE_LIMIT_DELAYS = Object.freeze({ 426: 60000, 429: 40000, 501: 15000 });
-const AVAILABILITY_REQUEST_TIMEOUT_MS = 10000;
+const AVAILABILITY_REQUEST_TIMEOUT_MS = 15000;
+
+function isMissingRouteRedirect(response) {
+  if (response?.status === MISSING_ROUTE_STATUS) return true;
+  if (!response?.redirected || !response?.url) return false;
+  try {
+    const url = new URL(response.url);
+    return url.origin === MULTIPASS_ORIGIN && MISSING_ROUTE_REDIRECT_PATTERN.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
 
 function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   const requestController = new AbortController();
@@ -46,7 +59,7 @@ function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
         new AppError(
           ErrorCode.HTTP_ERROR,
           `Availability request timed out after ${timeoutMs / 1000} seconds`,
-          { retryable: false }
+          { retryable: true }
         )
       );
     }, timeoutMs);
@@ -74,6 +87,7 @@ export function createMultipassClient({
   scheduler,
   logger = () => {},
   onRouteNotFound = () => {},
+  isRouteExcluded = () => false,
   sessionStorage = localStorage,
   fetchImpl = fetch,
   maxAttempts = 2,
@@ -83,6 +97,14 @@ export function createMultipassClient({
   let sessionPromise = null;
   let refreshPromise = null;
   const inFlightRequests = new Map();
+  function recordLogicalOutcome(kind, error = null) {
+    if (typeof scheduler.recordProbeOutcome === "function") {
+      scheduler.recordProbeOutcome(kind, error);
+      return;
+    }
+    if (kind === "transient") scheduler.recordTransientFailure?.(error);
+    else if (kind === "success") scheduler.recordSuccess?.();
+  }
 
   function readSession() {
     try {
@@ -226,15 +248,16 @@ export function createMultipassClient({
     return refreshPromise;
   }
 
-  async function requestFlights(segment, signal) {
+  async function requestFlights(segment, signal, { strictPayload = false } = {}) {
     let lastError;
+    let sawTransientFailure = false;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       throwIfAborted(signal);
       try {
-        const session = await ensureSession(signal);
-        const response = await scheduler.schedule(() => fetchWithTimeout(fetchImpl, session.dynamicUrl, {
-          method: "POST",
-          redirect: "manual",
+          const session = await ensureSession(signal);
+          const response = await scheduler.schedule(() => fetchWithTimeout(fetchImpl, session.dynamicUrl, {
+            method: "POST",
+            redirect: "follow",
           headers: { "Content-Type": "application/json", ...(session.headers ?? {}) },
           body: JSON.stringify({
             flightType: "RT",
@@ -246,12 +269,12 @@ export function createMultipassClient({
           }),
           signal
         }, requestTimeoutMs), signal);
-
-        const isMissingRoute = response.status === MISSING_ROUTE_STATUS
-          // Cross-origin manual redirects can be exposed as an opaque response.
-          || response.type === "opaqueredirect";
+        // The availability endpoint returns missing routes as a redirect to
+        // the translations endpoint. With redirect: "follow", Chrome exposes
+        // the final URL instead of the original 302 status.
+        const isMissingRoute = isMissingRouteRedirect(response);
         if (isMissingRoute) {
-          scheduler.recordSuccess();
+          recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
           try {
             onRouteNotFound({ origin: segment.origin, destination: segment.destination });
           } catch (error) {
@@ -262,8 +285,16 @@ export function createMultipassClient({
           );
           return { outbound: [], inbound: null };
         }
+        if (response.redirected) {
+          lastError = new AppError(ErrorCode.AUTH_REQUIRED, "Multipass session requires refresh", {
+            retryable: true
+          });
+          if (attempt === maxAttempts - 1) throw lastError;
+          await refreshSession(signal);
+          continue;
+        }
         if (EMPTY_AVAILABILITY_STATUSES.has(response.status)) {
-          scheduler.recordSuccess();
+          recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
           return { outbound: [], inbound: null };
         }
         if ([426, 429, 501].includes(response.status)) {
@@ -297,12 +328,15 @@ export function createMultipassClient({
 
         const payload = await response.json();
         if (!Array.isArray(payload?.flightsOutbound)) {
-          logger(
-            `No flightsOutbound array for ${segment.origin} → ${segment.destination} on ${segment.date}; treating it as no availability`,
-            payload
+          if (!strictPayload) {
+            recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
+            return { outbound: [], inbound: null };
+          }
+          throw new AppError(
+            ErrorCode.INVALID_RESPONSE,
+            `Availability response for ${segment.origin} → ${segment.destination} is missing flightsOutbound`,
+            { retryable: false }
           );
-          scheduler.recordSuccess();
-          return { outbound: [], inbound: null };
         }
         let inbound = null;
         if (segment.arrivalDate) {
@@ -315,7 +349,7 @@ export function createMultipassClient({
             );
           }
         }
-        scheduler.recordSuccess();
+        recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
         return { outbound: payload.flightsOutbound, inbound };
       } catch (error) {
         if (signal?.aborted) throw new AppError(ErrorCode.CANCELLED, "Search cancelled");
@@ -326,7 +360,14 @@ export function createMultipassClient({
             retryable: true
           });
         lastError = normalized;
-        if (!normalized.retryable || attempt === maxAttempts - 1) throw normalized;
+        if (normalized.code !== ErrorCode.RATE_LIMITED
+          && (normalized.retryable || normalized.status >= 500)) {
+          sawTransientFailure = true;
+        }
+        if (!normalized.retryable || attempt === maxAttempts - 1) {
+          if (sawTransientFailure) recordLogicalOutcome("transient", normalized);
+          throw normalized;
+        }
         if (normalized.code !== ErrorCode.RATE_LIMITED) {
           await abortableDelay(1000, signal);
         }
@@ -335,26 +376,27 @@ export function createMultipassClient({
     throw lastError ?? new AppError(ErrorCode.INVALID_RESPONSE, "Flight request failed");
   }
 
-  return Object.freeze({
-    ensureSession,
-    clearSession,
-    async getFlights(segment, signal) {
+  async function requestAndCacheFlights(segment, signal, {
+    coalesce = false,
+    strictPayload = false
+  } = {}) {
       const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
-      const cached = await cache.get(key);
-      if (Array.isArray(cached)) return cached;
-      const requestKey = `${key}|${segment.arrivalDate ?? ""}`;
+      const requestKey = coalesce ? key : `${key}|${segment.arrivalDate ?? ""}`;
       if (inFlightRequests.has(requestKey)) return inFlightRequests.get(requestKey);
       const request = (async () => {
-        const { outbound, inbound } = await requestFlights(segment, signal);
-        const writes = [cache.put(key, outbound)];
+        const { outbound, inbound } = await requestFlights(segment, signal, { strictPayload });
+        const checkedAt = Date.now();
+        const cacheOptions = { checkedAt };
+        const writes = [cache.put(key, outbound, cacheOptions)];
         if (segment.arrivalDate && Array.isArray(inbound)) {
           writes.push(cache.put(
             segmentCacheKey(segment.destination, segment.origin, segment.arrivalDate),
-            inbound
+            inbound,
+            cacheOptions
           ));
         }
         await Promise.all(writes);
-        return outbound;
+        return { flights: outbound, checkedAt };
       })();
       inFlightRequests.set(requestKey, request);
       try {
@@ -362,7 +404,88 @@ export function createMultipassClient({
       } finally {
         if (inFlightRequests.get(requestKey) === request) inFlightRequests.delete(requestKey);
       }
-    },
+  }
+
+  async function getFlights(segment, signal, {
+    skipCache = false,
+    coalesce = false,
+    strictPayload = false
+  } = {}) {
+      if (isRouteExcluded(segment.origin, segment.destination)) {
+        logger(`[availability:skip-excluded] ${segment.origin} → ${segment.destination}`);
+        return [];
+      }
+      const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
+      if (!skipCache) {
+        const cached = await cache.get(key);
+        if (Array.isArray(cached)) return cached;
+      }
+      const result = await requestAndCacheFlights(segment, signal, { coalesce, strictPayload });
+      return result.flights;
+  }
+
+  async function getFlightsOutcome(segment, signal, { skipCache = false } = {}) {
+      if (isRouteExcluded(segment.origin, segment.destination)) {
+        logger(`[availability:skip-excluded] ${segment.origin} → ${segment.destination}`);
+        return {
+          state: AvailabilityState.UNAVAILABLE,
+          flights: [],
+          source: "catalog",
+          reason: "excluded-route"
+        };
+      }
+      const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
+      const cached = skipCache
+        ? null
+        : typeof cache.lookup === "function"
+          ? await cache.lookup(key)
+          : (() => null)();
+      if (!cached && !skipCache) {
+        const legacy = await cache.get(key);
+        if (Array.isArray(legacy)) {
+          return legacy.length
+            ? { state: AvailabilityState.AVAILABLE, flights: legacy, source: "cache" }
+            : { state: AvailabilityState.UNAVAILABLE, flights: [], source: "cache", reason: "empty-response" };
+        }
+      }
+      const cacheState = cached ?? { state: AvailabilityState.UNKNOWN, reason: "miss" };
+      if (cacheState.state === AvailabilityState.AVAILABLE) {
+        return { ...cacheState, flights: cacheState.results };
+      }
+      if (cacheState.state === AvailabilityState.UNAVAILABLE) {
+        return { ...cacheState, flights: [] };
+      }
+      try {
+        const { flights, checkedAt } = await requestAndCacheFlights(segment, signal, {
+          coalesce: true,
+          strictPayload: true
+        });
+        return flights.length
+          ? { state: AvailabilityState.AVAILABLE, flights, source: "network", checkedAt }
+          : {
+              state: AvailabilityState.UNAVAILABLE,
+              flights: [],
+              source: "network",
+              checkedAt,
+              reason: "empty-response"
+            };
+      } catch (error) {
+        if (error?.code === ErrorCode.AUTH_REQUIRED || error?.code === ErrorCode.CANCELLED) throw error;
+        return {
+          state: AvailabilityState.UNKNOWN,
+          flights: [],
+          source: "network",
+          reason: error?.code === ErrorCode.RATE_LIMITED ? "rate-limit" : "request-error",
+          error
+        };
+      }
+  }
+
+  return Object.freeze({
+    ensureSession,
+    clearSession,
+    getFlights,
+    getFlightsOutcome,
     async continueBooking(subscriptionId, outboundKey, signal) {
       const tab = await gateway.createTab({ url: MULTIPASS_URL, active: true });
       await gateway.waitForTabComplete(tab.id, { signal });

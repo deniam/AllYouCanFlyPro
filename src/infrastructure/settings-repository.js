@@ -41,20 +41,30 @@ function parseValue(key, value) {
 
 export function createSettingsRepository(storage = localStorage) {
   const listeners = new Set();
+  let currentSettings = readSettings();
 
-  function load() {
+  function readSettings() {
     return Object.fromEntries(Object.keys(SCHEMA).map(key => [
       key,
       parseValue(key, storage.getItem(key))
     ]));
   }
 
+  function load() {
+    // Search scheduling calls load() frequently. Return a copy of the
+    // in-memory snapshot instead of touching localStorage on every call.
+    return { ...currentSettings };
+  }
+
   function update(patch) {
+    const nextSettings = { ...currentSettings };
     for (const [key, rawValue] of Object.entries(patch)) {
       if (!SCHEMA[key]) continue;
       const value = parseValue(key, rawValue);
       storage.setItem(key, String(value));
+      nextSettings[key] = value;
     }
+    currentSettings = nextSettings;
     const settings = load();
     for (const listener of listeners) listener(settings);
     return settings;
