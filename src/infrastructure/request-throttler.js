@@ -39,12 +39,15 @@ export function createRequestScheduler(
     staggerMaxMs = DEFAULT_STAGGER_MAX_MS
   } = {}
 ) {
-  const queue = [];
+  let queue = [];
+  let queueHead = 0;
+  let queuedRequests = 0;
   let activeRequests = 0;
   let requestsInBatch = 0;
   let batchPauseUntil = 0;
   let cooldownUntil = 0;
-  let effectiveConcurrency = configuredConcurrency(settingsProvider());
+  let settings = settingsProvider();
+  let effectiveConcurrency = configuredConcurrency(settings);
   let recovering = false;
   let successfulResponses = 0;
   let outcomeWindow = [];
@@ -64,7 +67,7 @@ export function createRequestScheduler(
   }
 
   function currentConcurrency() {
-    const configured = configuredConcurrency(settingsProvider());
+    const configured = configuredConcurrency(settings);
     effectiveConcurrency = Math.min(effectiveConcurrency, configured);
     return effectiveConcurrency;
   }
@@ -72,7 +75,7 @@ export function createRequestScheduler(
   function stateSnapshot() {
     return {
       activeRequests,
-      queuedRequests: queue.filter(item => !item.settled).length,
+      queuedRequests,
       effectiveConcurrency: currentConcurrency(),
       recovering,
       requestsInBatch,
@@ -95,7 +98,7 @@ export function createRequestScheduler(
   }
 
   function setEffectiveConcurrency(value, reason) {
-    const configured = configuredConcurrency(settingsProvider());
+    const configured = configuredConcurrency(settings);
     const next = Math.max(1, Math.min(configured, Math.floor(Number(value) || 1)));
     const previous = effectiveConcurrency;
     effectiveConcurrency = next;
@@ -121,7 +124,24 @@ export function createRequestScheduler(
   }
 
   function discardCancelled() {
-    while (queue.length && queue[0].settled) queue.shift();
+    while (queueHead < queue.length && queue[queueHead].settled) queueHead += 1;
+    if (queueHead > 1024 && queueHead * 2 > queue.length) {
+      queue = queue.slice(queueHead);
+      queueHead = 0;
+    }
+  }
+
+  function takeNext() {
+    while (queueHead < queue.length) {
+      const item = queue[queueHead++];
+      if (item.queued) {
+        item.queued = false;
+        queuedRequests -= 1;
+      }
+      if (!item.settled) return item;
+    }
+    discardCancelled();
+    return null;
   }
 
   function finish(item, method, value) {
@@ -152,9 +172,12 @@ export function createRequestScheduler(
   function pump() {
     clearTimer();
     discardCancelled();
-    if (!queue.length) return;
+    if (queueHead >= queue.length) {
+      queue = [];
+      queueHead = 0;
+      return;
+    }
 
-    const settings = settingsProvider();
     const concurrency = currentConcurrency();
     if (activeRequests >= concurrency) return;
 
@@ -184,11 +207,8 @@ export function createRequestScheduler(
       return;
     }
 
-    const item = queue.shift();
-    if (!item || item.settled) {
-      pump();
-      return;
-    }
+    const item = takeNext();
+    if (!item) return;
     start(item);
     pump();
   }
@@ -202,14 +222,20 @@ export function createRequestScheduler(
         resolve,
         reject,
         settled: false,
+        queued: true,
         onAbort: null
       };
       item.onAbort = () => {
+        if (item.queued) {
+          item.queued = false;
+          queuedRequests -= 1;
+        }
         finish(item, "reject", cancelledError());
         pump();
       };
       signal?.addEventListener("abort", item.onAbort, { once: true });
       queue.push(item);
+      queuedRequests += 1;
       notifyState();
       pump();
     });
@@ -278,10 +304,11 @@ export function createRequestScheduler(
     recordProbeOutcome('success');
   }
 
-  function beginSearch(maxConcurrency = configuredConcurrency(settingsProvider())) {
+  function beginSearch(maxConcurrency = configuredConcurrency(settings)) {
+    settings = settingsProvider();
     const now = performance.now();
     const configured = Math.min(
-      configuredConcurrency(settingsProvider()),
+      configuredConcurrency(settings),
       Math.max(1, Math.min(50, Number(maxConcurrency) || 1))
     );
     const next = cooldownUntil > now ? 1 : configured;
@@ -309,7 +336,8 @@ export function createRequestScheduler(
   }
 
   function settingsChanged() {
-    const configured = configuredConcurrency(settingsProvider());
+    settings = settingsProvider();
+    const configured = configuredConcurrency(settings);
     if (!recovering) setEffectiveConcurrency(configured, 'settings-change');
     else if (effectiveConcurrency > configured) setEffectiveConcurrency(configured, 'settings-change');
     logger(
@@ -320,7 +348,7 @@ export function createRequestScheduler(
   }
 
   logger(
-    `Request scheduler configured: max concurrency ${configuredConcurrency(settingsProvider())}, ` +
+    `Request scheduler configured: max concurrency ${configuredConcurrency(settings)}, ` +
     `effective concurrency ${currentConcurrency()}`
   );
 

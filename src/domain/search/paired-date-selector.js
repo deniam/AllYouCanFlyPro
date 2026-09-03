@@ -12,6 +12,7 @@ function utcDateText(date) {
  */
 export function createPairedDateSelector({
   routeCatalog,
+  lookupMany,
   getCached,
   now = () => new Date(),
   bookingHorizonDays = DEFAULT_BOOKING_HORIZON_DAYS
@@ -20,15 +21,35 @@ export function createPairedDateSelector({
   const reservationKey = (origin, destination, date) => `${origin}-${destination}-${date}`;
 
   async function firstUncached(origin, destination, dates) {
+    const candidates = [];
     for (const date of dates) {
       const key = reservationKey(origin, destination, date);
       if (reservations.has(key)) continue;
       reservations.add(key);
-      const cached = await getCached(origin, destination, date);
-      if (!Array.isArray(cached)) return date;
-      reservations.delete(key);
+      candidates.push({ date, key });
     }
-    return null;
+    if (!candidates.length) return null;
+
+    const cachedByKey = typeof lookupMany === "function"
+      ? await lookupMany(candidates.map(candidate => candidate.key))
+      : new Map();
+    let selectedDate = null;
+    for (const candidate of candidates) {
+      const cached = typeof lookupMany === "function"
+        ? cachedByKey.get(candidate.key)
+        : await getCached?.(origin, destination, candidate.date);
+      const isCached = typeof lookupMany === "function"
+        ? cached?.state === "available" || cached?.state === "unavailable"
+        : Array.isArray(cached);
+      if (!isCached) {
+        selectedDate = candidate.date;
+        break;
+      }
+    }
+    candidates.forEach(candidate => {
+      if (candidate.date !== selectedDate) reservations.delete(candidate.key);
+    });
+    return selectedDate;
   }
 
   async function selectPairedArrivalDate({

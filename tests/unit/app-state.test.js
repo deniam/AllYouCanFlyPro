@@ -25,4 +25,26 @@ describe("app search state", () => {
     expect(state.searchSession.active).toBe(true);
     expect(state.finishSearch(currentSession)).toBe(true);
   });
+
+  it("keeps result arrays and the duplicate-key Set synchronized", () => {
+    const state = createAppState();
+    const first = { key: "AAA-BBB-2026-09-01" };
+    const second = { key: "AAA-CCC-2026-09-01" };
+
+    expect(state.appendResult(first, first.key)).toBe(true);
+    expect(state.appendResult(first, first.key)).toBe(false);
+    expect(state.results).toEqual([first]);
+    expect(state.defaultResults).toEqual([first]);
+    expect(state.resultKeys).toEqual(new Set([first.key]));
+
+    state.replaceResults([first, second, first], result => result.key);
+    expect(state.results).toEqual([first, second]);
+    expect(state.defaultResults).toEqual([first, second]);
+    expect(state.resultKeys).toEqual(new Set([first.key, second.key]));
+
+    state.resetResults();
+    expect(state.results).toEqual([]);
+    expect(state.defaultResults).toEqual([]);
+    expect(state.resultKeys.size).toBe(0);
+  });
 });

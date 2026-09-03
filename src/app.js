@@ -1,7 +1,7 @@
 import { loadAirportsData, MULTI_AIRPORT_CITIES, EXCLUDED_ROUTES, cityNameLookup, customCityNames } from './data/airports.js';
 import { createRouteCatalog } from './domain/route-catalog.js';
 import { getDatabase } from './infrastructure/database.js';
-import { createFlightCache, segmentCacheKey } from './infrastructure/cache-repository.js';
+import { createFlightCache } from './infrastructure/cache-repository.js';
 import { createRequestScheduler } from './infrastructure/request-throttler.js';
 import { appState } from './app/state.js';
 import { createSettingsRepository } from './infrastructure/settings-repository.js';
@@ -14,6 +14,7 @@ import { createNotifier } from './ui/notifications.js';
 import { downloadTabSeparatedFile, escapeTabularCell } from './ui/csv-export.js';
 import { createMultipassClient } from './infrastructure/multipass-client.js';
 import { addDaysUTC, parseLocalDate } from './domain/dates.js';
+import { resolveAirport as resolveAirportValue } from './domain/airports.js';
 import { initMultiCalendar, renderCalendarMonth } from './ui/calendar.js';
 import { setupAirportAutocomplete } from './ui/autocomplete.js';
 import { createResultsRenderer } from './ui/results-renderer.js';
@@ -28,7 +29,6 @@ import {
   validateMaxConcurrentRequestsInput
 } from './ui/settings-panel.js';
 import { createThemeController } from './ui/theme-controller.js';
-import { unifyRawFlight } from './domain/flight-normalizer.js';
 import { createDirectSearch } from './domain/search/direct.js';
 import { runSearch } from './domain/search/orchestrator.js';
 import { createConnectionsSearch } from './domain/search/connections.js';
@@ -105,7 +105,9 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     // IndexedDB is used only for API response caching. The selected route
     // dataset (remote cache or packaged fallback) is indexed once in memory.
     const db = getDatabase();
-    const flightCache = createFlightCache(db, () => CACHE_LIFETIME);
+    const flightCache = createFlightCache(db, () => CACHE_LIFETIME, {
+      onMetric: metric => debugLogger("[perf:cache]", metric)
+    });
     const routeCatalog = createRouteCatalog(routesData, {
       excludedRoutes: [...EXCLUDED_ROUTES, ...routeExclusions.load()]
     });
@@ -150,6 +152,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
 
   async function initApp() {
     await initAirports();
+    scheduleCacheCleanup();
   }
   const initializationPromise = initApp();
   // ---------------- Helper: Airport Flag ----------------
@@ -301,10 +304,10 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
   function renderCurrentResults() {
     syncRendererSortState();
     if (appState.tripType === "return") {
-      if (appState.defaultResults.length) displayRoundTripResultsAll([...appState.defaultResults]);
+      if (appState.defaultResults.length) displayRoundTripResultsAll([...appState.defaultResults], true);
       else resultsRenderer.refreshRoundTrips();
     } else {
-      displayGlobalResults([...appState.defaultResults]);
+      displayGlobalResults([...appState.defaultResults], true);
     }
   }
 
@@ -380,8 +383,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
   });
   const selectPairedArrivalDate = createPairedDateSelector({
     routeCatalog,
-    getCached: (origin, destination, date) =>
-      flightCache.get(segmentCacheKey(origin, destination, date))
+    lookupMany: keys => flightCache.lookupMany(keys)
   });
 
   function validateMaxConcurrentRequests() {
@@ -425,10 +427,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
 
   //===========Autocomplete Functions================
 // Assumptions:
-//   - Global variables AIRPORTS, COUNTRY_AIRPORTS, and ROUTES are available and populated.
 //   - getMultiAirportValues(containerId) returns an array of string values from inputs within the container.
 //   - resolveAirport(input) resolves a given input string into an array of airport codes.
-//   - ROUTES is an array of route objects loaded from Dexie (instead of the old static routesData).
 
   function setupAutocomplete(inputId, suggestionsId) {
     setupAirportAutocomplete(inputId, suggestionsId, {
@@ -452,74 +452,14 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     return airportFields.values(containerId);
   }
 
-    // Helper to expand multi-airport city codes
-  function expandMultiAirport(codes) {
-    if (codes.length === 1 && MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[codes[0].toUpperCase()]) {
-      const expanded = MULTI_AIRPORT_CITIES[codes[0].toUpperCase()];
-      if (debug) {      }
-      return expanded;
-    }
-    return codes;
-  }  
   function resolveAirport(input) {
-    if (!input) return [];
-    
-    const anyPattern = /(.+)\(any\)/i;
-    if (anyPattern.test(input)) {
-      for (const key in MULTI_AIRPORT_CITIES) {
-        if (cityNameLookup(key).toLowerCase() === input.toLowerCase()) {
-          return MULTI_AIRPORT_CITIES[key];
-        }
-      }
-      const match = input.match(anyPattern);
-      if (match && match[1]) {
-        const cityPart = match[1].trim();
-        const derivedKey = cityPart.substring(0, 3).toUpperCase();
-        if (MULTI_AIRPORT_CITIES && MULTI_AIRPORT_CITIES[derivedKey]) {
-          return MULTI_AIRPORT_CITIES[derivedKey];
-        }
-      }
-    }
-    const codeMatch = input.match(/\(([A-Z]{3})\)/i);
-    if (codeMatch) {
-      input = codeMatch[1];
-    }
-    const trimmed = input.trim();
-    if (trimmed.toLowerCase() === "any" || trimmed.toLowerCase() === "anywhere") {
-      return ["ANY"];
-    }
-    const lower = trimmed.toLowerCase();
-    
-    if (trimmed.length === 3) {
-      const byCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
-      if (byCode) {
-        return expandMultiAirport([byCode.code]);
-      }
-    }
-    
-    for (const country in COUNTRY_AIRPORTS) {
-      if (country.toLowerCase() === lower) {
-        return COUNTRY_AIRPORTS[country];
-      }
-    }
-    
-    const fallbackByCode = AIRPORTS.find(a => a.code.toLowerCase() === lower);
-    if (fallbackByCode) {
-      return expandMultiAirport([fallbackByCode.code]);
-    }
-    
-    const matches = AIRPORTS.filter(a => a.name.toLowerCase().includes(lower));
-    if (matches.length > 0) {
-      const codes = matches.map(a => a.code);
-      return expandMultiAirport(codes);
-    }
-    
-    return [input.toUpperCase()];
-  }
-
-  // ---------------- Candidate Caching Functions ----------------
-  function getUnifiedCacheKey(origin, destination, date) {
-    return segmentCacheKey(origin, destination, date);
+    return resolveAirportValue(input, {
+      airports: AIRPORTS,
+      countries: COUNTRY_AIRPORTS,
+      groups: MULTI_AIRPORT_CITIES,
+      groupName: cityNameLookup,
+      fallbackUnknown: true
+    });
   }
 
   async function handleClearCache() {  
@@ -542,37 +482,20 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     }
   }
 
-  async function setCachedResults(key, results) {
-    await flightCache.put(key, results);
-  }
-
-  async function getCachedResults(key) {
-    try {
-      return await flightCache.get(key);
-    } catch (e) {
-      console.error("Error retrieving cached results from IndexedDB:", e);
-    }
-    return null;
-  }
-
-  function isDateAvailableForSegment(origin, destination, dateStr) {
-    // Find the route that starts at the given origin.
-    // debugLogger(`Checking availability: ${origin}→${destination} on ${dateStr}`);
-    const route = routeCatalog.getRoute(origin, destination);
-    if (!route) return false;
-    // Find the arrival station object with the given destination.
-    const arrivalStationObj = route.arrivalStations.find(st => {
-      const id = typeof st === "object" ? st.id : st;
-      return id === destination;
-    });
-    if (!arrivalStationObj) return false;
-    // If flightDates is defined, check that dateStr is included.
-    if (arrivalStationObj.flightDates) {
-      return arrivalStationObj.flightDates.includes(dateStr);
-    }
-    // If no flightDates provided, assume available.
-    debugLogger(`  No flight dates restriction`);
-    return true;
+  let cacheCleanupScheduled = false;
+  let cacheCleanupDone = false;
+  function scheduleCacheCleanup() {
+    if (cacheCleanupScheduled || cacheCleanupDone) return;
+    cacheCleanupScheduled = true;
+    const run = async () => {
+      cacheCleanupScheduled = false;
+      if (cacheCleanupDone) return;
+      await cleanupCache();
+      cacheCleanupDone = true;
+      debugLogger("Deferred flight cache cleanup finished.");
+    };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 5000 });
+    else setTimeout(run, 0);
   }
 
   async function checkRouteSegment(origin, destination, date, queryOptions = {}) {
@@ -637,27 +560,27 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
    */
   function appendRouteToDisplay(routeObj) {
     const routeKey = defaultFlightKey(routeObj);
-    if (appState.results.some(result => defaultFlightKey(result) === routeKey)) return;
-    appState.results.push(routeObj);
-    appState.defaultResults.push(routeObj);
+    if (!appState.appendResult(routeObj, routeKey)) return;
     if (appState.tripType === "return") {
       // Round-trip results are rendered by runSearch when an inbound match
       // becomes available. Do not show incomplete outbound-only cards.
-      if (routeObj.returnFlights?.length) displayRoundTripResultsAll(appState.results);
+      if (routeObj.returnFlights?.length) resultsRenderer.enqueueRoundTrip(routeObj);
     } else {
       displayGlobalResults(appState.results);
     }
   }
     
 
-  function displayGlobalResults(results) {
+  function displayGlobalResults(results, immediate = false) {
     syncRendererSortState();
-    resultsRenderer.display(results);
+    if (immediate) resultsRenderer.display(results);
+    else resultsRenderer.enqueue(results);
   }
 
-  function displayRoundTripResultsAll(results) {
+  function displayRoundTripResultsAll(results, immediate = false) {
     syncRendererSortState();
-    resultsRenderer.displayRoundTrips(results);
+    if (immediate) resultsRenderer.displayRoundTrips(results);
+    else resultsRenderer.enqueueRoundTrips(results);
   }
 
   function renderSearchDiagnostics(diagnostics = {}) {
@@ -678,16 +601,6 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     };
   }
 
-  // ---------------- Data Fetching Functions ----------------
-  async function fetchDestinations() {
-    return routeCatalog.getActiveRoutes().map(route => ({
-      ...route,
-      arrivalStations: Array.isArray(route.arrivalStations)
-        ? [...route.arrivalStations]
-        : []
-    }));
-  }
-  
   // ---------------- Round-Trip and Direct Route Search Functions ----------------
   // Searches for connecting (multi‑leg) routes.
   // Uses the "overnight-checkbox" value to decide if connecting flights must depart on the same day as selected.
@@ -697,37 +610,21 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
    */
   let activeAvailabilityScope = null;
   const searchConnectingRoutes = createConnectionsSearch({
+    routeCatalog,
+    airportLookup,
     isCancelled: () => appState.searchSession.cancelled,
     debugLogger,
-    isDateAvailableForSegment,
-    getCachedResults,
-    setCachedResults,
-    getUnifiedCacheKey,
-    checkRouteSegment,
     updateProgress,
-    fetchDestinations,
-    routeCatalog,
     isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination),
-    airportLookup,
-    appendRouteToDisplay,
-    getSettings: () => settingsRepository.load(),
-    getStopoverText: () => document.getElementById("selected-stopover").textContent
+    appendRouteToDisplay
   });
 
   const searchDirectRoutes = createDirectSearch({
-    fetchRoutes: fetchDestinations,
-    getPreviousResults: () => appState.results,
+    routeCatalog,
     isCancelled: () => appState.searchSession.cancelled,
-    getCached: (origin, destination, date) =>
-      getCachedResults(getUnifiedCacheKey(origin, destination, date)),
-    setCached: (origin, destination, date, flights) =>
-      setCachedResults(getUnifiedCacheKey(origin, destination, date), flights),
-    fetchFlights: checkRouteSegment,
-    normalizeFlight: unifyRawFlight,
     appendResult: appendRouteToDisplay,
     updateProgress,
     getConcurrency: () => settingsRepository.load().maxConcurrentRequests,
-    isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination),
     logger: debugLogger,
     getAvailabilityScope: () => activeAvailabilityScope
   });
@@ -768,8 +665,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     }
   
     // Clear previous results and mark search as active.
-    appState.results = [];
-    appState.defaultResults = [];
+    appState.resetResults();
     donationReminderController?.searchStarted();
     resultsRenderer.reset();
     totalResultsEl.textContent = "Total results: 0";
@@ -779,8 +675,6 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     setSearchButtonActive(searchButton);
     debugLogger("New search started. Resetting counters and UI.");
 
-    await cleanupCache();
-  
     requestScheduler.resetBatch();
   
     let returnInputRaw = "";
@@ -846,87 +740,32 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     // here. Connecting searches resolve ANY from the route graph.
     if (isOriginAnywhere && isDestinationAnywhere && maxTransfers === 0) {
       showNotification("Searching all available direct flights. Please wait.");
-      let allRoutes = await fetchDestinations();
-      allRoutes = allRoutes.map(route => {
-        if (Array.isArray(route.arrivalStations)) {
-          route.arrivalStations = route.arrivalStations.filter(arrival => {
-            if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
-            }
-            return true;
-          });
-        }
-        return route;
-      }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
-      const allOrigins = allRoutes.map(route => (
-        typeof route.departureStation === "object" ? route.departureStation.id : route.departureStation
-      ));
-      origins = Array.from(new Set(allOrigins));
+      const date = departureDates.at(-1);
+      origins = routeCatalog.airportCodes.filter(origin =>
+        routeCatalog.getDestinations(origin).some(destination =>
+          routeCatalog.isDateAvailable(origin, destination, date))
+      );
       debugLogger("Anywhere-to-Anywhere search: replaced origins with all available departure codes:", origins);
     }
   
     // 3) If only origin is ANY and destination is specified, filter origins.
     if (isOriginAnywhere && !isDestinationAnywhere && maxTransfers === 0) {
       debugLogger("Origin = ANY; filtering origins by direct routes");
-      let fetchedRoutes = await fetchDestinations();
-      fetchedRoutes = fetchedRoutes.map(route => {
-        if (Array.isArray(route.arrivalStations)) {
-          route.arrivalStations = route.arrivalStations.filter(arrival => {
-            if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
-            }
-            return true;
-          });
-        }
-        return route;
-      }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
-      const destSet = new Set(destinations);
-      const filteredOrigins = fetchedRoutes
-        .filter(route =>
-          route.arrivalStations.some(arr => {
-            const arrId = typeof arr === "object" ? arr.id : arr;
-            return destSet.has(arrId);
-          })
-        )
-        .map(route =>
-          typeof route.departureStation === "object"
-            ? route.departureStation.id
-            : route.departureStation
-        );
-      origins = Array.from(new Set(filteredOrigins));
+      const date = departureDates.at(-1);
+      origins = routeCatalog.airportCodes.filter(origin =>
+        destinations.some(destination => routeCatalog.isDateAvailable(origin, destination, date))
+      );
       debugLogger("Filtered origins:", origins);
     }
   
     // 4) If only destination is ANY and origin is specified, filter destinations.
     if (isDestinationAnywhere && !isOriginAnywhere && maxTransfers === 0) {
       debugLogger("Destination = ANY; filtering destinations by direct routes");
-      let fetchedRoutes = await fetchDestinations();
-      fetchedRoutes = fetchedRoutes.map(route => {
-        if (Array.isArray(route.arrivalStations)) {
-          route.arrivalStations = route.arrivalStations.filter(arrival => {
-            if (typeof arrival === "object" && arrival.operationStartDate) {
-              return new Date(departureDates[departureDates.length - 1]) >= new Date(arrival.operationStartDate);
-            }
-            return true;
-          });
-        }
-        return route;
-      }).filter(route => route.arrivalStations && route.arrivalStations.length > 0);
-      const originSet = new Set(origins);
-      const filteredDestinations = fetchedRoutes
-        .filter(route =>
-          originSet.has(
-            typeof route.departureStation === "object"
-              ? route.departureStation.id
-              : route.departureStation
-          )
-        )
-        .flatMap(route =>
-          route.arrivalStations.map(arr =>
-            typeof arr === "object" ? arr.id : arr
-          )
-        );
-      destinations = Array.from(new Set(filteredDestinations));
+      const date = departureDates.at(-1);
+      destinations = [...new Set(origins.flatMap(origin =>
+        routeCatalog.getDestinations(origin).filter(destination =>
+          routeCatalog.isDateAvailable(origin, destination, date))
+      ))];
       debugLogger("Filtered destinations:", destinations);
     }
     // --- End Anywhere logic ---
@@ -996,16 +835,16 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
             concurrencyChanges: schedulerDiagnostics.concurrencyChanges ?? diagnostics.concurrencyChanges ?? [],
             failedProbes: activeAvailabilityScope?.getFailed?.() ?? []
           };
-        }
+        },
+        debugLogger
       }, searchSession.controller.signal, progress => {
         updateProgress(progress.current, progress.total, progress.message);
       });
       completedResults = results;
 
-      appState.results = results;
-      appState.defaultResults = [...results];
-      if (tripType === "return") displayRoundTripResultsAll(results);
-      else displayGlobalResults(results);
+      appState.replaceResults(results, defaultFlightKey);
+      if (tripType === "return") displayRoundTripResultsAll(results, true);
+      else displayGlobalResults(results, true);
       if (!results.diagnostics?.failedProbes?.length) {
         donationReminderController?.resultsDisplayed(results.length);
       }

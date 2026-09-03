@@ -3,7 +3,6 @@ import { AppError, ErrorCode, throwIfAborted } from "./errors.js";
 export const MessageAction = Object.freeze({
   GET_DYNAMIC_URL: "getDynamicUrl",
   GET_HEADERS: "getHeaders",
-  GET_DESTINATIONS: "getDestinations",
   INJECT_PAYMENT_FORM: "injectPaymentForm",
   PING: "ping"
 });
@@ -54,18 +53,6 @@ export function createExtensionGateway(api = globalThis.chrome ?? globalThis.bro
     requireApi("tabs.update", api?.tabs?.update);
     if (api.tabs.update.length < 3) return api.tabs.update(tabId, updateProperties);
     return callbackCall(callback => api.tabs.update(tabId, updateProperties, callback));
-  }
-
-  async function createWindow(createData) {
-    requireApi("windows.create", api?.windows?.create);
-    if (api.windows.create.length < 2) return api.windows.create(createData);
-    return callbackCall(callback => api.windows.create(createData, callback));
-  }
-
-  async function focusWindow(windowId) {
-    requireApi("windows.update", api?.windows?.update);
-    if (api.windows.update.length < 3) return api.windows.update(windowId, { focused: true });
-    return callbackCall(callback => api.windows.update(windowId, { focused: true }, callback));
   }
 
   async function reloadTab(tabId) {
@@ -132,16 +119,11 @@ export function createExtensionGateway(api = globalThis.chrome ?? globalThis.bro
     queryTabs,
     createTab,
     updateTab,
-    createWindow,
-    focusWindow,
     reloadTab,
     sendMessage,
     waitForTabComplete,
     getManifestVersion() {
       return api?.runtime?.getManifest?.().version ?? "";
-    },
-    getURL(path) {
-      return api?.runtime?.getURL?.(path) ?? path;
     },
     async storageGet(key) {
       if (!api?.storage?.local?.get) return null;

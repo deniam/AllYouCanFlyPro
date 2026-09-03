@@ -32,6 +32,78 @@ function normalizeOutcome(outcome, source = "network") {
   };
 }
 
+function clock() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function createPriorityQueue(compare) {
+  const heap = [];
+
+  function swap(left, right) {
+    [heap[left], heap[right]] = [heap[right], heap[left]];
+    heap[left].heapIndex = left;
+    heap[right].heapIndex = right;
+  }
+
+  function bubbleUp(start) {
+    let index = start;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (compare(heap[index], heap[parent]) <= 0) break;
+      swap(index, parent);
+      index = parent;
+    }
+  }
+
+  function bubbleDown(start) {
+    let index = start;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let largest = index;
+      if (left < heap.length && compare(heap[left], heap[largest]) > 0) largest = left;
+      if (right < heap.length && compare(heap[right], heap[largest]) > 0) largest = right;
+      if (largest === index) return;
+      swap(index, largest);
+      index = largest;
+    }
+  }
+
+  return {
+    get size() {
+      return heap.length;
+    },
+    push(node) {
+      node.heapIndex = heap.length;
+      heap.push(node);
+      bubbleUp(node.heapIndex);
+    },
+    update(node) {
+      if (node.heapIndex < 0) return;
+      bubbleUp(node.heapIndex);
+      bubbleDown(node.heapIndex);
+    },
+    pop() {
+      if (!heap.length) return null;
+      const result = heap[0];
+      const last = heap.pop();
+      result.heapIndex = -1;
+      if (heap.length && last !== result) {
+        heap[0] = last;
+        last.heapIndex = 0;
+        bubbleDown(0);
+      }
+      return result;
+    },
+    drain() {
+      const result = heap.slice();
+      heap.length = 0;
+      result.forEach(node => { node.heapIndex = -1; });
+      return result;
+    }
+  };
+}
+
 /**
  * Search-scoped availability registry. It owns logical single-flight and
  * diagnostics while the supplied loader owns the transport/cache write.
@@ -63,7 +135,11 @@ export function createAvailabilityService({
     const plannedKeys = new Set();
     const resolvedKeys = new Set();
     const probeNodes = new Map();
-    const probeQueue = [];
+    const probeQueue = createPriorityQueue((left, right) =>
+      left.priority - right.priority
+      || left.consumers - right.consumers
+      || right.key.localeCompare(left.key)
+    );
     let activeProbes = 0;
     let cleared = false;
     let probePumpScheduled = false;
@@ -140,7 +216,13 @@ export function createAvailabilityService({
             skipCache: cacheMisses.has(key),
             signal
           });
+          const normalizationStartedAt = clock();
           const normalized = normalizeOutcome(outcome);
+          logger("[perf:availability.normalize]", {
+            key,
+            durationMs: clock() - normalizationStartedAt,
+            flightCount: normalized.flights.length
+          });
           if (normalized.source === "cache") diagnostics.cacheHits += 1;
           else diagnostics.networkRequests += 1;
           return remember(key, normalized);
@@ -171,14 +253,6 @@ export function createAvailabilityService({
       return Math.max(1, Math.min(configuredProbeLimit, normalized));
     }
 
-    function sortQueue() {
-      probeQueue.sort((left, right) =>
-        right.priority - left.priority
-        || right.consumers - left.consumers
-        || left.key.localeCompare(right.key)
-      );
-    }
-
     function finishProbe(node, method, value) {
       if (node.settled) return;
       node.settled = true;
@@ -190,9 +264,8 @@ export function createAvailabilityService({
     function pumpProbeQueue() {
       probePumpScheduled = false;
       if (cleared || signal?.aborted) return;
-      sortQueue();
-      while (activeProbes < concurrencyLimit() && probeQueue.length) {
-        const node = probeQueue.shift();
+      while (activeProbes < concurrencyLimit() && probeQueue.size) {
+        const node = probeQueue.pop();
         if (!node || node.settled) continue;
         activeProbes += 1;
         diagnostics.peakActiveProbes = Math.max(
@@ -213,7 +286,7 @@ export function createAvailabilityService({
       }
       diagnostics.peakPendingProbes = Math.max(
         diagnostics.peakPendingProbes,
-        probeQueue.filter(node => !node.settled).length
+        probeQueue.size
       );
     }
 
@@ -243,7 +316,7 @@ export function createAvailabilityService({
       if (existing) {
         existing.consumers += 1;
         existing.priority = Math.max(existing.priority, Number(priority) || 0);
-        sortQueue();
+        probeQueue.update(existing);
         return existing.promise;
       }
 
@@ -265,14 +338,13 @@ export function createAvailabilityService({
       };
       probeNodes.set(key, node);
       probeQueue.push(node);
-      diagnostics.peakPendingProbes = Math.max(diagnostics.peakPendingProbes, probeQueue.length);
+      diagnostics.peakPendingProbes = Math.max(diagnostics.peakPendingProbes, probeQueue.size);
       requestProbePump();
       return promise;
     }
 
     function rejectQueuedProbes(error) {
-      for (const node of probeQueue) finishProbe(node, "reject", error);
-      probeQueue.length = 0;
+      for (const node of probeQueue.drain()) finishProbe(node, "reject", error);
     }
 
     const onAbort = () => {

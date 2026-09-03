@@ -170,6 +170,29 @@ export function createResultsRenderer({
   let roundTripListenerBound = false;
   let flightCardListenerBound = false;
   const roundTripEntries = new Map();
+  let pendingResults = null;
+  let pendingRoundTrips = false;
+  let frameHandle = null;
+
+  function cancelScheduledFlush() {
+    if (frameHandle === null) return;
+    if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(frameHandle);
+    }
+    else clearTimeout(frameHandle);
+    frameHandle = null;
+  }
+
+  function scheduleFlush() {
+    if (frameHandle !== null) return;
+    const callback = () => {
+      frameHandle = null;
+      flush();
+    };
+    frameHandle = typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
+      ? window.requestAnimationFrame(callback)
+      : setTimeout(callback, 0);
+  }
 
   function segmentHtml(segment, label = "", extraInfo = "") {
     const departureCode = segment.departureStationCode ?? segment.departureStation ?? "";
@@ -369,15 +392,39 @@ export function createResultsRenderer({
   }
 
   function renderRoundTrips() {
+    const startedAt = globalThis.performance?.now?.() ?? Date.now();
     const expanded = expandedRoundTripKeys();
     const expandedCards = expandedFlightKeys();
     const outbounds = sortResultsArray([...roundTripEntries.values()], sortOption, airportName, sortDirection);
     prepare(outbounds);
     bindRoundTripToggles();
-    outbounds.forEach((outbound, index) => list.insertAdjacentHTML(
-      "beforeend",
+    list.insertAdjacentHTML("beforeend", outbounds.map((outbound, index) =>
       roundTripGroupHtml(outbound, index, expanded.has(flightKey(outbound)), expandedCards)
-    ));
+    ).join(""));
+    logger("Rendered round trips", {
+      count: outbounds.length,
+      durationMs: (globalThis.performance?.now?.() ?? Date.now()) - startedAt
+    });
+  }
+
+  function flush() {
+    const results = pendingResults;
+    const shouldRenderRoundTrips = pendingRoundTrips;
+    pendingResults = null;
+    pendingRoundTrips = false;
+    if (results) renderResults(results);
+    if (shouldRenderRoundTrips) renderRoundTrips();
+  }
+
+  function renderResults(results) {
+    const startedAt = globalThis.performance?.now?.() ?? Date.now();
+    const sortedResults = sortResultsArray(results, sortOption, airportName, sortDirection);
+    prepare(sortedResults);
+    list.insertAdjacentHTML("beforeend", sortedResults.map(result => routeHtml(result)).join(""));
+    logger("Rendered results", {
+      count: sortedResults.length,
+      durationMs: (globalThis.performance?.now?.() ?? Date.now()) - startedAt
+    });
   }
 
   return Object.freeze({
@@ -393,24 +440,50 @@ export function createResultsRenderer({
         : "departure";
     },
     display(results) {
-      const sortedResults = sortResultsArray(results, sortOption, airportName, sortDirection);
-      prepare(sortedResults);
-      list.insertAdjacentHTML("beforeend", sortedResults.map(result => routeHtml(result)).join(""));
-      logger("Rendered results", sortedResults.length);
+      cancelScheduledFlush();
+      pendingResults = null;
+      pendingRoundTrips = false;
+      renderResults(results);
     },
     displayRoundTrips(outbounds) {
+      cancelScheduledFlush();
+      pendingResults = null;
+      pendingRoundTrips = false;
       roundTripEntries.clear();
       outbounds.forEach(outbound => roundTripEntries.set(flightKey(outbound), outbound));
       renderRoundTrips();
     },
     upsertRoundTrip(outbound) {
       roundTripEntries.set(flightKey(outbound), outbound);
-      renderRoundTrips();
+      pendingRoundTrips = true;
+      scheduleFlush();
+    },
+    enqueue(results) {
+      pendingResults = results;
+      scheduleFlush();
+    },
+    enqueueRoundTrip(outbound) {
+      roundTripEntries.set(flightKey(outbound), outbound);
+      pendingRoundTrips = true;
+      scheduleFlush();
+    },
+    enqueueRoundTrips(outbounds) {
+      roundTripEntries.clear();
+      outbounds.forEach(outbound => roundTripEntries.set(flightKey(outbound), outbound));
+      pendingRoundTrips = true;
+      scheduleFlush();
     },
     refreshRoundTrips() {
+      cancelScheduledFlush();
+      pendingResults = null;
+      pendingRoundTrips = false;
       if (roundTripEntries.size) renderRoundTrips();
     },
+    flush,
     reset() {
+      cancelScheduledFlush();
+      pendingResults = null;
+      pendingRoundTrips = false;
       roundTripEntries.clear();
       list.replaceChildren();
       toolbar.classList.add("hidden");

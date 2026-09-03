@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createResultsRenderer,
   sortResultsArray,
@@ -98,6 +98,33 @@ describe("results renderer", () => {
     expect(sortResultsArray(results, "arrivalAirport", code => ({ YYY: "Zulu", ZZZ: "Alpha" }[code] ?? code))
       .map(flight => flight.key)).toEqual(["early", "late"]);
     expect(results.map(flight => flight.key)).toEqual(["late", "early"]);
+  });
+
+  it("coalesces many streamed results into one flush", () => {
+    const list = document.createElement("div");
+    const toolbar = document.createElement("div");
+    const total = document.createElement("div");
+    const logger = vi.fn();
+    const renderer = createResultsRenderer({
+      list,
+      toolbar,
+      total,
+      countryFor: code => code,
+      flagFor: () => "",
+      logger
+    });
+    const results = Array.from({ length: 1_000 }, (_, index) => segment({ key: `flight-${index}` }));
+
+    const streamed = [];
+    results.forEach(result => {
+      streamed.push(result);
+      renderer.enqueue(streamed);
+    });
+    expect(list.querySelectorAll(".flight-card")).toHaveLength(0);
+    renderer.flush();
+
+    expect(list.querySelectorAll(".flight-card")).toHaveLength(1_000);
+    expect(logger).toHaveBeenCalledTimes(1);
   });
 
   it("sorts transfer and connection metrics while keeping missing direct connections at zero", () => {
@@ -342,8 +369,10 @@ describe("results renderer", () => {
     const outbound = segment({ returnFlights: [inbound] });
 
     renderer.upsertRoundTrip(outbound, 3);
+    renderer.flush();
     list.querySelector(".return-toggle").click();
     renderer.upsertRoundTrip({ ...outbound, returnFlights: [inbound, secondInbound] }, 3);
+    renderer.flush();
 
     expect(list.querySelectorAll(".flight-trip-group")).toHaveLength(1);
     expect(list.querySelector(".return-toggle").textContent).toContain("2 inbound flights found");

@@ -187,8 +187,10 @@ export function createConnectionPlanner({
     connectionRadiusKm = 0,
     allowChangeAirport = false,
     bookingWindow = {},
-    appendResults = true
+    appendResults = true,
+    skipProgress = false
   }) {
+    const startedAt = globalThis.performance?.now?.() ?? Date.now();
     const maxFlights = Math.max(1, Number(maxTransfers) + 1);
     const bookingFrom = bookingWindow.from ?? isoDate(new Date());
     const horizon = bookingWindow.to
@@ -293,6 +295,7 @@ export function createConnectionPlanner({
 
     let pendingEvents = 0;
     const completedEvents = [];
+    let completedEventsHead = 0;
     let eventWaiter = null;
 
     function publishEvent(event) {
@@ -302,10 +305,15 @@ export function createConnectionPlanner({
     }
 
     async function nextEvent() {
-      if (!completedEvents.length) {
+      if (completedEventsHead >= completedEvents.length) {
         await new Promise(resolve => { eventWaiter = resolve; });
       }
-      return completedEvents.shift();
+      const event = completedEvents[completedEventsHead++];
+      if (completedEventsHead > 1024 && completedEventsHead * 2 > completedEvents.length) {
+        completedEvents.splice(0, completedEventsHead);
+        completedEventsHead = 0;
+      }
+      return event;
     }
 
     function priorityFor({ destination, remainingFlights, dateAlternatives = 1 }) {
@@ -437,16 +445,18 @@ export function createConnectionPlanner({
     }
 
     while (pendingEvents > 0 && !isCancelled()) {
-      const event = completedEvents.length ? completedEvents.shift() : await nextEvent();
+      const event = await nextEvent();
       pendingEvents -= 1;
       if (event.error) throw event.error;
       if (!resolvedKeys.has(event.probeKey)) {
         resolvedKeys.add(event.probeKey);
-        updateProgress(
-          resolvedKeys.size,
-          Math.max(resolvedKeys.size, plannedKeys.size),
-          `Checking ${event.probe.origin} → ${event.probe.destination} on ${event.probe.date}`
-        );
+        if (!skipProgress) {
+          updateProgress(
+            resolvedKeys.size,
+            Math.max(resolvedKeys.size, plannedKeys.size),
+            `Checking ${event.probe.origin} → ${event.probe.destination} on ${event.probe.date}`
+          );
+        }
       }
       const compatibleFlights = event.outcome.state === AvailabilityState.AVAILABLE
         ? processAvailableFlights(event.probe, event.context, event.outcome)
@@ -459,6 +469,12 @@ export function createConnectionPlanner({
       `${resolvedKeys.size}/${plannedKeys.size} unique availability probes, ` +
       `${preflightSegments.length} relevant cache keys`
     );
+    debugLogger("[perf:planner]", {
+      durationMs: (globalThis.performance?.now?.() ?? Date.now()) - startedAt,
+      resultCount: results.length,
+      preflightKeyCount: preflightSegments.length,
+      plannedProbeCount: plannedKeys.size
+    });
     return results;
   }
 

@@ -2,21 +2,16 @@ import { ErrorCode } from "../../infrastructure/errors.js";
 import { mapConcurrentOrdered } from "./concurrency.js";
 
 /**
- * Creates the direct-flight search stage without coupling it to the DOM or the
- * WebExtensions platform.
+ * Creates the direct-flight search stage. Static route eligibility is read
+ * from the already-indexed catalog; availability and cache access belong to
+ * the search-scoped availability service.
  */
 export function createDirectSearch({
-  fetchRoutes,
-  getPreviousResults,
+  routeCatalog,
   isCancelled,
-  getCached,
-  setCached,
-  fetchFlights,
-  normalizeFlight,
   appendResult,
   updateProgress,
   getConcurrency = () => 1,
-  isRouteExcluded = () => false,
   logger = () => {},
   getAvailabilityScope = () => null
 }) {
@@ -29,49 +24,34 @@ export function createDirectSearch({
     skipProgress = false,
     queryOptions = {}
   ) {
-    let allowedReversePairs = null;
-    if (reverse && getPreviousResults().length) {
-      allowedReversePairs = new Set(
-        getPreviousResults().map(flight => `${flight.arrivalStation}-${flight.departureStation}`)
-      );
-    }
-
-    if (reverse) [origins, destinations] = [destinations, origins];
-
-    const routes = (await fetchRoutes())
-      .map(route => ({
-        ...route,
-        arrivalStations: (route.arrivalStations || []).filter(arrival => {
-          if (arrival.operationStartDate && new Date(selectedDate) < new Date(arrival.operationStartDate)) return false;
-          return reverse || !arrival.flightDates || arrival.flightDates.includes(selectedDate);
-        })
-      }))
-      .filter(route => route.arrivalStations.length > 0);
-
+    const sourceOrigins = reverse ? destinations : origins;
+    const sourceDestinations = reverse ? origins : destinations;
+    const requestedOrigins = sourceOrigins.includes("ANY")
+      ? routeCatalog.airportCodes
+      : sourceOrigins;
+    const requestedDestinations = sourceDestinations.includes("ANY")
+      ? null
+      : new Set(sourceDestinations);
     const pairs = [];
-    for (const origin of origins) {
-      const route = routes.find(candidate => {
-        const departure = typeof candidate.departureStation === "object"
-          ? candidate.departureStation.id
-          : candidate.departureStation;
-        return departure === origin;
-      });
-      if (!route) continue;
-      const arrivals = destinations.length === 1 && destinations[0] === "ANY"
-        ? route.arrivalStations
-        : route.arrivalStations.filter(arrival => destinations.includes(
-          typeof arrival === "object" ? arrival.id : arrival
-        ));
-      for (const arrival of arrivals) {
-        pairs.push({ origin, destination: typeof arrival === "object" ? arrival.id : arrival });
+
+    for (const origin of requestedOrigins) {
+      const availableDestinations = routeCatalog.getDestinations(origin)
+        .filter(destination =>
+          (!requestedDestinations || requestedDestinations.has(destination))
+          && routeCatalog.isDateAvailable(origin, destination, selectedDate));
+      for (const destination of availableDestinations) {
+        pairs.push({ origin, destination });
       }
     }
 
     let processed = 0;
     if (!skipProgress) updateProgress(0, pairs.length, "Checking direct flights");
 
-    const availabilityScope = getAvailabilityScope();
-    if (availabilityScope?.preflight) {
+    const availabilityScope = queryOptions.availabilityScope ?? getAvailabilityScope();
+    if (!availabilityScope?.resolve) {
+      throw new Error("Direct search requires an availability scope");
+    }
+    if (availabilityScope.preflight) {
       await availabilityScope.preflight(pairs.map(pair => ({
         ...pair,
         date: selectedDate
@@ -80,42 +60,26 @@ export function createDirectSearch({
 
     const pairResults = await mapConcurrentOrdered(pairs, getConcurrency(), async pair => {
       if (isCancelled()) return [];
-      if (isRouteExcluded(pair.origin, pair.destination)) return [];
-      if (reverse && !allowedReversePairs.has(`${pair.origin}-${pair.destination}`)) return [];
+      if (routeCatalog.isRouteExcluded(pair.origin, pair.destination)) return [];
 
-      let flights;
+      let flights = [];
       try {
-        if (availabilityScope) {
-          const outcome = await availabilityScope.resolve({
-            origin: pair.origin,
-            destination: pair.destination,
-            date: selectedDate
-          });
-          if (outcome.state === "unknown") {
-            logger(`Direct availability unresolved for ${pair.origin} → ${pair.destination}`);
-            flights = [];
-          } else {
-            flights = outcome.flights;
-          }
-          if (outcome.state === "unknown") {
-            processed += 1;
-            if (!skipProgress) updateProgress(processed, pairs.length, `Unresolved ${pair.origin} → ${pair.destination} on ${selectedDate}`);
-            return flights;
-          }
-        } else {
-        flights = await getCached(pair.origin, pair.destination, selectedDate);
-        if (!flights) {
-          flights = await fetchFlights(pair.origin, pair.destination, selectedDate, queryOptions);
-          if (!Array.isArray(flights)) flights = [];
-          await setCached(pair.origin, pair.destination, selectedDate, flights);
-        }
+        const outcome = await availabilityScope.resolve({
+          origin: pair.origin,
+          destination: pair.destination,
+          date: selectedDate,
+          preferredReturnDates: queryOptions.preferredReturnDates ?? []
+        });
+        if (outcome?.state === "unknown") {
+          logger(`Direct availability unresolved for ${pair.origin} → ${pair.destination}`);
+        } else if (Array.isArray(outcome?.flights)) {
+          flights = outcome.flights;
         }
       } catch (error) {
         if ([ErrorCode.AUTH_REQUIRED, ErrorCode.CANCELLED].includes(error?.code)) throw error;
         logger(`Skipping ${pair.origin} → ${pair.destination} after request error: ${error?.message ?? error}`);
-        flights = [];
       }
-      flights = flights.map(normalizeFlight);
+
       if (shouldAppend) flights.forEach(appendResult);
       processed += 1;
       if (!skipProgress) {

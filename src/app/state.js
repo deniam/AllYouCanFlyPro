@@ -5,6 +5,7 @@ export function createAppState() {
     originalOriginInput: [],
     results: [],
     defaultResults: [],
+    resultKeys: new Set(),
     searchSession: {
       active: false,
       cancelled: false,
@@ -18,6 +19,24 @@ export function createAppState() {
         controller: new AbortController()
       };
       return this.searchSession;
+    },
+    resetResults() {
+      this.results = [];
+      this.defaultResults = [];
+      this.resultKeys.clear();
+    },
+    appendResult(result, key) {
+      if (this.resultKeys.has(key)) return false;
+      this.resultKeys.add(key);
+      this.results.push(result);
+      this.defaultResults.push(result);
+      return true;
+    },
+    replaceResults(results, keyFor = result => result?.key) {
+      this.results = [];
+      this.defaultResults = [];
+      this.resultKeys.clear();
+      results.forEach(result => this.appendResult(result, keyFor(result)));
     },
     cancelSearch() {
       this.searchSession.cancelled = true;

@@ -8,14 +8,15 @@ function selector({ reverseDates = [], cachedKeys = [] } = {}) {
     arrivalStations: [{ id: "AAA", flightDates: reverseDates }]
   }]);
   const cached = new Set(cachedKeys);
-  const getCached = vi.fn(async (origin, destination, date) =>
-    cached.has(`${origin}-${destination}-${date}`) ? [] : null
-  );
+  const lookupMany = vi.fn(async keys => new Map(keys.map(key => [
+    key,
+    cached.has(key) ? { state: "unavailable", results: [] } : { state: "unknown", reason: "miss" }
+  ])));
   return {
-    getCached,
+    lookupMany,
     select: createPairedDateSelector({
       routeCatalog: catalog,
-      getCached,
+      lookupMany,
       now: () => new Date("2026-08-29T12:00:00Z")
     })
   };
