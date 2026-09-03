@@ -15,7 +15,7 @@ src/app/main.js               only extension-page entry point
 src/app/app-controller.js     idempotent mount lifecycle
 src/app/state.js              session state and search cancellation
 src/domain/                   routes, airports, dates and flight normalization
-src/domain/search/            candidates, direct search, connections and orchestration
+src/domain/search/            candidates, direct search, connections, orchestration and scoped refresh
 src/infrastructure/           WebExtensions, Dexie, cache, settings, throttle, Multipass client
 src/ui/                       focused UI controllers and renderers
 src/background.js             classic MV3 service worker
@@ -32,6 +32,8 @@ Important boundaries:
 - `background.js` and `content.js` remain classic scripts for Orion compatibility.
 - Routes are loaded from a validated GitHub Pages dataset, cached in `chrome.storage.local`, and indexed once in memory. The packaged dataset is a lazy offline fallback.
 - IndexedDB `FlightSearchCache/cache` and existing localStorage keys remain backward compatible with 3.5.0.
+- Availability outcomes carry their source and `checkedAt` metadata so result cards can distinguish online checks from cached snapshots; the existing IndexedDB timestamp schema requires no migration.
+- Individual route refreshes reuse the completed search snapshot and force network access only for the selected route group's segment/date cache keys. Other cached results remain untouched, while the full **CLEAR CACHE** action remains available in settings.
 - Search cancellation uses `AbortController`; throttle, retry, tab waits and session discovery have finite lifetimes.
 
 ## Development
@@ -91,7 +93,7 @@ Automated tests never call the live Wizz Air API. Authenticated availability and
 
 ## Changelog
 
-### Version 4.1.0 — September 2, 2026
+### Version 4.1.0 — September 3, 2026
 
 - Replaced eager connecting-route expansion with a lazy, date-aware layered graph for one-stop and two-stop searches, including overnight connections, `ANY` origins/destinations, airport changes, `flightDates` and booking-window filtering.
 - Added shared availability nodes and partial flight-chain states so one availability request can serve multiple branches while flights at different times remain separate results.
@@ -100,6 +102,11 @@ Automated tests never call the live Wizz Air API. Authenticated availability and
 - Added date-aware cache preflight, single-flight request coalescing, branch pruning and stable flight-instance/result deduplication.
 - Improved incomplete-search handling: confirmed unavailable routes are pruned, while timeouts and transport failures remain retryable `UNKNOWN` checks.
 - Expanded automated coverage for layered planning, overnight and airport-change routes, cache behavior, scheduler adaptation and concurrent availability requests.
+- Added per-result freshness indicators that distinguish cached snapshots from online checks and show relative age using the oldest contributing segment.
+- Added scoped refresh for individual direct, connecting and round-trip result groups. Refreshes force only the selected segment/date cache keys and keep unrelated cached results intact.
+- Added unavailable and refresh-error states, disabled booking actions for confirmed unavailable routes, and preserved stale snapshots when a refresh fails.
+- Fixed scoped refresh progress handling so unrelated route pairs are not shown and the global progress bar is hidden after completion.
+- Expanded automated coverage for cache timestamps, provenance, scoped refresh, responsive result states and refresh progress handling.
 
 ### Version 4.0.0 — August 31, 2026
 
