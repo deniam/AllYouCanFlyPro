@@ -77,6 +77,20 @@ describe("MultipassClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("does not access the tab or network for an excluded route", async () => {
+    const { client, cache, gateway, fetchImpl } = createHarness({
+      isRouteExcluded: (origin, destination) => `${origin}-${destination}` === "LTN-KRK"
+    });
+
+    await expect(client.getFlights({ origin: "LTN", destination: "KRK", date: "2026-08-28" }))
+      .resolves.toEqual([]);
+    await expect(client.getFlightsOutcome({ origin: "LTN", destination: "KRK", date: "2026-08-28" }))
+      .resolves.toMatchObject({ state: "unavailable", reason: "excluded-route" });
+    expect(cache.get).not.toHaveBeenCalled();
+    expect(gateway.queryTabs).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("coalesces identical in-flight availability requests", async () => {
     let release;
     const gate = new Promise(resolve => { release = resolve; });
@@ -163,9 +177,51 @@ describe("MultipassClient", () => {
       origin: "CDT", destination: "LTN", date: "2026-08-31"
     })).resolves.toEqual([]);
     expect(onRouteNotFound).toHaveBeenCalledWith({ origin: "CDT", destination: "LTN" });
-    expect(fetchImpl.mock.calls[0][1].redirect).toBe("manual");
+    expect(fetchImpl.mock.calls[0][1].redirect).toBe("follow");
     expect(cache.put).toHaveBeenCalledWith("CDT-LTN-2026-08-31", []);
     expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
+  });
+
+  it("classifies a followed translations redirect as a permanently missing route", async () => {
+    const onRouteNotFound = vi.fn();
+    const { client, cache, fetchImpl, scheduler } = createHarness({ onRouteNotFound });
+    fetchImpl.mockResolvedValue({
+      status: 200,
+      ok: true,
+      redirected: true,
+      url: "https://multipass.wizzair.com/w6/translations/en",
+      headers: new Headers()
+    });
+
+    await expect(client.getFlights({
+      origin: "BBU", destination: "AHO", date: "2026-09-05"
+    })).resolves.toEqual([]);
+    expect(onRouteNotFound).toHaveBeenCalledWith({ origin: "BBU", destination: "AHO" });
+    expect(cache.put).toHaveBeenCalledWith("BBU-AHO-2026-09-05", []);
+    expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes the session for a redirect that is not the missing-route target", async () => {
+    const onRouteNotFound = vi.fn();
+    const { client, fetchImpl, gateway } = createHarness({ onRouteNotFound });
+    fetchImpl
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        redirected: true,
+        url: "https://multipass.wizzair.com/w6/subscriptions/spa/private-page/wallets",
+        headers: new Headers()
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        flightsOutbound: [{ key: "flight-after-refresh" }]
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await expect(client.getFlights({
+      origin: "AAA", destination: "BBB", date: "2026-08-28"
+    })).resolves.toEqual([{ key: "flight-after-refresh" }]);
+    expect(onRouteNotFound).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(gateway.reloadTab).toHaveBeenCalledOnce();
   });
 
   it("requests and caches both sides of a paired RT response", async () => {

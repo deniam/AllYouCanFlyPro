@@ -9,8 +9,21 @@ const SESSION_TTL_MS = 60 * 60 * 1000;
 // The observed availability endpoint uses 400 to represent no matching flights.
 const EMPTY_AVAILABILITY_STATUSES = new Set([400]);
 const MISSING_ROUTE_STATUS = 302;
+const MULTIPASS_ORIGIN = "https://multipass.wizzair.com";
+const MISSING_ROUTE_REDIRECT_PATTERN = /^\/w6\/translations\/[^/]+\/?$/;
 const RATE_LIMIT_DELAYS = Object.freeze({ 426: 60000, 429: 40000, 501: 15000 });
 const AVAILABILITY_REQUEST_TIMEOUT_MS = 15000;
+
+function isMissingRouteRedirect(response) {
+  if (response?.status === MISSING_ROUTE_STATUS) return true;
+  if (!response?.redirected || !response?.url) return false;
+  try {
+    const url = new URL(response.url);
+    return url.origin === MULTIPASS_ORIGIN && MISSING_ROUTE_REDIRECT_PATTERN.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
 
 function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   const requestController = new AbortController();
@@ -74,6 +87,7 @@ export function createMultipassClient({
   scheduler,
   logger = () => {},
   onRouteNotFound = () => {},
+  isRouteExcluded = () => false,
   sessionStorage = localStorage,
   fetchImpl = fetch,
   maxAttempts = 2,
@@ -240,10 +254,10 @@ export function createMultipassClient({
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       throwIfAborted(signal);
       try {
-        const session = await ensureSession(signal);
-        const response = await scheduler.schedule(() => fetchWithTimeout(fetchImpl, session.dynamicUrl, {
-          method: "POST",
-          redirect: "manual",
+          const session = await ensureSession(signal);
+          const response = await scheduler.schedule(() => fetchWithTimeout(fetchImpl, session.dynamicUrl, {
+            method: "POST",
+            redirect: "follow",
           headers: { "Content-Type": "application/json", ...(session.headers ?? {}) },
           body: JSON.stringify({
             flightType: "RT",
@@ -255,10 +269,10 @@ export function createMultipassClient({
           }),
           signal
         }, requestTimeoutMs), signal);
-        // A plain 302 is the documented missing-route response. Opaque
-        // redirects are deliberately not treated as a permanent exclusion:
-        // they can also represent an authentication redirect.
-        const isMissingRoute = response.status === MISSING_ROUTE_STATUS;
+        // The availability endpoint returns missing routes as a redirect to
+        // the translations endpoint. With redirect: "follow", Chrome exposes
+        // the final URL instead of the original 302 status.
+        const isMissingRoute = isMissingRouteRedirect(response);
         if (isMissingRoute) {
           recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
           try {
@@ -270,6 +284,14 @@ export function createMultipassClient({
             `HTTP ${MISSING_ROUTE_STATUS}: excluding ${segment.origin} → ${segment.destination} from future searches`
           );
           return { outbound: [], inbound: null };
+        }
+        if (response.redirected) {
+          lastError = new AppError(ErrorCode.AUTH_REQUIRED, "Multipass session requires refresh", {
+            retryable: true
+          });
+          if (attempt === maxAttempts - 1) throw lastError;
+          await refreshSession(signal);
+          continue;
         }
         if (EMPTY_AVAILABILITY_STATUSES.has(response.status)) {
           recordLogicalOutcome(sawTransientFailure ? "transient" : "success", lastError);
@@ -359,6 +381,10 @@ export function createMultipassClient({
     coalesce = false,
     strictPayload = false
   } = {}) {
+      if (isRouteExcluded(segment.origin, segment.destination)) {
+        logger(`[availability:skip-excluded] ${segment.origin} → ${segment.destination}`);
+        return [];
+      }
       const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
       if (!skipCache) {
         const cached = await cache.get(key);
@@ -387,6 +413,15 @@ export function createMultipassClient({
   }
 
   async function getFlightsOutcome(segment, signal, { skipCache = false } = {}) {
+      if (isRouteExcluded(segment.origin, segment.destination)) {
+        logger(`[availability:skip-excluded] ${segment.origin} → ${segment.destination}`);
+        return {
+          state: AvailabilityState.UNAVAILABLE,
+          flights: [],
+          source: "catalog",
+          reason: "excluded-route"
+        };
+      }
       const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
       const cached = skipCache
         ? null

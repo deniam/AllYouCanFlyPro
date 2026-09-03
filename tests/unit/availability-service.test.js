@@ -44,6 +44,7 @@ describe("availability service", () => {
     const outcome = await scope.resolve({ origin: "AAA", destination: "BBB", date: "2026-09-01" });
     expect(outcome.state).toBe(AvailabilityState.UNAVAILABLE);
     expect(loadFlights).not.toHaveBeenCalled();
+    expect(scope.getFailed()).toEqual([]);
   });
 
   it("starts only the current lazy frontier and selects the highest queued priority", async () => {

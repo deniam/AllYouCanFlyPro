@@ -42,7 +42,18 @@ export const EXCLUDED_ROUTES = Object.freeze([
   "PMI-BBU", "RMO-BBU", "SVQ-BBU", "TLV-BBU", "VLC-BBU",
   "BBU-BCN", "BBU-BRI", "BUD-CDT", "FCO-CDT", "KRK-CDT",
   "LGW-CDT", "LTN-CDT", "MXP-CDT", "SOF-CDT", "TIA-CDT",
-  "WAW-CDT", "LTN-KRK", "BBU-MLH", "BTS-MLH"
+  "WAW-CDT", "LTN-KRK", "BBU-MLH", "BTS-MLH",
+  "AGP-BBU", "AHO-BBU", "AYT-BBU", "BBU-AGP", "BBU-AHO",
+  "BBU-AYT", "BBU-BER", "BBU-BLL", "BBU-BLQ", "BBU-BVA",
+  "BBU-CDT", "BBU-CFU", "BBU-CPH", "BBU-CRL", "BBU-EFL",
+  "BBU-HER", "BBU-LPA", "BBU-LPL", "BBU-OPO", "BBU-PSA",
+  "BBU-PSR", "BBU-STR", "BBU-TRF", "BBU-TSF", "BBU-ZAZ",
+  "BBU-ZTH", "BER-BBU", "BLL-BBU", "BLQ-BBU", "BNX-BSL",
+  "BSL-BNX", "BTS-SJJ", "BVA-BBU", "CDT-BBU", "CFU-BBU",
+  "CPH-BBU", "CRL-BBU", "EFL-BBU", "HER-BBU", "LPA-BBU",
+  "LPL-BBU", "MLH-TSR", "OPO-BBU", "PSA-BBU", "PSR-BBU",
+  "SJJ-BTS", "STR-BBU", "TRF-BBU", "TSF-BBU", "TSR-MLH",
+  "ZAZ-BBU", "ZTH-BBU"
 ]);
 
 // Country flag mapping.

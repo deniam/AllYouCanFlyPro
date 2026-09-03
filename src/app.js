@@ -375,7 +375,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     cache: flightCache,
     scheduler: requestScheduler,
     logger: debugLogger,
-    onRouteNotFound: ({ origin, destination }) => excludeRoute(origin, destination)
+    onRouteNotFound: ({ origin, destination }) => excludeRoute(origin, destination),
+    isRouteExcluded: (origin, destination) => routeCatalog.isRouteExcluded(origin, destination)
   });
   const selectPairedArrivalDate = createPairedDateSelector({
     routeCatalog,
