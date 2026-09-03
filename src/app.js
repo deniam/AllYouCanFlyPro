@@ -229,6 +229,11 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     logger: debugLogger
   });
   const airportFields = createAirportFields({ setupAutocomplete });
+  const customGroupAirportFields = createAirportFields({
+    setupAutocomplete,
+    maxRows: 20,
+    autocompleteOptions: { airportOnly: true }
+  });
 
   const sortOptionsByTripType = Object.freeze({
     oneway: Object.freeze([
@@ -430,7 +435,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
 //   - getMultiAirportValues(containerId) returns an array of string values from inputs within the container.
 //   - resolveAirport(input) resolves a given input string into an array of airport codes.
 
-  function setupAutocomplete(inputId, suggestionsId) {
+  function setupAutocomplete(inputId, suggestionsId, options = {}) {
     setupAirportAutocomplete(inputId, suggestionsId, {
       airports: () => AIRPORTS,
       countries: () => COUNTRY_AIRPORTS,
@@ -444,7 +449,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
         const firstOrigin = document.querySelector("#origin-multi input");
         if (firstOrigin) firstOrigin.value = option.name;
       }
-    });
+    }, options);
   }
 
   // Helper function to get values from all input fields within a container.
@@ -1050,6 +1055,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
       groupNames: customCityNames,
       airportLookup,
       airports: AIRPORTS,
+      airportFields: customGroupAirportFields,
+      resolveAirport,
       notify: showNotification
     });
     customGroupsController.initialize();

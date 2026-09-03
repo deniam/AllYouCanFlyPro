@@ -22,7 +22,7 @@ function optionElement(label, onSelect) {
   return option;
 }
 
-export function setupAirportAutocomplete(inputId, suggestionsId, dependencies) {
+export function setupAirportAutocomplete(inputId, suggestionsId, dependencies, options = {}) {
   const input = document.getElementById(inputId);
   const suggestions = document.getElementById(suggestionsId);
   if (!input || !suggestions || initializedInputs.has(input)) return;
@@ -31,6 +31,7 @@ export function setupAirportAutocomplete(inputId, suggestionsId, dependencies) {
   const isPreferred = inputId === "preferred-airport";
   const isDestination = inputId.toLowerCase().includes("destination");
   const isOrigin = inputId.toLowerCase().includes("origin");
+  const airportOnly = options.airportOnly === true;
 
   function airportName(code) {
     return dependencies.airports().find(airport => airport.code === code)?.name ?? code;
@@ -70,12 +71,14 @@ export function setupAirportAutocomplete(inputId, suggestionsId, dependencies) {
 
   function filteredOptions(query) {
     const normalized = query.toLowerCase();
-    const countries = Object.keys(dependencies.countries())
+    const countries = airportOnly ? [] : Object.keys(dependencies.countries())
       .filter(country => country.toLowerCase().includes(normalized))
       .map(country => ({ code: country, name: country }));
     const airports = dependencies.airports()
-      .filter(airport => airport.code.toLowerCase().includes(normalized)
+      .filter(airport => (!airportOnly || !dependencies.groups[airport.code])
+        && (airport.code.toLowerCase().includes(normalized)
         || airport.name.toLowerCase().includes(normalized))
+      )
       .map(airport => ({ code: airport.code, name: airport.name }));
     return [...countries, ...airports]
       .sort((left, right) => {
@@ -88,8 +91,8 @@ export function setupAirportAutocomplete(inputId, suggestionsId, dependencies) {
 
   function render(query = "") {
     suggestions.replaceChildren();
-    let options = query ? filteredOptions(query) : directOptions();
-    if (!isPreferred) options = [{ code: "ANY", name: "Anywhere" }, ...options];
+    let options = query || airportOnly ? filteredOptions(query) : directOptions();
+    if (!isPreferred && !airportOnly) options = [{ code: "ANY", name: "Anywhere" }, ...options];
     if (!options.length) {
       suggestions.classList.add("hidden");
       return;
