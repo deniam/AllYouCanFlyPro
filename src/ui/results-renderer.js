@@ -224,7 +224,13 @@ export function createResultsRenderer({
             </div>
           </div>
           <div class="flight-route-middle">
-            <div class="flight-route-symbol" aria-hidden="true">━ ✈ ━</div>
+            <div class="flight-route-symbol" aria-hidden="true">
+              <span class="flight-route-line"></span>
+              <svg class="flight-route-plane" viewBox="0 0 24 24" focusable="false">
+                <path fill="currentColor" d="M21.5 3.5a1.56 1.56 0 0 0-2.2 0l-4.7 4.7L5.1 5.8 3.7 7.2l7.9 4.5-4.2 4.2-3.1-1.1-1.2 1.2 3.4 2.1 2.1 3.4 1.2-1.2-1.1-3.1 4.2-4.2 4.5 7.9 1.4-1.4-2.4-9.5 4.7-4.7a1.56 1.56 0 0 0 0-2.2Z" />
+              </svg>
+              <span class="flight-route-line"></span>
+            </div>
             <div class="flight-duration">${escapeHtml(segment.calculatedDuration?.hours)}h ${escapeHtml(segment.calculatedDuration?.minutes)}m</div>
           </div>
           <div class="flight-endpoint flight-endpoint--arrival">

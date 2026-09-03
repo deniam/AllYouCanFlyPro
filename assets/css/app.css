@@ -373,10 +373,29 @@ img.emoji { width: 1em; height: 1em; vertical-align: text-bottom; }
 }
 
 .flight-route-symbol {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.25rem;
+  min-height: 1rem;
   overflow: hidden;
   color: var(--theme-brand-text);
-  font-size: 0.875rem;
-  white-space: nowrap;
+}
+
+.flight-route-line {
+  display: block;
+  height: 2px;
+  min-width: 0;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.flight-route-plane {
+  display: block;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  transform: rotate(45deg);
 }
 
 .flight-duration {
