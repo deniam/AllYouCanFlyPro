@@ -8,8 +8,12 @@ function keyFor(origin, destination, date) {
 
 function normalizeOutcome(outcome, source = "network") {
   if (outcome?.state === AvailabilityState.AVAILABLE) {
+    const availability = Object.freeze({
+      source: outcome.source ?? source,
+      checkedAt: Number.isFinite(outcome.checkedAt) ? outcome.checkedAt : null
+    });
     const flights = (outcome.flights ?? outcome.results ?? [])
-      .map(unifyRawFlight)
+      .map(rawFlight => ({ ...unifyRawFlight(rawFlight), availability }))
       .filter(flight => flight?.departureDateUtc instanceof Date
         && !Number.isNaN(flight.departureDateUtc.getTime())
         && flight?.arrivalDateUtc instanceof Date
@@ -125,7 +129,10 @@ export function createAvailabilityService({
   function createScope({
     signal,
     preferredReturnDates = [],
-    maxConcurrentRequests = Number.POSITIVE_INFINITY
+    maxConcurrentRequests = Number.POSITIVE_INFINITY,
+    seedOutcomes = new Map(),
+    forceNetworkKeys = new Set(),
+    networkAllowlist = null
   } = {}) {
     const inFlight = new Map();
     const known = new Map();
@@ -143,6 +150,10 @@ export function createAvailabilityService({
     let activeProbes = 0;
     let cleared = false;
     let probePumpScheduled = false;
+    const forcedKeys = new Set(forceNetworkKeys);
+    const allowedNetworkKeys = networkAllowlist === null
+      ? null
+      : new Set(networkAllowlist);
     const diagnostics = {
       cacheHits: 0,
       networkRequests: 0,
@@ -159,6 +170,10 @@ export function createAvailabilityService({
     const configuredProbeLimit = Number.isFinite(Number(maxConcurrentRequests))
       ? Math.max(1, Math.floor(Number(maxConcurrentRequests)))
       : Number.POSITIVE_INFINITY;
+
+    for (const [key, outcome] of seedOutcomes ?? []) {
+      if (!forcedKeys.has(key)) known.set(key, normalizeOutcome(outcome, outcome?.source));
+    }
 
     function throwIfCancelled() {
       if (signal?.aborted) {
@@ -207,13 +222,22 @@ export function createAvailabilityService({
       if (known.has(key)) return known.get(key);
       if (inFlight.has(key)) return inFlight.get(key);
 
+      if (allowedNetworkKeys && !allowedNetworkKeys.has(key)) {
+        return remember(key, {
+          state: AvailabilityState.UNKNOWN,
+          flights: [],
+          source: "snapshot",
+          reason: "outside-refresh-scope"
+        });
+      }
+
       const promise = (async () => {
         throwIfCancelled();
         try {
           const outcome = await loadFlights({
             ...segment,
             preferredReturnDates,
-            skipCache: cacheMisses.has(key),
+            skipCache: cacheMisses.has(key) || forcedKeys.has(key),
             signal
           });
           const normalizationStartedAt = clock();
@@ -362,7 +386,11 @@ export function createAvailabilityService({
       const keys = unique.map(segment => keyFor(segment.origin, segment.destination, segment.date));
       keys.forEach(key => preflightedKeys.add(key));
       diagnostics.preflightKeys = preflightedKeys.size;
-      const cached = await peekMany(keys);
+      const cacheKeys = keys.filter(key => !forcedKeys.has(key));
+      forcedKeys.forEach(key => {
+        if (keys.includes(key)) cacheMisses.add(key);
+      });
+      const cached = await peekMany(cacheKeys);
       for (const segment of unique) {
         const key = keyFor(segment.origin, segment.destination, segment.date);
           const value = cached.get(key);
@@ -401,6 +429,7 @@ export function createAvailabilityService({
       preflight,
       getKnown: key => known.get(key) ?? null,
       getFailed: () => [...failed.entries()].map(([key, outcome]) => ({ key, ...outcome })),
+      snapshot: () => new Map(known),
       diagnostics,
       clear
     });

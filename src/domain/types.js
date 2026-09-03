@@ -29,6 +29,7 @@
  * @property {Date} departureDateUtc
  * @property {Date} arrivalDateUtc
  * @property {{departureDate: Date, arrivalDate: Date, totalMinutes: number}} calculatedDuration
+ * @property {{source: 'cache'|'network'|'snapshot', checkedAt: number|null}=} availability
  * @property {NormalizedFlight[]=} segments
  */
 
@@ -51,6 +52,23 @@
  */
 
 /** @typedef {SearchResult[] & {diagnostics?: SearchDiagnostics}} SearchOutcome */
+
+/**
+ * @typedef {Object} AvailabilityOutcome
+ * @property {'available'|'unavailable'|'unknown'} state
+ * @property {NormalizedFlight[]} flights
+ * @property {'cache'|'network'|'snapshot'|'catalog'} source
+ * @property {number=} checkedAt
+ * @property {string=} reason
+ */
+
+/**
+ * @typedef {Object} SearchRunContext
+ * @property {SearchRequest} request
+ * @property {Map<string, AvailabilityOutcome>} outcomesByKey
+ */
+
+/** @typedef {'idle'|'refreshing'|'unavailable'|'error'} ResultRefreshState */
 
 /**
  * @typedef {Object} AvailabilitySegmentRequest

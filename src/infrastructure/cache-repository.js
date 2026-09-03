@@ -29,7 +29,25 @@ export function createFlightCache(db, lifetimeProvider, {
   function isFresh(entry, now = Date.now()) {
     return entry
       && Array.isArray(entry.results)
+      && Number.isFinite(entry.timestamp)
       && now - entry.timestamp < lifetimeFor(entry.results);
+  }
+
+  function availableEntry(entry) {
+    return entry.results.length
+      ? {
+          state: AvailabilityState.AVAILABLE,
+          results: entry.results,
+          source: "cache",
+          checkedAt: entry.timestamp
+        }
+      : {
+          state: AvailabilityState.UNAVAILABLE,
+          results: [],
+          source: "cache",
+          checkedAt: entry.timestamp,
+          reason: "empty-response"
+        };
   }
 
   function yieldToEventLoop() {
@@ -39,15 +57,13 @@ export function createFlightCache(db, lifetimeProvider, {
   async function readEntry(key, now = Date.now()) {
     try {
       const entry = await db.cache.get(key);
-      if (!entry || !Array.isArray(entry.results)) {
+      if (!entry || !Array.isArray(entry.results) || !Number.isFinite(entry.timestamp)) {
         return { state: AvailabilityState.UNKNOWN, reason: "miss" };
       }
       if (now - entry.timestamp >= lifetimeFor(entry.results)) {
         return { state: AvailabilityState.UNKNOWN, reason: "expired" };
       }
-      return entry.results.length
-        ? { state: AvailabilityState.AVAILABLE, results: entry.results, source: "cache" }
-        : { state: AvailabilityState.UNAVAILABLE, results: [], source: "cache", reason: "empty-response" };
+      return availableEntry(entry);
     } catch (error) {
       console.error("Error retrieving cached flight results:", error);
       return { state: AvailabilityState.UNKNOWN, reason: "cache-error", error };
@@ -84,7 +100,7 @@ export function createFlightCache(db, lifetimeProvider, {
           const entries = await db.cache.bulkGet(batchKeys);
           batchKeys.forEach((key, index) => {
             const entry = entries[index];
-            if (!entry || !Array.isArray(entry.results)) {
+            if (!entry || !Array.isArray(entry.results) || !Number.isFinite(entry.timestamp)) {
               values.set(key, { state: AvailabilityState.UNKNOWN, reason: "miss" });
               return;
             }
@@ -92,9 +108,7 @@ export function createFlightCache(db, lifetimeProvider, {
               values.set(key, { state: AvailabilityState.UNKNOWN, reason: "expired" });
               return;
             }
-            values.set(key, entry.results.length
-              ? { state: AvailabilityState.AVAILABLE, results: entry.results, source: "cache" }
-              : { state: AvailabilityState.UNAVAILABLE, results: [], source: "cache", reason: "empty-response" });
+            values.set(key, availableEntry(entry));
           });
           if (yieldBetweenBatches && start + batchSize < uniqueKeys.length) {
             await yieldToEventLoop();
@@ -123,11 +137,14 @@ export function createFlightCache(db, lifetimeProvider, {
         }]));
       }
     },
-    async put(key, results) {
+    async put(key, results, { checkedAt = Date.now() } = {}) {
       try {
-        await db.cache.put({ key, results, timestamp: Date.now() });
+        const timestamp = Number.isFinite(checkedAt) ? checkedAt : Date.now();
+        await db.cache.put({ key, results, timestamp });
+        return timestamp;
       } catch (error) {
         console.error("Error caching flight results:", error);
+        return null;
       }
     },
     async cleanup() {

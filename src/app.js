@@ -35,6 +35,11 @@ import { createConnectionsSearch } from './domain/search/connections.js';
 import { createPairedDateSelector } from './domain/search/paired-date-selector.js';
 import { createAvailabilityService } from './domain/search/availability-service.js';
 import { defaultFlightKey } from './domain/search/result-matcher.js';
+import {
+  collectResultRefreshKeys,
+  oldestCheckedAt,
+  shouldSkipStageProgress
+} from './domain/search/refresh.js';
 // ----------------------- Global Settings -----------------------
   const settingsRepository = createSettingsRepository(localStorage);
   const extensionGateway = createExtensionGateway();
@@ -226,7 +231,8 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     countryFor: getCountry,
     flagFor: getCountryFlag,
     airportName: code => airportLookup[code]?.name ?? code,
-    logger: debugLogger
+    logger: debugLogger,
+    onRefresh: key => handleRefreshRoute(key)
   });
   const airportFields = createAirportFields({ setupAutocomplete });
   const customGroupAirportFields = createAirportFields({
@@ -307,10 +313,10 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
   }
 
   function renderCurrentResults() {
+    syncResultViewState();
     syncRendererSortState();
     if (appState.tripType === "return") {
-      if (appState.defaultResults.length) displayRoundTripResultsAll([...appState.defaultResults], true);
-      else resultsRenderer.refreshRoundTrips();
+      displayRoundTripResultsAll([...appState.defaultResults], true);
     } else {
       displayGlobalResults([...appState.defaultResults], true);
     }
@@ -577,15 +583,25 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     
 
   function displayGlobalResults(results, immediate = false) {
+    syncResultViewState();
     syncRendererSortState();
     if (immediate) resultsRenderer.display(results);
     else resultsRenderer.enqueue(results);
   }
 
   function displayRoundTripResultsAll(results, immediate = false) {
+    syncResultViewState();
     syncRendererSortState();
     if (immediate) resultsRenderer.displayRoundTrips(results);
     else resultsRenderer.enqueueRoundTrips(results);
+  }
+
+  function syncResultViewState() {
+    resultsRenderer.setViewState({
+      unavailable: appState.unavailableResults,
+      states: appState.refreshStates,
+      actionsDisabled: appState.searchSession.active || appState.refreshSession.active
+    });
   }
 
   function renderSearchDiagnostics(diagnostics = {}) {
@@ -634,6 +650,154 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     getAvailabilityScope: () => activeAvailabilityScope
   });
 
+  async function executeSearch(searchRequest, availabilityScope, signal, {
+    stream = false,
+    onProgress = () => {}
+  } = {}) {
+    const {
+      allowOvernight,
+      minConnectionMinutes,
+      maxConnectionMinutes,
+      allowAirportChange,
+      connectionRadiusKm,
+      maxConcurrentRequests,
+      bookingWindow
+    } = searchRequest;
+    return runSearch(searchRequest, {
+      searchDirect: ({ origins: from, destinations: to, date, append, skipProgress, preferredReturnDates }) =>
+        searchDirectRoutes(from, to, date, stream && append, false,
+          shouldSkipStageProgress(stream, skipProgress), {
+          preferredReturnDates,
+          availabilityScope
+        }),
+      searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress }) =>
+        searchConnectingRoutes(from, to, date, transfers, stream && append,
+          shouldSkipStageProgress(stream, skipProgress), {
+          availabilityScope,
+          allowOvernight,
+          minConnection: minConnectionMinutes,
+          maxConnection: maxConnectionMinutes,
+          allowChangeAirport: allowAirportChange,
+          connectionRadiusKm,
+          maxConcurrentRequests,
+          bookingWindow
+        }),
+      onRoundTripResult: stream
+        ? flight => {
+            if (!signal?.aborted) resultsRenderer.upsertRoundTrip(flight);
+          }
+        : () => {},
+      getDiagnostics: () => {
+        const diagnostics = availabilityScope?.diagnostics ?? {};
+        const schedulerDiagnostics = requestScheduler.getState();
+        return {
+          ...diagnostics,
+          peakNetworkConcurrency: schedulerDiagnostics.peakActiveRequests
+            ?? diagnostics.peakNetworkConcurrency
+            ?? 0,
+          concurrencyChanges: schedulerDiagnostics.concurrencyChanges ?? diagnostics.concurrencyChanges ?? [],
+          failedProbes: availabilityScope?.getFailed?.() ?? []
+        };
+      },
+      debugLogger
+    }, signal, onProgress);
+  }
+
+  function immutableSearchRequest(request) {
+    return Object.freeze({
+      ...request,
+      origins: Object.freeze([...request.origins]),
+      destinations: Object.freeze([...request.destinations]),
+      originalOrigins: Object.freeze([...request.originalOrigins]),
+      departureDates: Object.freeze([...request.departureDates]),
+      returnDates: Object.freeze([...request.returnDates]),
+      bookingWindow: Object.freeze({ ...request.bookingWindow })
+    });
+  }
+
+  async function handleRefreshRoute(resultKey) {
+    const context = appState.searchRunContext;
+    if (!context || appState.searchSession.active || appState.refreshSession.active) return;
+    const current = appState.results.find(result => defaultFlightKey(result) === resultKey)
+      ?? appState.unavailableResults.get(resultKey);
+    if (!current) return;
+
+    const refreshKeys = collectResultRefreshKeys(current, {
+      includeReturns: context.request.tripType === "return"
+    });
+    if (!refreshKeys.size) {
+      appState.refreshStates.set(resultKey, { status: "error" });
+      renderCurrentResults();
+      return;
+    }
+
+    const refreshSession = appState.beginRefresh(resultKey);
+    hideProgress();
+    syncResultViewState();
+    renderCurrentResults();
+    selectPairedArrivalDate.reset();
+    requestScheduler.beginSearch(context.request.maxConcurrentRequests);
+
+    let refreshScope;
+    try {
+      refreshScope = availabilityService.createScope({
+        signal: refreshSession.controller.signal,
+        preferredReturnDates: context.request.returnDates,
+        maxConcurrentRequests: context.request.maxConcurrentRequests,
+        seedOutcomes: context.outcomesByKey,
+        forceNetworkKeys: refreshKeys,
+        networkAllowlist: refreshKeys
+      });
+      const refreshedResults = await executeSearch(
+        context.request,
+        refreshScope,
+        refreshSession.controller.signal,
+        { stream: false }
+      );
+      if (refreshSession.controller.signal.aborted || appState.refreshSession !== refreshSession) return;
+
+      const failedKeys = refreshScope.getFailed()
+        .filter(failure => refreshKeys.has(failure.key));
+      if (failedKeys.length) {
+        appState.refreshStates.set(resultKey, { status: "error" });
+        debugLogger("Route refresh incomplete", failedKeys);
+        return;
+      }
+
+      const refreshedOutcomes = refreshScope.snapshot();
+      const checkedAt = oldestCheckedAt(refreshKeys, refreshedOutcomes);
+      appState.searchRunContext = {
+        request: context.request,
+        outcomesByKey: refreshedOutcomes
+      };
+      appState.replaceResults(refreshedResults, defaultFlightKey);
+      const refreshedResultKeys = new Set(refreshedResults.map(defaultFlightKey));
+      for (const key of refreshedResultKeys) appState.clearUnavailable(key);
+
+      if (refreshedResultKeys.has(resultKey)) {
+        appState.clearUnavailable(resultKey);
+        appState.refreshStates.delete(resultKey);
+      } else {
+        appState.markUnavailable(
+          resultKey,
+          current,
+          Number.isFinite(checkedAt) ? checkedAt : Date.now()
+        );
+      }
+      updateCSVButtonVisibility();
+    } catch (error) {
+      if (error?.code !== ErrorCode.CANCELLED && error?.name !== "AbortError") {
+        appState.refreshStates.set(resultKey, { status: "error" });
+        if (error?.code === ErrorCode.AUTH_REQUIRED) showNotification(error.message);
+        console.error("Route refresh error:", error);
+      }
+    } finally {
+      refreshScope?.clear?.();
+      hideProgress();
+      if (appState.finishRefresh(refreshSession)) renderCurrentResults();
+    }
+  }
+
   function setSearchButtonIdle(button) {
     button.disabled = false;
     button.setAttribute("aria-label", "Search flights");
@@ -670,12 +834,14 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
     }
   
     // Clear previous results and mark search as active.
+    appState.cancelRefresh();
     appState.resetResults();
     donationReminderController?.searchStarted();
     resultsRenderer.reset();
     totalResultsEl.textContent = "Total results: 0";
     renderSearchDiagnostics({ failedProbes: [] });
     const searchSession = appState.beginSearch();
+    syncResultViewState();
     selectPairedArrivalDate.reset();
     setSearchButtonActive(searchButton);
     debugLogger("New search started. Resetting counters and UI.");
@@ -788,6 +954,22 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
       from: todayUtc,
       to: addDaysUTC(new Date(`${todayUtc}T00:00:00Z`), 3).toISOString().slice(0, 10)
     };
+    const searchRequest = {
+      origins,
+      destinations,
+      originalOrigins,
+      departureDates,
+      returnDates,
+      tripType,
+      maxTransfers,
+      maxConcurrentRequests: searchSettings.maxConcurrentRequests,
+      allowOvernight,
+      minConnectionMinutes: searchSettings.minConnectionTime,
+      maxConnectionMinutes: searchSettings.maxConnectionTime,
+      allowAirportChange: searchSettings.allowChangeAirport,
+      connectionRadiusKm: searchSettings.connectionRadius,
+      bookingWindow
+    };
 
     try {
       activeAvailabilityScope = availabilityService.createScope({
@@ -795,59 +977,22 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
         preferredReturnDates: returnDates,
         maxConcurrentRequests: searchSettings.maxConcurrentRequests
       });
-      const results = await runSearch({
-        origins,
-        destinations,
-        originalOrigins,
-        departureDates,
-        returnDates,
-        tripType,
-        maxTransfers,
-        maxConcurrentRequests: searchSettings.maxConcurrentRequests,
-        allowOvernight,
-        minConnectionMinutes: searchSettings.minConnectionTime,
-        maxConnectionMinutes: searchSettings.maxConnectionTime,
-        allowAirportChange: searchSettings.allowChangeAirport,
-        connectionRadiusKm: searchSettings.connectionRadius,
-        bookingWindow
-      }, {
-        searchDirect: ({ origins: from, destinations: to, date, append, skipProgress, preferredReturnDates }) =>
-          searchDirectRoutes(from, to, date, append, false, skipProgress, { preferredReturnDates }),
-        searchConnections: ({ origins: from, destinations: to, date, maxTransfers: transfers, append, skipProgress, preferredReturnDates }) =>
-          searchConnectingRoutes(from, to, date, transfers, append, skipProgress, {
-            preferredReturnDates,
-            availabilityScope: activeAvailabilityScope,
-            allowOvernight,
-            minConnection: searchSettings.minConnectionTime,
-            maxConnection: searchSettings.maxConnectionTime,
-            allowChangeAirport: searchSettings.allowChangeAirport,
-            connectionRadiusKm: searchSettings.connectionRadius,
-            maxConcurrentRequests: searchSettings.maxConcurrentRequests,
-            bookingWindow
-          }),
-        onRoundTripResult: (flight, index) => {
-          if (searchSession.controller.signal.aborted || appState.searchSession !== searchSession) return;
-          resultsRenderer.upsertRoundTrip(flight, index);
-        },
-        getDiagnostics: () => {
-          const diagnostics = activeAvailabilityScope?.diagnostics ?? {};
-          const schedulerDiagnostics = requestScheduler.getState();
-          return {
-            ...diagnostics,
-            peakNetworkConcurrency: schedulerDiagnostics.peakActiveRequests
-              ?? diagnostics.peakNetworkConcurrency
-              ?? 0,
-            concurrencyChanges: schedulerDiagnostics.concurrencyChanges ?? diagnostics.concurrencyChanges ?? [],
-            failedProbes: activeAvailabilityScope?.getFailed?.() ?? []
-          };
-        },
-        debugLogger
-      }, searchSession.controller.signal, progress => {
-        updateProgress(progress.current, progress.total, progress.message);
-      });
+      const results = await executeSearch(
+        searchRequest,
+        activeAvailabilityScope,
+        searchSession.controller.signal,
+        {
+          stream: true,
+          onProgress: progress => updateProgress(progress.current, progress.total, progress.message)
+        }
+      );
       completedResults = results;
 
       appState.replaceResults(results, defaultFlightKey);
+      appState.searchRunContext = {
+        request: immutableSearchRequest(searchRequest),
+        outcomesByKey: activeAvailabilityScope.snapshot()
+      };
       if (tripType === "return") displayRoundTripResultsAll(results, true);
       else displayGlobalResults(results, true);
       if (!results.diagnostics?.failedProbes?.length) {
@@ -878,6 +1023,7 @@ import { defaultFlightKey } from './domain/search/result-matcher.js';
         hideProgress();
         setSearchButtonIdle(searchButton);
         updateCSVButtonVisibility();
+        if (completedResults?.length) renderCurrentResults();
         debugLogger("Search process finished.");
       }
     }

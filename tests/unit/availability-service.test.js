@@ -113,6 +113,75 @@ describe("availability service", () => {
     expect(scope.diagnostics.preflightKeys).toBe(1);
   });
 
+  it("attaches cache provenance to normalized flights", async () => {
+    const checkedAt = Date.now() - 120_000;
+    const rawFlight = {
+      key: "cached-flight",
+      departureDate: "1 September 2026",
+      arrivalDate: "1 September 2026",
+      departure: "10:00 am",
+      arrival: "12:00 pm",
+      departureOffsetText: "UTC",
+      arrivalOffsetText: "UTC"
+    };
+    const service = createAvailabilityService({
+      cache: {
+        lookupMany: vi.fn(async keys => new Map(keys.map(key => [key, {
+          state: AvailabilityState.AVAILABLE,
+          source: "cache",
+          checkedAt,
+          results: [rawFlight]
+        }])) )
+      },
+      loadFlights: vi.fn()
+    });
+    const scope = service.createScope();
+    const segment = { origin: "AAA", destination: "BBB", date: "2026-09-01" };
+    await scope.preflight([segment]);
+    const outcome = await scope.resolve(segment);
+
+    expect(outcome.flights[0].availability).toEqual({ source: "cache", checkedAt });
+  });
+
+  it("forces only allowlisted keys while reusing a completed search snapshot", async () => {
+    const seedKey = "AAA-BBB-2026-09-01";
+    const forcedKey = "BBB-CCC-2026-09-01";
+    const loadFlights = vi.fn(async ({ origin }) => ({
+      state: AvailabilityState.UNAVAILABLE,
+      source: "network",
+      checkedAt: 2000,
+      flights: [],
+      reason: "empty-response",
+      origin
+    }));
+    const service = createAvailabilityService({ loadFlights });
+    const scope = service.createScope({
+      seedOutcomes: new Map([[seedKey, {
+        state: AvailabilityState.UNAVAILABLE,
+        source: "cache",
+        checkedAt: 1000,
+        flights: []
+      }]]),
+      forceNetworkKeys: new Set([forcedKey]),
+      networkAllowlist: new Set([forcedKey])
+    });
+
+    const seeded = await scope.resolve({ origin: "AAA", destination: "BBB", date: "2026-09-01" });
+    const forced = await scope.resolve({ origin: "BBB", destination: "CCC", date: "2026-09-01" });
+    const outside = await scope.resolve({ origin: "CCC", destination: "DDD", date: "2026-09-01" });
+
+    expect(seeded).toMatchObject({ source: "cache", checkedAt: 1000 });
+    expect(forced).toMatchObject({ source: "network", checkedAt: 2000 });
+    expect(outside).toMatchObject({ state: "unknown", reason: "outside-refresh-scope" });
+    expect(loadFlights).toHaveBeenCalledOnce();
+    expect(loadFlights).toHaveBeenCalledWith(expect.objectContaining({
+      origin: "BBB",
+      destination: "CCC",
+      skipCache: true
+    }));
+    expect(scope.snapshot().get(forcedKey)).toMatchObject({ checkedAt: 2000 });
+  });
+
   it("rejects both active and queued probes when the search is cancelled", async () => {
     const controller = new AbortController();
     const starts = [];

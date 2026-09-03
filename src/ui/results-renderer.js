@@ -76,6 +76,33 @@ function flightKey(flight) {
     ?? `${stationCode(flight, "departure")}-${stationCode(flight, "arrival")}|${departureTime(flight) ?? ""}`);
 }
 
+function contributingFlights(flight, includeReturns = false) {
+  const own = Array.isArray(flight?.segments) && flight.segments.length
+    ? flight.segments.flatMap(segment => contributingFlights(segment))
+    : [flight];
+  if (!includeReturns) return own;
+  return own.concat((flight?.returnFlights ?? []).flatMap(item => contributingFlights(item)));
+}
+
+export function resultFreshness(flight, includeReturns = false) {
+  const metadata = contributingFlights(flight, includeReturns)
+    .map(item => item?.availability)
+    .filter(item => Number.isFinite(item?.checkedAt));
+  if (!metadata.length) return { checkedAt: null, source: "cache" };
+  return {
+    checkedAt: Math.min(...metadata.map(item => item.checkedAt)),
+    source: metadata.every(item => item.source === "network") ? "network" : "cache"
+  };
+}
+
+export function formatRelativeAge(checkedAt, now = Date.now()) {
+  if (!Number.isFinite(checkedAt)) return "time unavailable";
+  const minutes = Math.max(0, Math.floor((now - checkedAt) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ago`;
+}
+
 function compareWithKeys(left, right, keys, direction) {
   for (const [getter, keyDirection = direction] of keys) {
     const difference = compareValues(getter(left), getter(right), keyDirection);
@@ -161,7 +188,8 @@ export function createResultsRenderer({
   countryFor,
   flagFor,
   airportName = code => code,
-  logger = () => {}
+  logger = () => {},
+  onRefresh = () => {}
 }) {
   let sortOption = "default";
   let sortDirection = "asc";
@@ -169,7 +197,12 @@ export function createResultsRenderer({
   let tooltipListenerBound = false;
   let roundTripListenerBound = false;
   let flightCardListenerBound = false;
+  let refreshListenerBound = false;
   const roundTripEntries = new Map();
+  let unavailableResults = new Map();
+  let refreshStates = new Map();
+  let refreshActionsDisabled = false;
+  let freshnessTimer = null;
   let pendingResults = null;
   let pendingRoundTrips = false;
   let frameHandle = null;
@@ -253,15 +286,40 @@ export function createResultsRenderer({
       </div>`;
   }
 
-  function paymentHtml(segment, expanded = false) {
+  function paymentHtml(segment, expanded = false, disabled = false) {
     return `<div class="flight-payment${expanded ? "" : " hidden"}">
       <div class="flight-price">${escapeHtml(segment.currency)} ${escapeHtml(segment.displayPrice)}</div>
-      <button type="button" class="continue-payment-button flight-continue-button" data-outbound-key="${escapeHtml(segment.key)}">Continue</button>
+      <button type="button" class="continue-payment-button flight-continue-button" data-outbound-key="${escapeHtml(segment.key)}"${disabled ? " disabled aria-disabled=\"true\"" : ""}>Continue</button>
     </div>`;
   }
 
-  function routeHtml(flight, label = "", extraInfo = "", expanded = false) {
+  function freshnessLabelHtml(flight, key, includeReturns = false) {
+    const state = refreshStates.get(key) ?? { status: "idle" };
+    const freshness = resultFreshness(flight, includeReturns);
+    const checkedAt = Number.isFinite(state.checkedAt) ? state.checkedAt : freshness.checkedAt;
+    let prefix = freshness.source === "network" ? "Checked online" : "Snapshot";
+    let age = formatRelativeAge(checkedAt);
+    if (state.status === "refreshing") {
+      prefix = "Refreshing…";
+      age = "";
+    } else if (state.status === "unavailable") {
+      prefix = "No longer available";
+    } else if (state.status === "error") {
+      prefix = "Couldn’t refresh · try again";
+    }
+    const text = age ? `${prefix} · ${age}` : prefix;
+    const disabled = refreshActionsDisabled || state.status === "refreshing";
+    return `<div class="route-freshness" data-result-key="${escapeHtml(key)}"${state.status === "refreshing" ? " aria-busy=\"true\"" : ""}>
+      <span class="route-freshness-label" data-prefix="${escapeHtml(prefix)}" data-checked-at="${checkedAt ?? ""}">${escapeHtml(text)}</span>
+      <button type="button" class="route-refresh-button${state.status === "refreshing" ? " route-refresh-button--spinning" : ""}" data-refresh-key="${escapeHtml(key)}" aria-label="Refresh this route" title="Refresh this route"${disabled ? " disabled" : ""}>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.9 9.2h-2.05A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35Z"/></svg>
+      </button>
+    </div>`;
+  }
+
+  function routeHtml(flight, label = "", extraInfo = "", expanded = false, options = {}) {
     const inbound = label.toLowerCase().includes("inbound");
+    const unavailable = options.unavailable === true;
     const segments = flight.segments?.length ? flight.segments : [flight];
     const body = segments.map((segment, index) => {
       const next = segments[index + 1];
@@ -272,9 +330,37 @@ export function createResultsRenderer({
         const minutes = Math.max(0, Math.round((departure - arrival) / 60000));
         connection = `<div class="theme-text-muted text-center text-sm my-2">Self-connection: ${Math.floor(minutes / 60)}h ${minutes % 60}m${escapeHtml(airportChangeText(flight, index))}</div>`;
       }
-      return `${segmentHtml(segment, index === 0 ? label : "", index === 0 ? extraInfo : "")}${paymentHtml(segment, expanded)}${connection}`;
+      return `${segmentHtml(segment, index === 0 ? label : "", index === 0 ? extraInfo : "")}${paymentHtml(segment, expanded, unavailable)}${connection}`;
     }).join("");
-    return `<div class="flight-card ${inbound ? "flight-card--inbound" : ""}" data-flight-key="${escapeHtml(flightKey(flight))}" tabindex="0" role="button" aria-expanded="${expanded}">${body}</div>`;
+    const key = flightKey(flight);
+    const footer = options.showFreshness ? freshnessLabelHtml(flight, key, options.includeReturns) : "";
+    return `<div class="flight-card ${inbound ? "flight-card--inbound" : ""}${unavailable ? " flight-card--unavailable" : ""}" data-flight-key="${escapeHtml(key)}" tabindex="0" role="button" aria-expanded="${expanded}">${body}${footer}</div>`;
+  }
+
+  function bindRefreshActions() {
+    if (refreshListenerBound) return;
+    refreshListenerBound = true;
+    list.addEventListener("click", event => {
+      const button = event.target.closest(".route-refresh-button");
+      if (!button || button.disabled) return;
+      event.stopPropagation();
+      onRefresh(button.dataset.refreshKey);
+    });
+  }
+
+  function scheduleFreshnessUpdate() {
+    if (freshnessTimer !== null) clearTimeout(freshnessTimer);
+    freshnessTimer = setTimeout(() => {
+      freshnessTimer = null;
+      list.querySelectorAll(".route-freshness-label").forEach(label => {
+        if (!label.dataset.checkedAt || !label.dataset.prefix) return;
+        const checkedAt = Number(label.dataset.checkedAt);
+        if (!Number.isFinite(checkedAt)) return;
+        label.textContent = `${label.dataset.prefix} · ${formatRelativeAge(checkedAt)}`;
+      });
+      scheduleFreshnessUpdate();
+    }, 60000);
+    freshnessTimer?.unref?.();
   }
 
   function bindTooltips() {
@@ -355,12 +441,22 @@ export function createResultsRenderer({
     return [...list.children].filter(child => child.classList.contains("flight-card"));
   }
 
-  function prepare(results) {
+  function prepare(availableCount, unavailableCount = 0) {
     toolbar.classList.remove("hidden");
-    total.textContent = `Total results: ${results.length}`;
+    total.textContent = unavailableCount
+      ? `${availableCount} available · ${unavailableCount} unavailable`
+      : `Total results: ${availableCount}`;
     list.replaceChildren();
     bindTooltips();
     bindFlightCardToggles();
+    bindRefreshActions();
+  }
+
+  function combinedResults(results) {
+    const activeKeys = new Set(results.map(flightKey));
+    return results.concat([...unavailableResults.entries()]
+      .filter(([key]) => !activeKeys.has(key))
+      .map(([, result]) => result));
   }
 
   function expandedRoundTripKeys() {
@@ -386,14 +482,18 @@ export function createResultsRenderer({
         flight,
         `Inbound Flight ${returnIndex + 1}`,
         `Stopover: ${Math.floor(minutes / 60)}h ${minutes % 60}m`,
-        expandedCards.has(flightKey(flight))
+        expandedCards.has(flightKey(flight)),
+        { unavailable: refreshStates.get(flightKey(outbound))?.status === "unavailable" }
       );
     }).join("") ?? "";
     const isExpanded = expanded && count > 0;
-    return `<div class="flight-trip-group" data-roundtrip-index="${index}" data-roundtrip-key="${escapeHtml(flightKey(outbound))}">
-      ${routeHtml(outbound, "Outbound Flight", "", expandedCards.has(flightKey(outbound)))}
+    const key = flightKey(outbound);
+    const unavailable = refreshStates.get(key)?.status === "unavailable";
+    return `<div class="flight-trip-group${unavailable ? " flight-trip-group--unavailable" : ""}" data-roundtrip-index="${index}" data-roundtrip-key="${escapeHtml(key)}">
+      ${routeHtml(outbound, "Outbound Flight", "", expandedCards.has(flightKey(outbound)), { unavailable })}
       ${count ? `<div class="flight-return-summary"><button type="button" class="return-toggle" aria-expanded="${isExpanded}" aria-controls="${returnsId}">${count} inbound flight${count === 1 ? "" : "s"} found</button></div>` : ""}
       <div id="${returnsId}" class="flight-return-list${isExpanded ? "" : " hidden"}">${returns}</div>
+      ${freshnessLabelHtml(outbound, key, true)}
     </div>`;
   }
 
@@ -401,12 +501,16 @@ export function createResultsRenderer({
     const startedAt = globalThis.performance?.now?.() ?? Date.now();
     const expanded = expandedRoundTripKeys();
     const expandedCards = expandedFlightKeys();
-    const outbounds = sortResultsArray([...roundTripEntries.values()], sortOption, airportName, sortDirection);
-    prepare(outbounds);
+    const activeOutbounds = [...roundTripEntries.values()];
+    const unavailableCount = [...unavailableResults.keys()]
+      .filter(key => !roundTripEntries.has(key)).length;
+    const outbounds = sortResultsArray(combinedResults(activeOutbounds), sortOption, airportName, sortDirection);
+    prepare(activeOutbounds.length, unavailableCount);
     bindRoundTripToggles();
     list.insertAdjacentHTML("beforeend", outbounds.map((outbound, index) =>
       roundTripGroupHtml(outbound, index, expanded.has(flightKey(outbound)), expandedCards)
     ).join(""));
+    scheduleFreshnessUpdate();
     logger("Rendered round trips", {
       count: outbounds.length,
       durationMs: (globalThis.performance?.now?.() ?? Date.now()) - startedAt
@@ -424,9 +528,18 @@ export function createResultsRenderer({
 
   function renderResults(results) {
     const startedAt = globalThis.performance?.now?.() ?? Date.now();
-    const sortedResults = sortResultsArray(results, sortOption, airportName, sortDirection);
-    prepare(sortedResults);
-    list.insertAdjacentHTML("beforeend", sortedResults.map(result => routeHtml(result)).join(""));
+    const activeKeys = new Set(results.map(flightKey));
+    const unavailableCount = [...unavailableResults.keys()].filter(key => !activeKeys.has(key)).length;
+    const sortedResults = sortResultsArray(combinedResults(results), sortOption, airportName, sortDirection);
+    prepare(results.length, unavailableCount);
+    list.insertAdjacentHTML("beforeend", sortedResults.map(result => {
+      const key = flightKey(result);
+      return routeHtml(result, "", "", false, {
+        showFreshness: true,
+        unavailable: refreshStates.get(key)?.status === "unavailable"
+      });
+    }).join(""));
+    scheduleFreshnessUpdate();
     logger("Rendered results", {
       count: sortedResults.length,
       durationMs: (globalThis.performance?.now?.() ?? Date.now()) - startedAt
@@ -444,6 +557,11 @@ export function createResultsRenderer({
       returnSortOption = ["departure", "arrival", "duration"].includes(value)
         ? value
         : "departure";
+    },
+    setViewState({ unavailable = new Map(), states = new Map(), actionsDisabled = false } = {}) {
+      unavailableResults = new Map(unavailable);
+      refreshStates = new Map(states);
+      refreshActionsDisabled = actionsDisabled;
     },
     display(results) {
       cancelScheduledFlush();
@@ -491,6 +609,10 @@ export function createResultsRenderer({
       pendingResults = null;
       pendingRoundTrips = false;
       roundTripEntries.clear();
+      unavailableResults.clear();
+      refreshStates.clear();
+      if (freshnessTimer !== null) clearTimeout(freshnessTimer);
+      freshnessTimer = null;
       list.replaceChildren();
       toolbar.classList.add("hidden");
     }

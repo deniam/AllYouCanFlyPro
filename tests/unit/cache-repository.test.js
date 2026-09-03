@@ -32,10 +32,32 @@ describe("flight cache", () => {
   });
 
   it("uses the same 30-minute negative TTL for get and lookup", async () => {
-    const databaseWithEmpty = database({ timestamp: Date.now() - 60_000, results: [] });
+    const timestamp = Date.now() - 60_000;
+    const databaseWithEmpty = database({ timestamp, results: [] });
     const cache = createFlightCache(databaseWithEmpty, () => 4 * 60 * 60 * 1000);
     await expect(cache.get("key")).resolves.toEqual([]);
-    await expect(cache.lookup("key")).resolves.toMatchObject({ state: "unavailable", results: [] });
+    await expect(cache.lookup("key")).resolves.toMatchObject({
+      state: "unavailable",
+      results: [],
+      checkedAt: timestamp
+    });
+  });
+
+  it("treats an entry without a valid timestamp as a miss", async () => {
+    const cache = createFlightCache(database({ results: [{ id: 1 }] }), () => 60_000);
+    await expect(cache.get("key")).resolves.toBeNull();
+    await expect(cache.lookup("key")).resolves.toMatchObject({ state: "unknown", reason: "miss" });
+  });
+
+  it("stores an explicitly shared check time", async () => {
+    const db = database(null);
+    const cache = createFlightCache(db, () => 60_000);
+    await expect(cache.put("key", [{ id: 1 }], { checkedAt: 1234 })).resolves.toBe(1234);
+    expect(db.cache.put).toHaveBeenCalledWith({
+      key: "key",
+      results: [{ id: 1 }],
+      timestamp: 1234
+    });
   });
 
   it("batches lookupMany without changing its Map result", async () => {
@@ -52,6 +74,9 @@ describe("flight cache", () => {
       500, 500, 500, 500, 500, 500
     ]);
     expect(result.size).toBe(3_000);
-    expect(result.get("key-2999")).toMatchObject({ state: "available" });
+    expect(result.get("key-2999")).toMatchObject({
+      state: "available",
+      checkedAt: expect.any(Number)
+    });
   });
 });

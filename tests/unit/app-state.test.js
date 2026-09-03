@@ -47,4 +47,29 @@ describe("app search state", () => {
     expect(state.defaultResults).toEqual([]);
     expect(state.resultKeys.size).toBe(0);
   });
+
+  it("keeps unavailable refresh placeholders out of available results and clears them on search", () => {
+    const state = createAppState();
+    const result = { key: "old" };
+    state.markUnavailable("old", result, 1234);
+
+    expect(state.results).toEqual([]);
+    expect(state.unavailableResults.get("old")).toBe(result);
+    expect(state.refreshStates.get("old")).toEqual({ status: "unavailable", checkedAt: 1234 });
+
+    state.resetResults();
+    expect(state.unavailableResults.size).toBe(0);
+    expect(state.refreshStates.size).toBe(0);
+  });
+
+  it("allows only one refresh session and cancels it when a search starts", () => {
+    const state = createAppState();
+    const refresh = state.beginRefresh("route");
+    expect(refresh.active).toBe(true);
+
+    state.beginSearch();
+    expect(refresh.controller.signal.aborted).toBe(true);
+    expect(state.refreshSession.active).toBe(false);
+    expect(state.searchSession.active).toBe(true);
+  });
 });

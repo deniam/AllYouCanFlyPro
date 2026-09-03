@@ -376,6 +376,36 @@ export function createMultipassClient({
     throw lastError ?? new AppError(ErrorCode.INVALID_RESPONSE, "Flight request failed");
   }
 
+  async function requestAndCacheFlights(segment, signal, {
+    coalesce = false,
+    strictPayload = false
+  } = {}) {
+      const key = segmentCacheKey(segment.origin, segment.destination, segment.date);
+      const requestKey = coalesce ? key : `${key}|${segment.arrivalDate ?? ""}`;
+      if (inFlightRequests.has(requestKey)) return inFlightRequests.get(requestKey);
+      const request = (async () => {
+        const { outbound, inbound } = await requestFlights(segment, signal, { strictPayload });
+        const checkedAt = Date.now();
+        const cacheOptions = { checkedAt };
+        const writes = [cache.put(key, outbound, cacheOptions)];
+        if (segment.arrivalDate && Array.isArray(inbound)) {
+          writes.push(cache.put(
+            segmentCacheKey(segment.destination, segment.origin, segment.arrivalDate),
+            inbound,
+            cacheOptions
+          ));
+        }
+        await Promise.all(writes);
+        return { flights: outbound, checkedAt };
+      })();
+      inFlightRequests.set(requestKey, request);
+      try {
+        return await request;
+      } finally {
+        if (inFlightRequests.get(requestKey) === request) inFlightRequests.delete(requestKey);
+      }
+  }
+
   async function getFlights(segment, signal, {
     skipCache = false,
     coalesce = false,
@@ -390,26 +420,8 @@ export function createMultipassClient({
         const cached = await cache.get(key);
         if (Array.isArray(cached)) return cached;
       }
-      const requestKey = coalesce ? key : `${key}|${segment.arrivalDate ?? ""}`;
-      if (inFlightRequests.has(requestKey)) return inFlightRequests.get(requestKey);
-      const request = (async () => {
-        const { outbound, inbound } = await requestFlights(segment, signal, { strictPayload });
-        const writes = [cache.put(key, outbound)];
-        if (segment.arrivalDate && Array.isArray(inbound)) {
-          writes.push(cache.put(
-            segmentCacheKey(segment.destination, segment.origin, segment.arrivalDate),
-            inbound
-          ));
-        }
-        await Promise.all(writes);
-        return outbound;
-      })();
-      inFlightRequests.set(requestKey, request);
-      try {
-        return await request;
-      } finally {
-        if (inFlightRequests.get(requestKey) === request) inFlightRequests.delete(requestKey);
-      }
+      const result = await requestAndCacheFlights(segment, signal, { coalesce, strictPayload });
+      return result.flights;
   }
 
   async function getFlightsOutcome(segment, signal, { skipCache = false } = {}) {
@@ -444,14 +456,19 @@ export function createMultipassClient({
         return { ...cacheState, flights: [] };
       }
       try {
-        const flights = await getFlights(segment, signal, {
-          skipCache: true,
+        const { flights, checkedAt } = await requestAndCacheFlights(segment, signal, {
           coalesce: true,
           strictPayload: true
         });
         return flights.length
-          ? { state: AvailabilityState.AVAILABLE, flights, source: "network" }
-          : { state: AvailabilityState.UNAVAILABLE, flights: [], source: "network", reason: "empty-response" };
+          ? { state: AvailabilityState.AVAILABLE, flights, source: "network", checkedAt }
+          : {
+              state: AvailabilityState.UNAVAILABLE,
+              flights: [],
+              source: "network",
+              checkedAt,
+              reason: "empty-response"
+            };
       } catch (error) {
         if (error?.code === ErrorCode.AUTH_REQUIRED || error?.code === ErrorCode.CANCELLED) throw error;
         return {

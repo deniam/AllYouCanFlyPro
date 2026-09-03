@@ -2,6 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createResultsRenderer,
+  formatRelativeAge,
+  resultFreshness,
   sortResultsArray,
   sortReturnFlightsArray
 } from "../../src/ui/results-renderer.js";
@@ -32,7 +34,7 @@ function segment(overrides = {}) {
   };
 }
 
-function setupRenderer() {
+function setupRenderer(options = {}) {
   const list = document.createElement("div");
   list.className = "route-list";
   const toolbar = document.createElement("div");
@@ -48,7 +50,8 @@ function setupRenderer() {
       toolbar,
       total,
       countryFor: code => `${code} country`,
-      flagFor: code => code === "MXP" ? "🇮🇹" : "🇪🇬"
+      flagFor: code => code === "MXP" ? "🇮🇹" : "🇪🇬",
+      ...options
     })
   };
 }
@@ -58,6 +61,23 @@ beforeEach(() => {
 });
 
 describe("results renderer", () => {
+  it("formats relative freshness without exposing an exact timestamp", () => {
+    const now = new Date("2026-09-03T12:00:00Z").getTime();
+    expect(formatRelativeAge(now - 30_000, now)).toBe("just now");
+    expect(formatRelativeAge(now - 14 * 60_000, now)).toBe("14m ago");
+    expect(formatRelativeAge(now - 134 * 60_000, now)).toBe("2h 14m ago");
+  });
+
+  it("uses the oldest segment and marks mixed provenance as a snapshot", () => {
+    const result = {
+      segments: [
+        segment({ availability: { source: "network", checkedAt: 5000 } }),
+        segment({ availability: { source: "cache", checkedAt: 3000 } })
+      ]
+    };
+    expect(resultFreshness(result)).toEqual({ source: "cache", checkedAt: 3000 });
+  });
+
   it("sorts one-way results without mutating the source and supports stable criteria", () => {
     const early = segment({
       key: "early",
@@ -239,6 +259,37 @@ describe("results renderer", () => {
     const button = list.querySelector(".continue-payment-button");
     expect(button.textContent).toBe("Continue");
     expect(button.dataset.outboundKey).toBe("flight-key");
+  });
+
+  it("renders an accessible freshness footer and delegates refresh", () => {
+    const onRefresh = vi.fn();
+    const { list, renderer } = setupRenderer({ onRefresh });
+    renderer.display([segment({
+      availability: { source: "network", checkedAt: Date.now() }
+    })]);
+
+    expect(list.querySelector(".route-freshness-label").textContent)
+      .toBe("Checked online · just now");
+    const refresh = list.querySelector(".route-refresh-button");
+    expect(refresh.getAttribute("aria-label")).toBe("Refresh this route");
+    refresh.click();
+    expect(onRefresh).toHaveBeenCalledWith("flight-key");
+  });
+
+  it("keeps an unavailable result visible and disables payment", () => {
+    const { list, renderer, total } = setupRenderer();
+    const unavailable = segment({ availability: { source: "cache", checkedAt: Date.now() - 60_000 } });
+    renderer.setViewState({
+      unavailable: new Map([["flight-key", unavailable]]),
+      states: new Map([["flight-key", { status: "unavailable", checkedAt: Date.now() }]])
+    });
+    renderer.display([]);
+
+    expect(total.textContent).toBe("0 available · 1 unavailable");
+    expect(list.querySelector(".flight-card--unavailable")).not.toBeNull();
+    expect(list.querySelector(".route-freshness-label").textContent)
+      .toContain("No longer available");
+    expect(list.querySelector(".continue-payment-button").disabled).toBe(true);
   });
 
   it("expands payment details when the flight card is clicked and collapses them again", () => {

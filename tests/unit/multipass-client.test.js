@@ -65,7 +65,11 @@ describe("MultipassClient", () => {
     const flights = await client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" });
     expect(flights).toEqual([{ key: "flight-1" }]);
     expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", flights);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      flights,
+      { checkedAt: expect.any(Number) }
+    );
   });
 
   it("does not access the tab or network on a cache hit", async () => {
@@ -164,7 +168,11 @@ describe("MultipassClient", () => {
     }))
       .resolves.toEqual([]);
     expect(cache.put).toHaveBeenCalledTimes(1);
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
     expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
   });
 
@@ -178,7 +186,11 @@ describe("MultipassClient", () => {
     })).resolves.toEqual([]);
     expect(onRouteNotFound).toHaveBeenCalledWith({ origin: "CDT", destination: "LTN" });
     expect(fetchImpl.mock.calls[0][1].redirect).toBe("follow");
-    expect(cache.put).toHaveBeenCalledWith("CDT-LTN-2026-08-31", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "CDT-LTN-2026-08-31",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
     expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
   });
 
@@ -197,7 +209,11 @@ describe("MultipassClient", () => {
       origin: "BBU", destination: "AHO", date: "2026-09-05"
     })).resolves.toEqual([]);
     expect(onRouteNotFound).toHaveBeenCalledWith({ origin: "BBU", destination: "AHO" });
-    expect(cache.put).toHaveBeenCalledWith("BBU-AHO-2026-09-05", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "BBU-AHO-2026-09-05",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
     expect(scheduler.recordSuccess).toHaveBeenCalledOnce();
   });
 
@@ -239,8 +255,17 @@ describe("MultipassClient", () => {
       flightType: "RT", origin: "AAA", destination: "BBB",
       departure: "2026-08-28", arrival: "2026-08-29"
     });
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", [{ key: "out" }]);
-    expect(cache.put).toHaveBeenCalledWith("BBB-AAA-2026-08-29", [{ key: "in" }]);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      [{ key: "out" }],
+      { checkedAt: expect.any(Number) }
+    );
+    expect(cache.put).toHaveBeenCalledWith(
+      "BBB-AAA-2026-08-29",
+      [{ key: "in" }],
+      { checkedAt: expect.any(Number) }
+    );
+    expect(cache.put.mock.calls[0][2].checkedAt).toBe(cache.put.mock.calls[1][2].checkedAt);
   });
 
   it("negative-caches a valid empty inbound response", async () => {
@@ -253,7 +278,11 @@ describe("MultipassClient", () => {
     await client.getFlights({
       origin: "AAA", destination: "BBB", date: "2026-08-28", arrivalDate: "2026-08-29"
     });
-    expect(cache.put).toHaveBeenCalledWith("BBB-AAA-2026-08-29", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "BBB-AAA-2026-08-29",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
   });
 
   it("does not cache a malformed or missing inbound response", async () => {
@@ -278,11 +307,15 @@ describe("MultipassClient", () => {
     }));
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .resolves.toEqual([]);
-    expect(cache.put).toHaveBeenCalledWith("AAA-BBB-2026-08-28", []);
+    expect(cache.put).toHaveBeenCalledWith(
+      "AAA-BBB-2026-08-28",
+      [],
+      { checkedAt: expect.any(Number) }
+    );
   });
 
   it("classifies a malformed availability payload as unknown in the stateful API", async () => {
-    const { client, fetchImpl } = createHarness();
+    const { client, cache, fetchImpl } = createHarness();
     fetchImpl.mockResolvedValue(new Response(JSON.stringify({ unexpected: true }), {
       status: 200,
       headers: { "content-type": "application/json" }
@@ -292,6 +325,7 @@ describe("MultipassClient", () => {
     });
     expect(outcome.state).toBe("unknown");
     expect(outcome.flights).toEqual([]);
+    expect(cache.put).not.toHaveBeenCalled();
   });
 
   it("opens Multipass in an active tab when no Multipass tab exists", async () => {
@@ -342,10 +376,11 @@ describe("MultipassClient", () => {
   });
 
   it("normalizes network failures", async () => {
-    const { client, fetchImpl } = createHarness({ maxAttempts: 1 });
+    const { client, cache, fetchImpl } = createHarness({ maxAttempts: 1 });
     fetchImpl.mockRejectedValue(new TypeError("offline"));
     await expect(client.getFlights({ origin: "AAA", destination: "BBB", date: "2026-08-28" }))
       .rejects.toMatchObject({ code: ErrorCode.HTTP_ERROR, message: "offline" });
+    expect(cache.put).not.toHaveBeenCalled();
   });
 
   it("reports retry congestion once for the complete logical probe", async () => {
